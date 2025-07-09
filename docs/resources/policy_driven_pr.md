@@ -13,12 +13,10 @@ description: |-
 ## Example Usage
 
 ```terraform
-# Copyright (c) HashiCorp, Inc.
-
 terraform {
   required_providers {
     stepsecurity = {
-      source = "registry.terraform.io/step-security/stepsecurity"
+      source = "step-security/stepsecurity"
     }
   }
 }
@@ -79,7 +77,5 @@ Import is supported using the following syntax:
 The [`terraform import` command](https://developer.hashicorp.com/terraform/cli/commands/import) can be used, for example:
 
 ```shell
-# Copyright (c) HashiCorp, Inc.
-
 terraform import stepsecurity_policy_driven_pr.test-organization test-organization
 ```

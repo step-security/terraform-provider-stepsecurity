@@ -1,5 +1,3 @@
-// Copyright (c) HashiCorp, Inc.
-
 package provider
 
 import (
@@ -205,9 +203,9 @@ func (r *userResource) ModifyPlan(ctx context.Context, req resource.ModifyPlanRe
 					reposList, _ := types.ListValue(types.StringType, repoElements)
 					policy.Repos = reposList
 
-					// policy.Group = types.StringValue("")
-					// emptyProjectsList, _ := types.ListValue(types.StringType, []attr.Value{})
-					// policy.Projects = emptyProjectsList
+					policy.Group = basetypes.NewStringNull()
+					emptyProjectsList, _ := types.ListValue(types.StringType, []attr.Value{})
+					policy.Projects = emptyProjectsList
 
 					modified = true
 				case "gitlab":
@@ -217,6 +215,10 @@ func (r *userResource) ModifyPlan(ctx context.Context, req resource.ModifyPlanRe
 					projectElements := []attr.Value{types.StringValue("*")}
 					projectsList, _ := types.ListValue(types.StringType, projectElements)
 					policy.Projects = projectsList
+
+					policy.Organization = basetypes.NewStringNull()
+					emptyReposList, _ := types.ListValue(types.StringType, []attr.Value{})
+					policy.Repos = emptyReposList
 
 					modified = true
 				}
@@ -228,9 +230,9 @@ func (r *userResource) ModifyPlan(ctx context.Context, req resource.ModifyPlanRe
 					reposList, _ := types.ListValue(types.StringType, repoElements)
 					policy.Repos = reposList
 
-					// policy.Group = types.StringValue("")
-					// emptyProjectsList, _ := types.ListValue(types.StringType, []attr.Value{})
-					// policy.Projects = emptyProjectsList
+					policy.Group = basetypes.NewStringNull()
+					emptyProjectsList, _ := types.ListValue(types.StringType, []attr.Value{})
+					policy.Projects = emptyProjectsList
 
 					modified = true
 				}
@@ -238,10 +240,6 @@ func (r *userResource) ModifyPlan(ctx context.Context, req resource.ModifyPlanRe
 			plan.Policies[index] = policy
 		}
 	}
-
-	// Note: We don't sort policies here because that would change the user's intended order
-	// and break the plan-config contract. Sorting will happen in updateUserState to match
-	// the order that comes back from the API.
 
 	if modified {
 		diags = resp.Plan.Set(ctx, plan)
@@ -469,6 +467,7 @@ func (r *userResource) Update(ctx context.Context, req resource.UpdateRequest, r
 	}
 
 	// overwrite items with refreshed state
+	state.Policies = plan.Policies
 	r.updateUserState(ctx, user, &state)
 
 	// Set state to fully populated data
@@ -506,36 +505,77 @@ func (r *userResource) updateUserState(ctx context.Context, user *stepsecurityap
 	state.UserName = getStringValue(user.UserName)
 	state.EmailSuffix = getStringValue(user.EmailSuffix)
 	state.AuthType = getStringValue(user.AuthType)
-
-	state.Policies = make([]UserPolicyModel, len(user.Policies))
-	for i, policy := range user.Policies {
-
-		var repos []attr.Value
-		for _, repo := range policy.Repos {
-			repos = append(repos, types.StringValue(repo))
-		}
-
-		var projects []attr.Value
-		for _, project := range policy.Projects {
-			projects = append(projects, types.StringValue(project))
-		}
-
-		state.Policies[i] = UserPolicyModel{
-			Type:         getStringValue(policy.Type),
-			Role:         getStringValue(policy.Role),
-			Scope:        getStringValue(policy.Scope),
-			Organization: getStringValue(policy.Organization),
-			Repos:        types.ListValueMust(types.StringType, repos),
-			Group:        getStringValue(policy.Group),
-			Projects:     types.ListValueMust(types.StringType, projects),
+	if !r.MatchPolicies(ctx, state, user.Policies) {
+		tflog.Debug(ctx, "user policies do not match with planned state. updating state", map[string]any{
+			"user_id": user.ID,
+		})
+		state.Policies = make([]UserPolicyModel, len(user.Policies))
+		for i := range user.Policies {
+			state.Policies[i] = r.getUserPolicyModelFromPolicy(user.Policies[i])
 		}
 	}
+
 }
 
-// policiesMatch checks if a planned policy matches an API policy by comparing core attributes
-func (r *userResource) policiesMatch(planned UserPolicyModel, api stepsecurityapi.UserPolicy) bool {
+func (r *userResource) MatchPolicies(ctx context.Context, state *userModel, apiPolicies []stepsecurityapi.UserPolicy) bool {
+	if len(state.Policies) != len(apiPolicies) {
+		return false
+	}
+	for _, policy := range state.Policies {
+		found := false
+		for _, apiPolicy := range apiPolicies {
+			if r.matchPolicy(policy, apiPolicy) {
+				found = true
+			}
+		}
+		if !found {
+			return false
+		}
+	}
+
+	return true
+}
+
+// matchPolicy checks if a planned policy matches an API policy by comparing core attributes
+func (r *userResource) matchPolicy(planned UserPolicyModel, api stepsecurityapi.UserPolicy) bool {
+
+	var repos []attr.Value
+	for _, repo := range api.Repos {
+		repos = append(repos, types.StringValue(repo))
+	}
+
+	var projects []attr.Value
+	for _, project := range api.Projects {
+		projects = append(projects, types.StringValue(project))
+	}
+
 	return planned.Type.ValueString() == api.Type &&
 		planned.Role.ValueString() == api.Role &&
 		planned.Scope.ValueString() == api.Scope &&
-		planned.Organization.ValueString() == api.Organization
+		planned.Organization.ValueString() == api.Organization &&
+		planned.Group.ValueString() == api.Group &&
+		planned.Repos.Equal(types.ListValueMust(types.StringType, repos)) &&
+		planned.Projects.Equal(types.ListValueMust(types.StringType, projects))
+}
+
+func (r *userResource) getUserPolicyModelFromPolicy(policy stepsecurityapi.UserPolicy) UserPolicyModel {
+	var repos []attr.Value
+	for _, repo := range policy.Repos {
+		repos = append(repos, types.StringValue(repo))
+	}
+
+	var projects []attr.Value
+	for _, project := range policy.Projects {
+		projects = append(projects, types.StringValue(project))
+	}
+
+	return UserPolicyModel{
+		Type:         getStringValue(policy.Type),
+		Role:         getStringValue(policy.Role),
+		Scope:        getStringValue(policy.Scope),
+		Organization: getStringValue(policy.Organization),
+		Repos:        types.ListValueMust(types.StringType, repos),
+		Group:        getStringValue(policy.Group),
+		Projects:     types.ListValueMust(types.StringType, projects),
+	}
 }

@@ -1,5 +1,3 @@
-# Copyright (c) HashiCorp, Inc.
-
 # Copied from https://github.com/hashicorp/terraform-provider-scaffolding-framework/blob/main/.goreleaser.yml
 # as suggested in docs https://developer.hashicorp.com/terraform/registry/providers/publishing#creating-a-github-release
 version: 2

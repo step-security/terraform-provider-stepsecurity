@@ -1,5 +1,3 @@
-// Copyright (c) HashiCorp, Inc.
-
 package provider
 
 import (
@@ -115,51 +113,51 @@ resource "stepsecurity_user" "test" {
 	})
 }
 
-// func TestAccUserResourceWithMultiplePolicies(t *testing.T) {
-// 	res.Test(t, res.TestCase{
-// 		PreCheck:                 func() { testAccPreCheck(t) },
-// 		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
-// 		Steps: []res.TestStep{
-// 			// Create and Read testing with multiple policies
-// 			{
-// 				Config: testProviderConfig() + `
-// resource "stepsecurity_user" "test" {
-//   email     = "test2@example.com"
-//   auth_type = "SSO"
-//   policies = [
-// 		{
-// 			type  = "github"
-// 			role  = "auditor"
-// 			scope = "organization"
-// 			organization = "test-org-2"
-// 		},
-// 		{
-// 			type  = "github"
-// 			role  = "admin"
-// 			scope = "organization"
-// 			organization = "test-org"
-// 		}
-// 	]
-// }
-// `,
-// 				Check: res.ComposeAggregateTestCheckFunc(
-// 					res.TestCheckResourceAttr("stepsecurity_user.test", "email", "test2@example.com"),
-// 					res.TestCheckResourceAttr("stepsecurity_user.test", "auth_type", "SSO"),
-// 					res.TestCheckResourceAttr("stepsecurity_user.test", "policies.#", "2"),
-// 					res.TestCheckResourceAttr("stepsecurity_user.test", "policies.0.type", "github"),
-// 					res.TestCheckResourceAttr("stepsecurity_user.test", "policies.0.role", "auditor"),
-// 					res.TestCheckResourceAttr("stepsecurity_user.test", "policies.0.scope", "organization"),
-// 					res.TestCheckResourceAttr("stepsecurity_user.test", "policies.0.organization", "test-org-2"),
-// 					res.TestCheckResourceAttr("stepsecurity_user.test", "policies.1.type", "github"),
-// 					res.TestCheckResourceAttr("stepsecurity_user.test", "policies.1.role", "admin"),
-// 					res.TestCheckResourceAttr("stepsecurity_user.test", "policies.1.scope", "organization"),
-// 					res.TestCheckResourceAttr("stepsecurity_user.test", "policies.1.organization", "test-org"),
-// 					res.TestCheckResourceAttrSet("stepsecurity_user.test", "id"),
-// 				),
-// 			},
-// 		},
-// 	})
-// }
+func TestAccUserResourceWithMultiplePolicies(t *testing.T) {
+	res.Test(t, res.TestCase{
+		PreCheck:                 func() { testAccPreCheck(t) },
+		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+		Steps: []res.TestStep{
+			// Create and Read testing with multiple policies
+			{
+				Config: testProviderConfig() + `
+resource "stepsecurity_user" "test" {
+  email     = "test2@example.com"
+  auth_type = "SSO"
+  policies = [
+		{
+			type  = "github"
+			role  = "auditor"
+			scope = "organization"
+			organization = "test-org-2"
+		},
+		{
+			type  = "github"
+			role  = "admin"
+			scope = "organization"
+			organization = "test-org"
+		}
+	]
+}
+`,
+				Check: res.ComposeAggregateTestCheckFunc(
+					res.TestCheckResourceAttr("stepsecurity_user.test", "email", "test2@example.com"),
+					res.TestCheckResourceAttr("stepsecurity_user.test", "auth_type", "SSO"),
+					res.TestCheckResourceAttr("stepsecurity_user.test", "policies.#", "2"),
+					res.TestCheckResourceAttr("stepsecurity_user.test", "policies.0.type", "github"),
+					res.TestCheckResourceAttr("stepsecurity_user.test", "policies.0.role", "auditor"),
+					res.TestCheckResourceAttr("stepsecurity_user.test", "policies.0.scope", "organization"),
+					res.TestCheckResourceAttr("stepsecurity_user.test", "policies.0.organization", "test-org-2"),
+					res.TestCheckResourceAttr("stepsecurity_user.test", "policies.1.type", "github"),
+					res.TestCheckResourceAttr("stepsecurity_user.test", "policies.1.role", "admin"),
+					res.TestCheckResourceAttr("stepsecurity_user.test", "policies.1.scope", "organization"),
+					res.TestCheckResourceAttr("stepsecurity_user.test", "policies.1.organization", "test-org"),
+					res.TestCheckResourceAttrSet("stepsecurity_user.test", "id"),
+				),
+			},
+		},
+	})
+}
 
 func TestAccUserResourceWithCustomerScope(t *testing.T) {
 	res.Test(t, res.TestCase{
