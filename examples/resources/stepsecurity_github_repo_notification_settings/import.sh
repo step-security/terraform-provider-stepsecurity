@@ -1,0 +1,3 @@
+# Copyright (c) HashiCorp, Inc.
+
+terraform import stepsecurity_github_org_notification_settings.test-organization test-organization
