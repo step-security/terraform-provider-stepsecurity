@@ -10,7 +10,7 @@ permissions:
 
 jobs:
   go-ci:
-    runs-on: "runs-on=${{ github.run_id }}/runner=8cpu-linux-x64/family=r7iz/image=ubuntu24-stepsecurity-x64"
+    runs-on: ubuntu-latest
     steps:
       - name: Harden Runner
         uses: step-security/harden-runner@4d991eb9b905ef189e4c376166672c3f2f230481
@@ -40,7 +40,7 @@ jobs:
           args: --issues-exit-code=0
  
   test:
-    runs-on: "runs-on=${{ github.run_id }}/runner=8cpu-linux-x64/family=r7iz/image=ubuntu24-stepsecurity-x64"
+    runs-on: ubuntu-latest
     steps:
       - name: Harden the runner (Audit all outbound calls)
         uses: step-security/harden-runner@4d991eb9b905ef189e4c376166672c3f2f230481 # v2.11.0
