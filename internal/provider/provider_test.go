@@ -196,12 +196,15 @@ func TestStepSecurityProvider_Configure(t *testing.T) {
 
 			// Clear environment variables if not set in test case
 			if _, exists := tc.envVars["STEP_SECURITY_API_BASE_URL"]; !exists {
+				//nolint:errcheck
 				os.Unsetenv("STEP_SECURITY_API_BASE_URL")
 			}
 			if _, exists := tc.envVars["STEP_SECURITY_API_KEY"]; !exists {
+				//nolint:errcheck
 				os.Unsetenv("STEP_SECURITY_API_KEY")
 			}
 			if _, exists := tc.envVars["STEP_SECURITY_CUSTOMER"]; !exists {
+				//nolint:errcheck
 				os.Unsetenv("STEP_SECURITY_CUSTOMER")
 			}
 

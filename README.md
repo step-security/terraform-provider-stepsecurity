@@ -77,18 +77,17 @@ cd terraform-provider-stepsecurity
 
 2. Build the provider:
 ```bash
-go build -o terraform-provider-stepsecurity
+make build
 ```
-
 
 ### Running Tests
 
 ```bash
 # Run unit tests
-go test ./...
+make test
 
-# Run acceptance tests (requires API credentials)
-TF_ACC=1 go test ./... -v
+# Run acceptance tests (requires API credentials and needs local API setup)
+make testacc
 ```
 
 ### Testing Locally

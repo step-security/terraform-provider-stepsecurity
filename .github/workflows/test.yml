@@ -91,7 +91,7 @@ jobs:
       - name: Check for documentation changes
         run: |
           if [[ -n "$(git diff --name-only docs/)" ]]; then
-            echo "::error::Documentation is out of sync with examples. Please run 'go generate -tags tools tools/tools.go' locally and commit the changes."
+            echo "::error::Documentation is out of sync with examples. Please run 'make docs' locally and commit the changes."
             git diff --name-only docs/
             exit 1
           else

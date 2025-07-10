@@ -21,9 +21,8 @@ terraform {
 }
 
 provider "stepsecurity" {
-  api_base_url = "http://localhost:1234"
-  api_key      = "09876"
-  customer     = "abcdefg"
+  api_key  = "xxxxxxxx" # can also be set as env variable STEP_SECURITY_API_KEY
+  customer = "abcdefg"  # can also be set as env variable STEP_SECURITY_CUSTOMER
 }
 ```
 
