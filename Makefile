@@ -1,7 +1,4 @@
-.PHONY: build test lint docs clean install help
-
-# Get the name of the provider from the directory
-PROVIDER_NAME := stepsecurity
+.PHONY: build test lint docs install help
 
 # Default target
 .DEFAULT_GOAL := help
