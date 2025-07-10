@@ -8,8 +8,8 @@ terraform {
 }
 
 provider "stepsecurity" {
-  api_key  = "09876"
-  customer = "abcdefg"
+  api_key  = "xxxxxxxx" # can also be set as env variable STEP_SECURITY_API_KEY
+  customer = "abcdefg"  # can also be set as env variable STEP_SECURITY_CUSTOMER
 }
 
 # creates policy for auto remediation of findings detected by stepsecurity in selected repos by creating a pr.
@@ -26,4 +26,12 @@ resource "stepsecurity_policy_driven_pr" "test-organization" {
     actions_to_exempt_while_pinning               = ["actions/checkout", "actions/setup-node"]
     actions_to_replace_with_step_security_actions = ["EnricoMi/publish-unit-test-result-action"]
   }
+}
+
+# For importing existing policy driven pr config to terraform state
+# this will be helpful to manage existing policy driven pr config using terraform
+# alternative to this is to use terraform import command
+import {
+  to = stepsecurity_policy_driven_pr.test-organization
+  id = "test-organization"
 }

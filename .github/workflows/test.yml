@@ -59,3 +59,35 @@ jobs:
 
       - name: Run go tests
         run: go test -race ./...
+        
+  docs-check:
+    name: Check Documentation
+    runs-on: ubuntu-latest
+    steps:
+      - name: Harden Runner
+        uses: step-security/harden-runner@4d991eb9b905ef189e4c376166672c3f2f230481
+        with:
+          egress-policy: audit
+
+      - name: Checkout code
+        uses: actions/checkout@eef61447b9ff4aafe5dcd4e0bbf5d482be7e7871
+        with:
+          fetch-depth: 0
+
+      - name: Set up Go
+        uses: actions/setup-go@d35c59abb061a4a6fb18e82ac0862c26744d6ab5
+        with:
+          go-version-file: 'go.mod'
+
+      - name: Generate documentation
+        run: go generate -tags tools tools/tools.go
+
+      - name: Check for documentation changes
+        run: |
+          if [[ -n "$(git diff --name-only docs/)" ]]; then
+            echo "::error::Documentation is out of sync with examples. Please run 'go generate -tags tools tools/tools.go' locally and commit the changes."
+            git diff --name-only docs/
+            exit 1
+          else
+            echo "Documentation is up-to-date with examples."
+          fi

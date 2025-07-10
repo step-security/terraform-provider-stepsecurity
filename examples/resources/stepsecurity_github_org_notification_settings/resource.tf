@@ -8,8 +8,8 @@ terraform {
 }
 
 provider "stepsecurity" {
-  api_key  = "09876"
-  customer = "abcdefg"
+  api_key  = "xxxxxxxx" # can also be set as env variable STEP_SECURITY_API_KEY
+  customer = "abcdefg"  # can also be set as env variable STEP_SECURITY_CUSTOMER
 }
 
 # github repo notification settings for findings detected by stepsecurity.
@@ -34,4 +34,13 @@ resource "stepsecurity_github_org_notification_settings" "test-organization" {
     non_compliant_artifact_detected       = false
     run_blocked_by_policy                 = false
   }
+}
+
+
+# For importing existing github org notification settings to terraform state
+# this will be helpful to manage already set github org notification settings using terraform
+# alternative to this is to use terraform import command
+import {
+  to = stepsecurity_github_org_notification_settings.test-organization
+  id = "test-organization"
 }
