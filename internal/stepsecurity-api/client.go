@@ -55,6 +55,7 @@ func (c *APIClient) do(req *http.Request) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
+	//nolint:errcheck
 	defer res.Body.Close()
 
 	body, err := io.ReadAll(res.Body)

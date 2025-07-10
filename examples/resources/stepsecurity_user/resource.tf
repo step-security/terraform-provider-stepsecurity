@@ -8,8 +8,8 @@ terraform {
 }
 
 provider "stepsecurity" {
-  api_key  = "09876"
-  customer = "abcdefg"
+  api_key  = "xxxxxxxx" # can also be set as env variable STEP_SECURITY_API_KEY
+  customer = "abcdefg"  # can also be set as env variable STEP_SECURITY_API_KEY
 }
 
 # creates a githubuser in stepsecurity console to have read access to the organization.
@@ -42,7 +42,7 @@ resource "stepsecurity_user" "sso_user" {
 # creates user that provides read access to the organization for all users with email suffix 'test.com'.
 resource "stepsecurity_user" "email_suffix_user" {
   email_suffix = "test.com"
-  auth_type    = "sso"
+  auth_type    = "SSO"
   policies = [
     {
       type         = "github"
@@ -51,4 +51,12 @@ resource "stepsecurity_user" "email_suffix_user" {
       organization = "test-organization"
     }
   ]
+}
+
+# For importing existing user to terraform state
+# this will be helpful to manage existing user using terraform
+# alternative to this is to use terraform import command
+import {
+  to = stepsecurity_user.github_user
+  id = ACTUAL_USER_ID
 }
