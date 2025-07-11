@@ -1,7 +1,6 @@
 package stepsecurityapi
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -101,19 +100,8 @@ func (c *APIClient) CreateUser(ctx context.Context, user CreateUserRequest) (*Cr
 		convertedUser.EmailSuffixes = []string{user.EmailSuffix}
 	}
 
-	body, err := json.Marshal(convertedUser)
-	if err != nil {
-		return resp, fmt.Errorf("failed to marshal user request: %w", err)
-	}
-
 	URI := fmt.Sprintf("%s/v1/%s/users", c.BaseURL, c.Customer)
-	req, err := http.NewRequest("POST", URI, bytes.NewReader(body))
-	if err != nil {
-		return resp, fmt.Errorf("failed to create request: %w", err)
-	}
-	req.Header.Set("Content-Type", "application/json")
-
-	respBody, err := c.do(req)
+	respBody, err := c.post(ctx, URI, convertedUser)
 	if err != nil {
 		return resp, fmt.Errorf("failed to create user: %w", err)
 	}
@@ -133,18 +121,13 @@ func (c *APIClient) CreateUser(ctx context.Context, user CreateUserRequest) (*Cr
 
 func (c *APIClient) GetUser(ctx context.Context, userID string) (*User, error) {
 	URI := fmt.Sprintf("%s/v1/%s/users/%s", c.BaseURL, c.Customer, userID)
-	req, err := http.NewRequest("GET", URI, nil)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create request: %w", err)
-	}
-
-	body, err := c.do(req)
+	respBody, err := c.get(ctx, URI)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get user: %w", err)
 	}
 
 	var user User
-	if err := json.Unmarshal(body, &user); err != nil {
+	if err := json.Unmarshal(respBody, &user); err != nil {
 		return nil, fmt.Errorf("failed to unmarshal user: %w", err)
 	}
 
@@ -153,37 +136,17 @@ func (c *APIClient) GetUser(ctx context.Context, userID string) (*User, error) {
 
 func (c *APIClient) UpdateUser(ctx context.Context, updateUserRequest UpdateUserRequest) error {
 
-	body, err := json.Marshal(updateUserRequest)
-	if err != nil {
-		return fmt.Errorf("failed to marshal policies: %w", err)
-	}
-
 	URI := fmt.Sprintf("%s/v1/%s/users/%s", c.BaseURL, c.Customer, updateUserRequest.UserID)
-	req, err := http.NewRequest("PUT", URI, bytes.NewReader(body))
-	if err != nil {
-		return fmt.Errorf("failed to create request: %w", err)
-	}
-	req.Header.Set("Content-Type", "application/json")
-
-	_, err = c.do(req)
-	if err != nil {
+	if _, err := c.put(ctx, URI, updateUserRequest); err != nil {
 		return fmt.Errorf("failed to update user: %w", err)
 	}
-
 	return nil
 }
 
 func (c *APIClient) DeleteUser(ctx context.Context, userID string) error {
 	URI := fmt.Sprintf("%s/v1/%s/users/%s", c.BaseURL, c.Customer, userID)
-	req, err := http.NewRequest("DELETE", URI, nil)
-	if err != nil {
-		return fmt.Errorf("failed to create request: %w", err)
-	}
-
-	_, err = c.do(req)
-	if err != nil {
+	if _, err := c.delete(ctx, URI); err != nil {
 		return fmt.Errorf("failed to delete user: %w", err)
 	}
-
 	return nil
 }

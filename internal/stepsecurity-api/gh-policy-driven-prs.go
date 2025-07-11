@@ -1,7 +1,6 @@
 package stepsecurityapi
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -76,7 +75,7 @@ func (c *APIClient) CreatePolicyDrivenPRPolicy(ctx context.Context, createReques
 		ActionsToReplace:              actionsToReplace,
 		ApplyIssuePRConfigForAllRepos: allRepos,
 	}
-	err := c.updateControlSettings(createRequest.Owner, controlSettings)
+	err := c.updateControlSettings(ctx, createRequest.Owner, controlSettings)
 	if err != nil {
 		return fmt.Errorf("failed to update control settings: %w", err)
 	}
@@ -120,7 +119,7 @@ func (c *APIClient) CreatePolicyDrivenPRPolicy(ctx context.Context, createReques
 	}
 
 	for _, repo := range createRequest.SelectedRepos {
-		err := c.updateConfigForRepo(createRequest.Owner, repo, config)
+		err := c.updateConfigForRepo(ctx, createRequest.Owner, repo, config)
 		if err != nil {
 			return fmt.Errorf("failed to update config for repo: %w", err)
 		}
@@ -129,55 +128,28 @@ func (c *APIClient) CreatePolicyDrivenPRPolicy(ctx context.Context, createReques
 	return nil
 }
 
-func (c *APIClient) updateControlSettings(owner string, controlSettings controlSettings) error {
+func (c *APIClient) updateControlSettings(ctx context.Context, owner string, controlSettings controlSettings) error {
 	URI := fmt.Sprintf("%s/v1/github/%s/control-settings", c.BaseURL, owner)
-	controlSettingsReqBody, err := json.Marshal(controlSettings)
-	if err != nil {
-		return fmt.Errorf("failed to marshal control settings: %w", err)
-	}
-	req, err := http.NewRequest("POST", URI, bytes.NewReader(controlSettingsReqBody))
-	if err != nil {
-		return fmt.Errorf("failed to create request: %w", err)
-	}
-	req.Header.Set("Content-Type", "application/json")
-	_, err = c.do(req)
-	if err != nil {
+	if _, err := c.post(ctx, URI, controlSettings); err != nil {
 		return fmt.Errorf("failed to create control settings: %w", err)
 	}
-
 	return nil
 }
 
-func (c *APIClient) updateConfigForRepo(owner string, repo string, config featureConfigInternal) error {
+func (c *APIClient) updateConfigForRepo(ctx context.Context, owner string, repo string, config featureConfigInternal) error {
 	URI := fmt.Sprintf("%s/v1/github/%s/%s/feature-configurations", c.BaseURL, owner, repo)
-	reqBody, err := json.Marshal(config)
-	if err != nil {
-		return fmt.Errorf("failed to marshal config: %w", err)
-	}
-	req, err := http.NewRequest("POST", URI, bytes.NewReader(reqBody))
-	if err != nil {
-		return fmt.Errorf("failed to create request: %w", err)
-	}
-	req.Header.Set("Content-Type", "application/json")
-	_, err = c.do(req)
-	if err != nil {
-		return fmt.Errorf("failed to create config: %w", err)
+	if _, err := c.post(ctx, URI, config); err != nil {
+		return fmt.Errorf("failed to create config for repo: %w", err)
 	}
 
 	return nil
 }
 
-func (c *APIClient) getControlSettings(owner string) (controlSettings, error) {
+func (c *APIClient) getControlSettings(ctx context.Context, owner string) (controlSettings, error) {
 
 	var controlSettings controlSettings
 	URI := fmt.Sprintf("%s/v1/github/%s/control-settings", c.BaseURL, owner)
-	req, err := http.NewRequest("GET", URI, nil)
-	if err != nil {
-		return controlSettings, fmt.Errorf("failed to create request: %w", err)
-	}
-	req.Header.Set("Content-Type", "application/json")
-
-	respBody, err := c.do(req)
+	respBody, err := c.get(ctx, URI)
 	if err != nil {
 		return controlSettings, fmt.Errorf("failed to get control settings: %w", err)
 	}
@@ -215,7 +187,7 @@ func (c *APIClient) GetPolicyDrivenPRPolicy(ctx context.Context, owner string) (
 
 	policy := &PolicyDrivenPRPolicy{}
 
-	controlSettings, err := c.getControlSettings(owner)
+	controlSettings, err := c.getControlSettings(ctx, owner)
 	if err != nil {
 		return policy, fmt.Errorf("failed to get control settings: %w", err)
 	}
@@ -289,7 +261,7 @@ func (c *APIClient) DeletePolicyDrivenPRPolicy(ctx context.Context, owner string
 		ApplyIssuePRConfigForAllRepos: false,
 	}
 
-	err := c.updateControlSettings(owner, controlSettings)
+	err := c.updateControlSettings(ctx, owner, controlSettings)
 	if err != nil {
 		return fmt.Errorf("failed to update control settings: %w", err)
 	}
@@ -305,7 +277,7 @@ func (c *APIClient) DeletePolicyDrivenPRPolicy(ctx context.Context, owner string
 			repo = "[all]"
 		}
 		config.Repo = repo
-		err := c.updateConfigForRepo(owner, repo, config)
+		err := c.updateConfigForRepo(ctx, owner, repo, config)
 		if err != nil {
 			return fmt.Errorf("failed to delete config for repo: %w", err)
 		}

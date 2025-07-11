@@ -78,3 +78,18 @@ func (m *MockStepSecurityClient) DeletePolicyDrivenPRPolicy(ctx context.Context,
 	args := m.Called(ctx, owner, repos)
 	return args.Error(0)
 }
+
+func (m *MockStepSecurityClient) CreateGitHubPolicyStorePolicy(ctx context.Context, policy *GitHubPolicyStorePolicy) error {
+	args := m.Called(ctx, policy)
+	return args.Error(0)
+}
+
+func (m *MockStepSecurityClient) GetGitHubPolicyStorePolicy(ctx context.Context, owner string, policyName string) (*GitHubPolicyStorePolicy, error) {
+	args := m.Called(ctx, owner, policyName)
+	return args.Get(0).(*GitHubPolicyStorePolicy), args.Error(1)
+}
+
+func (m *MockStepSecurityClient) DeleteGitHubPolicyStorePolicy(ctx context.Context, owner string, policyName string) error {
+	args := m.Called(ctx, owner, policyName)
+	return args.Error(0)
+}
