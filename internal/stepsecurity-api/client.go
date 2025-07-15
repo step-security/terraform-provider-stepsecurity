@@ -1,7 +1,9 @@
 package stepsecurityapi
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
@@ -27,6 +29,11 @@ type Client interface {
 	GetPolicyDrivenPRPolicy(ctx context.Context, owner string) (*PolicyDrivenPRPolicy, error)
 	UpdatePolicyDrivenPRPolicy(ctx context.Context, updateRequest PolicyDrivenPRPolicy, removedRepos []string) error
 	DeletePolicyDrivenPRPolicy(ctx context.Context, owner string, repos []string) error
+
+	// GitHub Policy Store
+	CreateGitHubPolicyStorePolicy(ctx context.Context, policy *GitHubPolicyStorePolicy) error
+	GetGitHubPolicyStorePolicy(ctx context.Context, owner string, policyName string) (*GitHubPolicyStorePolicy, error)
+	DeleteGitHubPolicyStorePolicy(ctx context.Context, owner string, policyName string) error
 }
 
 type APIClient struct {
@@ -68,4 +75,43 @@ func (c *APIClient) do(req *http.Request) ([]byte, error) {
 	}
 
 	return body, err
+}
+
+func (c *APIClient) get(ctx context.Context, URI string) ([]byte, error) {
+	req, err := http.NewRequestWithContext(ctx, "GET", URI, nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	return c.do(req)
+}
+
+func (c *APIClient) update(ctx context.Context, URI string, payload any, method string) ([]byte, error) {
+	reqBody, err := json.Marshal(payload)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal config: %w", err)
+	}
+	httpReq, err := http.NewRequestWithContext(ctx, method, URI, bytes.NewReader(reqBody))
+	if err != nil {
+		return nil, fmt.Errorf("failed to create request: %w", err)
+	}
+	httpReq.Header.Set("Content-Type", "application/json")
+	return c.do(httpReq)
+}
+
+func (c *APIClient) post(ctx context.Context, URI string, payload any) ([]byte, error) {
+	return c.update(ctx, URI, payload, "POST")
+}
+
+func (c *APIClient) put(ctx context.Context, URI string, payload any) ([]byte, error) {
+	return c.update(ctx, URI, payload, "PUT")
+}
+
+func (c *APIClient) delete(ctx context.Context, URI string) ([]byte, error) {
+	httpReq, err := http.NewRequestWithContext(ctx, "DELETE", URI, nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create request: %w", err)
+	}
+	httpReq.Header.Set("Content-Type", "application/json")
+	return c.do(httpReq)
 }
