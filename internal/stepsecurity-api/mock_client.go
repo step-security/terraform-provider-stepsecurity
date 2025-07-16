@@ -93,3 +93,23 @@ func (m *MockStepSecurityClient) DeleteGitHubPolicyStorePolicy(ctx context.Conte
 	args := m.Called(ctx, owner, policyName)
 	return args.Error(0)
 }
+
+func (m *MockStepSecurityClient) CreateSuppressionRule(ctx context.Context, rule SuppressionRule) (*SuppressionRule, error) {
+	args := m.Called(ctx, rule)
+	return args.Get(0).(*SuppressionRule), args.Error(1)
+}
+
+func (m *MockStepSecurityClient) ReadSuppressionRule(ctx context.Context, ruleID string) (*SuppressionRule, error) {
+	args := m.Called(ctx, ruleID)
+	return args.Get(0).(*SuppressionRule), args.Error(1)
+}
+
+func (m *MockStepSecurityClient) UpdateSuppressionRule(ctx context.Context, rule SuppressionRule) error {
+	args := m.Called(ctx, rule)
+	return args.Error(0)
+}
+
+func (m *MockStepSecurityClient) DeleteSuppressionRule(ctx context.Context, ruleID string) error {
+	args := m.Called(ctx, ruleID)
+	return args.Error(0)
+}

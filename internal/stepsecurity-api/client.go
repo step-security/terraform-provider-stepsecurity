@@ -34,6 +34,12 @@ type Client interface {
 	CreateGitHubPolicyStorePolicy(ctx context.Context, policy *GitHubPolicyStorePolicy) error
 	GetGitHubPolicyStorePolicy(ctx context.Context, owner string, policyName string) (*GitHubPolicyStorePolicy, error)
 	DeleteGitHubPolicyStorePolicy(ctx context.Context, owner string, policyName string) error
+
+	// Suppression Rules
+	CreateSuppressionRule(ctx context.Context, rule SuppressionRule) (*SuppressionRule, error)
+	ReadSuppressionRule(ctx context.Context, ruleID string) (*SuppressionRule, error)
+	UpdateSuppressionRule(ctx context.Context, rule SuppressionRule) error
+	DeleteSuppressionRule(ctx context.Context, ruleID string) error
 }
 
 type APIClient struct {
@@ -70,11 +76,11 @@ func (c *APIClient) do(req *http.Request) ([]byte, error) {
 		return nil, err
 	}
 
-	if res.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("status: %d, body: %s", res.StatusCode, body)
+	if res.StatusCode == http.StatusOK || res.StatusCode == http.StatusCreated {
+		return body, err
 	}
 
-	return body, err
+	return nil, fmt.Errorf("status: %d, body: %s", res.StatusCode, body)
 }
 
 func (c *APIClient) get(ctx context.Context, URI string) ([]byte, error) {
