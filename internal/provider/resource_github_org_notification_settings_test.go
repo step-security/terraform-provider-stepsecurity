@@ -21,9 +21,9 @@ func TestAccGithubRepoNotificationSettingsResource(t *testing.T) {
 		Steps: []res.TestStep{
 			// Create and Read testing
 			{
-				Config: testAccGithubNotificationResourceConfig("test-org", "https://hooks.slack.com/test", "admin@example.com"),
+				Config: testAccGithubNotificationResourceConfig("tf-acc-test", "https://hooks.slack.com/test", "admin@example.com"),
 				Check: res.ComposeAggregateTestCheckFunc(
-					res.TestCheckResourceAttr("stepsecurity_github_org_notification_settings.test", "owner", "test-org"),
+					res.TestCheckResourceAttr("stepsecurity_github_org_notification_settings.test", "owner", "tf-acc-test"),
 					res.TestCheckResourceAttr("stepsecurity_github_org_notification_settings.test", "notification_channels.slack_webhook_url", "https://hooks.slack.com/test"),
 					res.TestCheckResourceAttr("stepsecurity_github_org_notification_settings.test", "notification_channels.email", "admin@example.com"),
 				),
@@ -36,9 +36,9 @@ func TestAccGithubRepoNotificationSettingsResource(t *testing.T) {
 			},
 			// Update and Read testing
 			{
-				Config: testAccGithubNotificationResourceConfig("test-org", "https://hooks.slack.com/updated", "updated@example.com"),
+				Config: testAccGithubNotificationResourceConfig("tf-acc-test", "https://hooks.slack.com/updated", "updated@example.com"),
 				Check: res.ComposeAggregateTestCheckFunc(
-					res.TestCheckResourceAttr("stepsecurity_github_org_notification_settings.test", "owner", "test-org"),
+					res.TestCheckResourceAttr("stepsecurity_github_org_notification_settings.test", "owner", "tf-acc-test"),
 					res.TestCheckResourceAttr("stepsecurity_github_org_notification_settings.test", "notification_channels.slack_webhook_url", "https://hooks.slack.com/updated"),
 					res.TestCheckResourceAttr("stepsecurity_github_org_notification_settings.test", "notification_channels.email", "updated@example.com"),
 				),
@@ -54,9 +54,9 @@ func TestAccGithubRepoNotificationSettingsResourceWithTeams(t *testing.T) {
 		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
 		Steps: []res.TestStep{
 			{
-				Config: testAccGithubNotificationResourceConfigWithTeams("test-org", "https://outlook.office.com/webhook/test"),
+				Config: testAccGithubNotificationResourceConfigWithTeams("tf-acc-test", "https://outlook.office.com/webhook/test"),
 				Check: res.ComposeAggregateTestCheckFunc(
-					res.TestCheckResourceAttr("stepsecurity_github_org_notification_settings.test", "owner", "test-org"),
+					res.TestCheckResourceAttr("stepsecurity_github_org_notification_settings.test", "owner", "tf-acc-test"),
 					res.TestCheckResourceAttr("stepsecurity_github_org_notification_settings.test", "notification_channels.teams_webhook_url", "https://outlook.office.com/webhook/test"),
 				),
 			},
@@ -71,9 +71,9 @@ func TestAccGithubRepoNotificationSettingsResourceWithEvents(t *testing.T) {
 		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
 		Steps: []res.TestStep{
 			{
-				Config: testAccGithubNotificationResourceConfigWithEvents("test-org", "admin@example.com"),
+				Config: testAccGithubNotificationResourceConfigWithEvents("tf-acc-test", "admin@example.com"),
 				Check: res.ComposeAggregateTestCheckFunc(
-					res.TestCheckResourceAttr("stepsecurity_github_org_notification_settings.test", "owner", "test-org"),
+					res.TestCheckResourceAttr("stepsecurity_github_org_notification_settings.test", "owner", "tf-acc-test"),
 					res.TestCheckResourceAttr("stepsecurity_github_org_notification_settings.test", "notification_channels.email", "admin@example.com"),
 					res.TestCheckResourceAttr("stepsecurity_github_org_notification_settings.test", "notification_events.domain_blocked", "true"),
 					res.TestCheckResourceAttr("stepsecurity_github_org_notification_settings.test", "notification_events.secrets_detected", "true"),
@@ -91,9 +91,9 @@ func TestAccGithubRepoNotificationSettingsResourceMinimal(t *testing.T) {
 		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
 		Steps: []res.TestStep{
 			{
-				Config: testAccGithubNotificationResourceConfigMinimal("test-org"),
+				Config: testAccGithubNotificationResourceConfigMinimal("tf-acc-test"),
 				Check: res.ComposeAggregateTestCheckFunc(
-					res.TestCheckResourceAttr("stepsecurity_github_org_notification_settings.test", "owner", "test-org"),
+					res.TestCheckResourceAttr("stepsecurity_github_org_notification_settings.test", "owner", "tf-acc-test"),
 				),
 			},
 		},
@@ -278,11 +278,11 @@ func TestGithubNotificationResource_ClientInteraction(t *testing.T) {
 
 			// Create mock client
 			mockClient := &stepsecurityapi.MockStepSecurityClient{}
-			mockClient.On("GetNotificationSettings", mock.Anything, "test-org").Return(tc.mockResponse, tc.mockError)
+			mockClient.On("GetNotificationSettings", mock.Anything, "tf-acc-test").Return(tc.mockResponse, tc.mockError)
 
 			// Test the core client interaction logic directly
 			ctx := context.Background()
-			settings, err := mockClient.GetNotificationSettings(ctx, "test-org")
+			settings, err := mockClient.GetNotificationSettings(ctx, "tf-acc-test")
 
 			if tc.expectedError {
 				if err == nil {
