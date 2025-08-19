@@ -40,6 +40,17 @@ type Client interface {
 	ReadSuppressionRule(ctx context.Context, ruleID string) (*SuppressionRule, error)
 	UpdateSuppressionRule(ctx context.Context, rule SuppressionRule) error
 	DeleteSuppressionRule(ctx context.Context, ruleID string) error
+
+	// GitHub Run Policies
+	ListRunPolicies(ctx context.Context, owner string) ([]RunPolicy, error)
+	CreateRunPolicy(ctx context.Context, owner string, policy CreateRunPolicyRequest) (*RunPolicy, error)
+	GetRunPolicy(ctx context.Context, owner string, policyID string) (*RunPolicy, error)
+	UpdateRunPolicy(ctx context.Context, owner string, policyID string, policy UpdateRunPolicyRequest) (*RunPolicy, error)
+	DeleteRunPolicy(ctx context.Context, owner string, policyID string) error
+
+	// GitHub Run Policy Evaluations
+	ListOrgRunPolicyEvaluations(ctx context.Context, owner string, status string) ([]RunPolicyEvaluation, error)
+	ListRepoRunPolicyEvaluations(ctx context.Context, owner string, repo string, status string) ([]RunPolicyEvaluation, error)
 }
 
 type APIClient struct {

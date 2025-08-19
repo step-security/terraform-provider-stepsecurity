@@ -113,3 +113,40 @@ func (m *MockStepSecurityClient) DeleteSuppressionRule(ctx context.Context, rule
 	args := m.Called(ctx, ruleID)
 	return args.Error(0)
 }
+
+// GitHub Run Policy methods
+func (m *MockStepSecurityClient) ListRunPolicies(ctx context.Context, owner string) ([]RunPolicy, error) {
+	args := m.Called(ctx, owner)
+	return args.Get(0).([]RunPolicy), args.Error(1)
+}
+
+func (m *MockStepSecurityClient) CreateRunPolicy(ctx context.Context, owner string, policy CreateRunPolicyRequest) (*RunPolicy, error) {
+	args := m.Called(ctx, owner, policy)
+	return args.Get(0).(*RunPolicy), args.Error(1)
+}
+
+func (m *MockStepSecurityClient) GetRunPolicy(ctx context.Context, owner string, policyID string) (*RunPolicy, error) {
+	args := m.Called(ctx, owner, policyID)
+	return args.Get(0).(*RunPolicy), args.Error(1)
+}
+
+func (m *MockStepSecurityClient) UpdateRunPolicy(ctx context.Context, owner string, policyID string, policy UpdateRunPolicyRequest) (*RunPolicy, error) {
+	args := m.Called(ctx, owner, policyID, policy)
+	return args.Get(0).(*RunPolicy), args.Error(1)
+}
+
+func (m *MockStepSecurityClient) DeleteRunPolicy(ctx context.Context, owner string, policyID string) error {
+	args := m.Called(ctx, owner, policyID)
+	return args.Error(0)
+}
+
+// GitHub Run Policy Evaluation methods
+func (m *MockStepSecurityClient) ListOrgRunPolicyEvaluations(ctx context.Context, owner string, status string) ([]RunPolicyEvaluation, error) {
+	args := m.Called(ctx, owner, status)
+	return args.Get(0).([]RunPolicyEvaluation), args.Error(1)
+}
+
+func (m *MockStepSecurityClient) ListRepoRunPolicyEvaluations(ctx context.Context, owner string, repo string, status string) ([]RunPolicyEvaluation, error) {
+	args := m.Called(ctx, owner, repo, status)
+	return args.Get(0).([]RunPolicyEvaluation), args.Error(1)
+}
