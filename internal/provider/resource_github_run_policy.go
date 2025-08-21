@@ -3,6 +3,7 @@ package provider
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/hashicorp/terraform-plugin-framework-validators/stringvalidator"
@@ -41,7 +42,6 @@ type githubRunPolicyResource struct {
 
 // githubRunPolicyResourceModel maps the resource schema data.
 type githubRunPolicyResourceModel struct {
-	ID            types.String `tfsdk:"id"`
 	Owner         types.String `tfsdk:"owner"`
 	Name          types.String `tfsdk:"name"`
 	PolicyID      types.String `tfsdk:"policy_id"`
@@ -78,13 +78,6 @@ func (r *githubRunPolicyResource) Schema(_ context.Context, _ resource.SchemaReq
 	resp.Schema = schema.Schema{
 		MarkdownDescription: "Manages a GitHub Actions run policy in StepSecurity.",
 		Attributes: map[string]schema.Attribute{
-			"id": schema.StringAttribute{
-				Computed:            true,
-				MarkdownDescription: "Terraform identifier for this resource. Format: `owner/policy_id`",
-				PlanModifiers: []planmodifier.String{
-					stringplanmodifier.UseStateForUnknown(),
-				},
-			},
 			"owner": schema.StringAttribute{
 				Required:            true,
 				MarkdownDescription: "The GitHub organization or user that owns this policy.",
@@ -281,7 +274,7 @@ func (r *githubRunPolicyResource) Create(ctx context.Context, req resource.Creat
 		if resp.Diagnostics.HasError() {
 			return
 		}
-		
+
 		// Convert to map[string]struct{} as expected by API
 		disallowedMap := make(map[string]struct{})
 		for _, label := range disallowedLabels {
@@ -310,9 +303,6 @@ func (r *githubRunPolicyResource) Create(ctx context.Context, req resource.Creat
 	if resp.Diagnostics.HasError() {
 		return
 	}
-
-	// Set the ID
-	plan.ID = types.StringValue(fmt.Sprintf("%s/%s", createdPolicy.Owner, createdPolicy.PolicyID))
 
 	diags = resp.State.Set(ctx, plan)
 	resp.Diagnostics.Append(diags...)
@@ -410,7 +400,7 @@ func (r *githubRunPolicyResource) Update(ctx context.Context, req resource.Updat
 		if resp.Diagnostics.HasError() {
 			return
 		}
-		
+
 		// Convert to map[string]struct{} as expected by API
 		disallowedMap := make(map[string]struct{})
 		for _, label := range disallowedLabels {
@@ -461,13 +451,47 @@ func (r *githubRunPolicyResource) Delete(ctx context.Context, req resource.Delet
 
 // ImportState imports the resource state.
 func (r *githubRunPolicyResource) ImportState(ctx context.Context, req resource.ImportStateRequest, resp *resource.ImportStateResponse) {
-	// Import state using the format "owner/policy_id"
-	resource.ImportStatePassthroughID(ctx, path.Root("id"), req, resp)
+	// The import ID should be the owner name
+	id := req.ID
+
+	// Split the ID into owner and policy name
+	splitted := strings.Split(id, "/")
+	if len(splitted) != 2 {
+		resp.Diagnostics.AddError(
+			"Invalid Import ID",
+			fmt.Sprintf("Expected owner/policy_name, got: %s", id),
+		)
+		return
+	}
+
+	// Set the owner/policy name in the state
+	owner := splitted[0]
+	policyID := splitted[1]
+	resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("owner"), owner)...)
+	resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("policy_id"), policyID)...)
+
+	// Now call Read to populate the rest of the state
+	readReq := resource.ReadRequest{
+		State: resp.State,
+	}
+	readResp := &resource.ReadResponse{
+		State: resp.State,
+	}
+
+	r.Read(ctx, readReq, readResp)
+
+	// Copy any diagnostics and updated state from Read
+	resp.Diagnostics.Append(readResp.Diagnostics...)
+	resp.State = readResp.State
 }
 
 // updateModelFromAPI updates the Terraform model with data from the API response.
 func (r *githubRunPolicyResource) updateModelFromAPI(_ context.Context, model *githubRunPolicyResourceModel, policy *stepsecurityapi.RunPolicy, diags *diag.Diagnostics) {
-	model.Owner = types.StringValue(policy.Owner)
+
+	if strings.Contains(policy.Owner, "#[all]") {
+		model.Owner = types.StringValue(policy.Owner[:strings.Index(policy.Owner, "#")])
+	}
+	// model.Owner = types.StringValue(policy.Owner)
 	model.Name = types.StringValue(policy.Name)
 	model.PolicyID = types.StringValue(policy.PolicyID)
 	model.AllRepos = types.BoolValue(policy.AllRepos)
@@ -492,13 +516,13 @@ func (r *githubRunPolicyResource) updateModelFromAPI(_ context.Context, model *g
 
 	// Handle policy configuration
 	policyConfigAttrs := map[string]attr.Value{
-		"owner":                            types.StringValue(policy.PolicyConfig.Owner),
-		"name":                             types.StringValue(policy.PolicyConfig.Name),
-		"enable_action_policy":             types.BoolValue(policy.PolicyConfig.EnableActionPolicy),
-		"enable_runs_on_policy":            types.BoolValue(policy.PolicyConfig.EnableRunsOnPolicy),
-		"enable_secrets_policy":            types.BoolValue(policy.PolicyConfig.EnableSecretsPolicy),
+		"owner":                             types.StringValue(policy.PolicyConfig.Owner),
+		"name":                              types.StringValue(policy.PolicyConfig.Name),
+		"enable_action_policy":              types.BoolValue(policy.PolicyConfig.EnableActionPolicy),
+		"enable_runs_on_policy":             types.BoolValue(policy.PolicyConfig.EnableRunsOnPolicy),
+		"enable_secrets_policy":             types.BoolValue(policy.PolicyConfig.EnableSecretsPolicy),
 		"enable_compromised_actions_policy": types.BoolValue(policy.PolicyConfig.EnableCompromisedActionsPolicy),
-		"is_dry_run":                       types.BoolValue(policy.PolicyConfig.IsDryRun),
+		"is_dry_run":                        types.BoolValue(policy.PolicyConfig.IsDryRun),
 	}
 
 	// Handle allowed actions map
@@ -529,15 +553,15 @@ func (r *githubRunPolicyResource) updateModelFromAPI(_ context.Context, model *g
 
 	// Create the policy config object
 	policyConfigAttrTypes := map[string]attr.Type{
-		"owner":                            types.StringType,
-		"name":                             types.StringType,
-		"enable_action_policy":             types.BoolType,
-		"allowed_actions":                  types.MapType{ElemType: types.StringType},
-		"enable_runs_on_policy":            types.BoolType,
-		"disallowed_runner_labels":         types.SetType{ElemType: types.StringType},
-		"enable_secrets_policy":            types.BoolType,
+		"owner":                             types.StringType,
+		"name":                              types.StringType,
+		"enable_action_policy":              types.BoolType,
+		"allowed_actions":                   types.MapType{ElemType: types.StringType},
+		"enable_runs_on_policy":             types.BoolType,
+		"disallowed_runner_labels":          types.SetType{ElemType: types.StringType},
+		"enable_secrets_policy":             types.BoolType,
 		"enable_compromised_actions_policy": types.BoolType,
-		"is_dry_run":                       types.BoolType,
+		"is_dry_run":                        types.BoolType,
 	}
 
 	policyConfigObj, objDiags := types.ObjectValue(policyConfigAttrTypes, policyConfigAttrs)

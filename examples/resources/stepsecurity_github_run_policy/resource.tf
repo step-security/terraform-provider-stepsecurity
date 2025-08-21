@@ -228,6 +228,6 @@ resource "stepsecurity_github_run_policy" "repo_specific_runner_policy" {
 # this will be helpful to manage existing policy using terraform
 # alternative to this is to use terraform import command
 import {
-  to = stepsecurity_github_run_policy.run_policy
+  to = stepsecurity_github_run_policy.action_policy_all_orgs
   id = "my-org/ACTUAL_POLICY_ID"
 }
