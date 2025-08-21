@@ -175,7 +175,6 @@ func (p *StepSecurityProvider) DataSources(_ context.Context) []func() datasourc
 	return []func() datasource.DataSource{
 		NewUsersDataSource,
 		NewGithubRunPoliciesDataSource,
-		NewGithubRunPolicyEvaluationsDataSource,
 	}
 }
 

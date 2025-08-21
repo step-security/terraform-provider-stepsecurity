@@ -47,10 +47,6 @@ type Client interface {
 	GetRunPolicy(ctx context.Context, owner string, policyID string) (*RunPolicy, error)
 	UpdateRunPolicy(ctx context.Context, owner string, policyID string, policy UpdateRunPolicyRequest) (*RunPolicy, error)
 	DeleteRunPolicy(ctx context.Context, owner string, policyID string) error
-
-	// GitHub Run Policy Evaluations
-	ListOrgRunPolicyEvaluations(ctx context.Context, owner string, status string) ([]RunPolicyEvaluation, error)
-	ListRepoRunPolicyEvaluations(ctx context.Context, owner string, repo string, status string) ([]RunPolicyEvaluation, error)
 }
 
 type APIClient struct {

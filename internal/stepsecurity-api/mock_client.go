@@ -139,14 +139,3 @@ func (m *MockStepSecurityClient) DeleteRunPolicy(ctx context.Context, owner stri
 	args := m.Called(ctx, owner, policyID)
 	return args.Error(0)
 }
-
-// GitHub Run Policy Evaluation methods
-func (m *MockStepSecurityClient) ListOrgRunPolicyEvaluations(ctx context.Context, owner string, status string) ([]RunPolicyEvaluation, error) {
-	args := m.Called(ctx, owner, status)
-	return args.Get(0).([]RunPolicyEvaluation), args.Error(1)
-}
-
-func (m *MockStepSecurityClient) ListRepoRunPolicyEvaluations(ctx context.Context, owner string, repo string, status string) ([]RunPolicyEvaluation, error) {
-	args := m.Called(ctx, owner, repo, status)
-	return args.Get(0).([]RunPolicyEvaluation), args.Error(1)
-}
