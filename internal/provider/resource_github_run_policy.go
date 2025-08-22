@@ -490,8 +490,9 @@ func (r *githubRunPolicyResource) updateModelFromAPI(_ context.Context, model *g
 
 	if strings.Contains(policy.Owner, "#[all]") {
 		model.Owner = types.StringValue(policy.Owner[:strings.Index(policy.Owner, "#")])
+	} else {
+		model.Owner = types.StringValue(policy.Owner)
 	}
-	// model.Owner = types.StringValue(policy.Owner)
 	model.Name = types.StringValue(policy.Name)
 	model.PolicyID = types.StringValue(policy.PolicyID)
 	model.AllRepos = types.BoolValue(policy.AllRepos)
