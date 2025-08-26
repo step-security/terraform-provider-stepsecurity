@@ -174,6 +174,7 @@ func (p *StepSecurityProvider) Configure(ctx context.Context, req provider.Confi
 func (p *StepSecurityProvider) DataSources(_ context.Context) []func() datasource.DataSource {
 	return []func() datasource.DataSource{
 		NewUsersDataSource,
+		NewGithubRunPoliciesDataSource,
 	}
 }
 
@@ -185,6 +186,7 @@ func (p *StepSecurityProvider) Resources(_ context.Context) []func() resource.Re
 		NewPolicyDrivenPRResource,
 		NewGithubPolicyStoreResource,
 		NewGithubSupressionRuleResource,
+		NewGithubRunPolicyResource,
 	}
 }
 
