@@ -33,17 +33,14 @@ resource "stepsecurity_github_policy_store_attachment" "workflow-attachment" {
   policy_name = "workflow-policy"
 
   org = {
-    apply_to_org = false
     repositories = [
       {
-        name          = "myrepo"
-        apply_to_repo = false
-        workflows     = ["ci.yml", "deploy.yml"]
+        name      = "myrepo"
+        workflows = ["ci.yml", "deploy.yml"]
       },
       {
-        name          = "other-repo"
-        apply_to_repo = false
-        workflows     = ["test.yml"]
+        name      = "other-repo"
+        workflows = ["test.yml"]
       }
     ]
   }
@@ -55,22 +52,15 @@ resource "stepsecurity_github_policy_store_attachment" "repo-attachment" {
   policy_name = "repo-policy"
 
   org = {
-    apply_to_org = false
     repositories = [
       {
-        name          = "frontend-app"
-        apply_to_repo = true
-        workflows     = []
+        name = "frontend-app"
       },
       {
-        name          = "backend-api"
-        apply_to_repo = true
-        workflows     = []
+        name = "backend-api"
       },
       {
-        name          = "shared-libs"
-        apply_to_repo = true
-        workflows     = []
+        name = "shared-libs"
       }
     ]
   }
@@ -83,7 +73,6 @@ resource "stepsecurity_github_policy_store_attachment" "org-attachment" {
 
   org = {
     apply_to_org = true
-    repositories = []
   }
 }
 
@@ -104,17 +93,13 @@ resource "stepsecurity_github_policy_store_attachment" "mixed-attachment" {
   policy_name = "workflow-policy"
 
   org = {
-    apply_to_org = false
     repositories = [
       {
-        name          = "critical-repo"
-        apply_to_repo = true
-        workflows     = []
+        name = "critical-repo"
       },
       {
-        name          = "staging-repo"
-        apply_to_repo = false
-        workflows     = ["test.yml", "deploy-staging.yml"]
+        name      = "staging-repo"
+        workflows = ["test.yml", "deploy-staging.yml"]
       }
     ]
   }
@@ -153,7 +138,7 @@ import {
 
 Optional:
 
-- `apply_to_org` (Boolean) If true, applies to entire organization
+- `apply_to_org` (Boolean) If true, applies to entire organization. Defaults to true when no repositories are specified, false when repositories are specified
 - `repositories` (Attributes List) List of repository-level attachments (see [below for nested schema](#nestedatt--org--repositories))
 
 <a id="nestedatt--org--repositories"></a>
@@ -165,5 +150,5 @@ Required:
 
 Optional:
 
-- `apply_to_repo` (Boolean) If true, applies to entire repository
+- `apply_to_repo` (Boolean) If true, applies to entire repository. Automatically set to false when workflows are specified, otherwise defaults to true
 - `workflows` (List of String) List of specific workflows

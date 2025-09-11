@@ -71,7 +71,7 @@ func (r *githubPolicyStoreAttachmentResource) Schema(_ context.Context, _ resour
 						Optional:    true,
 						Computed:    true,
 						Default:     booldefault.StaticBool(false),
-						Description: "If true, applies to entire organization",
+						Description: "If true, applies to entire organization. Defaults to true when no repositories are specified, false when repositories are specified",
 					},
 					"repositories": schema.ListNestedAttribute{
 						Optional:    true,
@@ -86,7 +86,7 @@ func (r *githubPolicyStoreAttachmentResource) Schema(_ context.Context, _ resour
 									Optional:    true,
 									Computed:    true,
 									Default:     booldefault.StaticBool(false),
-									Description: "If true, applies to entire repository",
+									Description: "If true, applies to entire repository. Automatically set to false when workflows are specified, otherwise defaults to true",
 								},
 								"workflows": schema.ListAttribute{
 									ElementType: types.StringType,
@@ -317,41 +317,50 @@ func (r *githubPolicyStoreAttachmentResource) createAttachment(ctx context.Conte
 	// Handle org-level attachments
 	if !plan.Org.IsNull() {
 		orgAttrs := plan.Org.Attributes()
-		
+
 		orgResource := &stepsecurityapi.OrgResource{
 			Name: owner,
 		}
 
-		if applyToOrgAttr, exists := orgAttrs["apply_to_org"]; exists {
-			orgResource.ApplyToOrg = applyToOrgAttr.(types.Bool).ValueBool()
-		}
+		// First, handle repositories to determine if apply_to_org should be automatically set
+		var hasRepositories bool
+		var repos []stepsecurityapi.RepoResource
 
 		if reposAttr, exists := orgAttrs["repositories"]; exists && !reposAttr.IsNull() {
-			var repos []stepsecurityapi.RepoResource
 			reposList := reposAttr.(types.List)
-			
+			hasRepositories = len(reposList.Elements()) > 0
+
 			for _, repoObj := range reposList.Elements() {
 				repoAttrs := repoObj.(types.Object).Attributes()
-				
+
 				repoResource := stepsecurityapi.RepoResource{}
 				if nameAttr, exists := repoAttrs["name"]; exists {
 					repoResource.Name = nameAttr.(types.String).ValueString()
 				}
-				if applyToRepoAttr, exists := repoAttrs["apply_to_repo"]; exists {
-					repoResource.ApplyToRepo = applyToRepoAttr.(types.Bool).ValueBool()
-				}
+
+				// Check if workflows are specified first
+				var hasWorkflows bool
 				if workflowsAttr, exists := repoAttrs["workflows"]; exists && !workflowsAttr.IsNull() {
 					workflowsList := workflowsAttr.(types.List)
-					for _, workflow := range workflowsList.Elements() {
-						repoResource.Workflows = append(repoResource.Workflows, workflow.(types.String).ValueString())
+					if len(workflowsList.Elements()) > 0 {
+						hasWorkflows = true
+						for _, workflow := range workflowsList.Elements() {
+							repoResource.Workflows = append(repoResource.Workflows, workflow.(types.String).ValueString())
+						}
 					}
 				}
-				
+
+				// Always calculate apply_to_repo based on workflows
+				repoResource.ApplyToRepo = !hasWorkflows
+
 				repos = append(repos, repoResource)
 			}
-			
+
 			orgResource.Repos = repos
 		}
+
+		// Always calculate apply_to_org based on repositories
+		orgResource.ApplyToOrg = !hasRepositories
 
 		request.Org = orgResource
 	}
@@ -374,11 +383,11 @@ func (r *githubPolicyStoreAttachmentResource) updateAttachmentState(policy *step
 	// If no attachments, clear the state
 	if policy.Attachments == nil {
 		state.Org = types.ObjectNull(map[string]attr.Type{
-			"apply_to_org":   types.BoolType,
-			"repositories":   types.ListType{ElemType: types.ObjectType{AttrTypes: map[string]attr.Type{
-				"name":           types.StringType,
-				"apply_to_repo":  types.BoolType,
-				"workflows":      types.ListType{ElemType: types.StringType},
+			"apply_to_org": types.BoolType,
+			"repositories": types.ListType{ElemType: types.ObjectType{AttrTypes: map[string]attr.Type{
+				"name":          types.StringType,
+				"apply_to_repo": types.BoolType,
+				"workflows":     types.ListType{ElemType: types.StringType},
 			}}},
 		})
 		state.Clusters = types.ListNull(types.StringType)

@@ -18,17 +18,14 @@ resource "stepsecurity_github_policy_store_attachment" "workflow-attachment" {
   policy_name = "workflow-policy"
 
   org = {
-    apply_to_org = false
     repositories = [
       {
-        name          = "myrepo"
-        apply_to_repo = false
-        workflows     = ["ci.yml", "deploy.yml"]
+        name      = "myrepo"
+        workflows = ["ci.yml", "deploy.yml"]
       },
       {
-        name          = "other-repo"
-        apply_to_repo = false
-        workflows     = ["test.yml"]
+        name      = "other-repo"
+        workflows = ["test.yml"]
       }
     ]
   }
@@ -40,22 +37,15 @@ resource "stepsecurity_github_policy_store_attachment" "repo-attachment" {
   policy_name = "repo-policy"
 
   org = {
-    apply_to_org = false
     repositories = [
       {
-        name          = "frontend-app"
-        apply_to_repo = true
-        workflows     = []
+        name = "frontend-app"
       },
       {
-        name          = "backend-api"
-        apply_to_repo = true
-        workflows     = []
+        name = "backend-api"
       },
       {
-        name          = "shared-libs"
-        apply_to_repo = true
-        workflows     = []
+        name = "shared-libs"
       }
     ]
   }
@@ -68,7 +58,6 @@ resource "stepsecurity_github_policy_store_attachment" "org-attachment" {
 
   org = {
     apply_to_org = true
-    repositories = []
   }
 }
 
@@ -89,17 +78,13 @@ resource "stepsecurity_github_policy_store_attachment" "mixed-attachment" {
   policy_name = "workflow-policy"
 
   org = {
-    apply_to_org = false
     repositories = [
       {
-        name          = "critical-repo"
-        apply_to_repo = true
-        workflows     = []
+        name = "critical-repo"
       },
       {
-        name          = "staging-repo"
-        apply_to_repo = false
-        workflows     = ["test.yml", "deploy-staging.yml"]
+        name      = "staging-repo"
+        workflows = ["test.yml", "deploy-staging.yml"]
       }
     ]
   }
