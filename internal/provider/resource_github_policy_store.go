@@ -263,7 +263,6 @@ func (r *githubPolicyStoreResource) Update(ctx context.Context, req resource.Upd
 	}
 
 	// update the state
-
 	var state githubPolicyStoreModel
 	resp.Diagnostics.Append(req.State.Get(ctx, &state)...)
 	if resp.Diagnostics.HasError() {

@@ -1,4 +1,3 @@
-
 terraform {
   required_providers {
     stepsecurity = {
@@ -12,24 +11,33 @@ provider "stepsecurity" {
   customer = "abcdefg"  # can also be set as env variable STEP_SECURITY_CUSTOMER
 }
 
-# policy that can be referenced in workflows in 'test-organization' to block egress traffic in
-resource "stepsecurity_github_policy_store" "test-organization" {
+# Policy with block mode and basic endpoints
+resource "stepsecurity_github_policy_store" "audit-policy" {
   owner         = "test-organization"
-  policy_name   = "test-policy"
+  policy_name   = "audit-policy"
   egress_policy = "block"
   allowed_endpoints = [
     "github.com:443",
     "api.github.com:443",
     "registry.npmjs.org:443"
   ]
-  disable_telemetry       = false
-  disable_sudo            = false
-  disable_file_monitoring = false
 }
 
-# For importing existing github policy store polcies to terraform state
-import {
-  to = stepsecurity_github_policy_store.test-organization
-  id = "test-organization:::test-policy" # format is <owner>:::<policy_name>
+# Policy with audit mode and custom endpoints
+resource "stepsecurity_github_policy_store" "custom-policy" {
+  owner         = "test-organization"
+  policy_name   = "custom-policy"
+  egress_policy = "audit"
+  allowed_endpoints = [
+    "github.com:443",
+    "api.github.com:443",
+    "registry.npmjs.org:443",
+    "docker.io:443"
+  ]
 }
-  
+
+# For importing existing github policy store policies to terraform state
+import {
+  to = stepsecurity_github_policy_store.audit-policy
+  id = "test-organization:::audit-policy" # format is <owner>:::<policy_name>
+}
