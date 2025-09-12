@@ -548,8 +548,101 @@ func TestGithubPolicyStoreAttachmentResource_AutomaticBooleanLogic(t *testing.T)
 			mockClient := &stepsecurityapi.MockStepSecurityClient{}
 			mockClient.On("AttachGitHubPolicyStorePolicy", mock.Anything, "test-org", "test-policy", mock.MatchedBy(tc.expectedRequest)).Return(nil)
 
-			// This would be tested via the full resource integration tests
-			// For now, we validate the logic is sound through unit test structure
+			// Create a resource instance with the mock client
+			r := &githubPolicyStoreAttachmentResource{client: mockClient}
+
+			// Parse the config string into a model
+			model := githubPolicyStoreAttachmentModel{
+				Owner:      types.StringValue("test-org"),
+				PolicyName: types.StringValue("test-policy"),
+			}
+
+			// Parse the config string and set up the model's org attribute
+			if strings.Contains(tc.config, "org") {
+				orgAttrs := map[string]attr.Type{
+					"apply_to_org": types.BoolType,
+					"repositories": types.ListType{
+						ElemType: types.ObjectType{
+							AttrTypes: map[string]attr.Type{
+								"name":          types.StringType,
+								"apply_to_repo": types.BoolType,
+								"workflows":     types.ListType{ElemType: types.StringType},
+							},
+						},
+					},
+				}
+
+				orgValues := map[string]attr.Value{}
+
+				// Set apply_to_org if explicitly specified
+				if strings.Contains(tc.config, "apply_to_org = true") {
+					orgValues["apply_to_org"] = types.BoolValue(true)
+				} else {
+					// Default to null if not specified
+					orgValues["apply_to_org"] = types.BoolNull()
+				}
+
+				// Handle repositories if specified
+				if strings.Contains(tc.config, "repositories") {
+					var repoValues []attr.Value
+
+					if strings.Contains(tc.config, "name = \"test-repo\"") {
+						repoAttrs := map[string]attr.Type{
+							"name":          types.StringType,
+							"apply_to_repo": types.BoolType,
+							"workflows":     types.ListType{ElemType: types.StringType},
+						}
+
+						repoValue := map[string]attr.Value{
+							"name":          types.StringValue("test-repo"),
+							"apply_to_repo": types.BoolNull(),
+						}
+
+						// Add workflows if specified
+						if strings.Contains(tc.config, "workflows = [\"ci.yml\"]") {
+							repoValue["workflows"] = types.ListValueMust(
+								types.StringType,
+								[]attr.Value{types.StringValue("ci.yml")},
+							)
+						} else {
+							repoValue["workflows"] = types.ListNull(types.StringType)
+						}
+
+						repoValues = append(repoValues, types.ObjectValueMust(repoAttrs, repoValue))
+					}
+
+					orgValues["repositories"] = types.ListValueMust(
+						types.ObjectType{
+							AttrTypes: map[string]attr.Type{
+								"name":          types.StringType,
+								"apply_to_repo": types.BoolType,
+								"workflows":     types.ListType{ElemType: types.StringType},
+							},
+						},
+						repoValues,
+					)
+				} else {
+					orgValues["repositories"] = types.ListNull(
+						types.ObjectType{
+							AttrTypes: map[string]attr.Type{
+								"name":          types.StringType,
+								"apply_to_repo": types.BoolType,
+								"workflows":     types.ListType{ElemType: types.StringType},
+							},
+						},
+					)
+				}
+
+				model.Org = types.ObjectValueMust(orgAttrs, orgValues)
+			}
+
+			// Execute the actual code that should trigger the mock
+			err := r.createAttachment(context.Background(), &model)
+			if err != nil {
+				t.Fatalf("createAttachment failed: %v", err)
+			}
+
+			// Verify that the mock was called as expected
 			mockClient.AssertExpectations(t)
 		})
 	}
