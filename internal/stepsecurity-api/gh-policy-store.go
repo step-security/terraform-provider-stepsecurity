@@ -6,22 +6,55 @@ import (
 	"fmt"
 )
 
+// Hierarchical structure for policy attachments
+type PolicyAttachments struct {
+	Org      *OrgResource `json:"org,omitempty"`
+	Clusters []string     `json:"clusters,omitempty"`
+}
+
+type OrgResource struct {
+	Name       string         `json:"name"`                // org name
+	ApplyToOrg bool           `json:"apply_to_org"`        // if true, applies to entire org
+	Repos      []RepoResource `json:"repos,omitempty"`
+}
+
+type RepoResource struct {
+	Name        string   `json:"name"`                // repo name
+	ApplyToRepo bool     `json:"apply_to_repo"`       // if true, applies to entire repo
+	Workflows   []string `json:"workflows,omitempty"` // specific workflows
+}
+
+// Main policy struct with embedded policy details
 type GitHubPolicyStorePolicy struct {
-	Owner                 string   `json:"owner"`
-	PolicyName            string   `json:"policyName"`
-	AllowedEndpoints      []string `json:"allowed_endpoints"`
-	EgressPolicy          string   `json:"egress_policy"`
-	DisableTelemetry      bool     `json:"disable_telemetry"`
-	DisableSudo           bool     `json:"disable_sudo"`
-	DisableFileMonitoring bool     `json:"disable_file_monitoring"`
+	Owner                 string             `json:"owner"`
+	PolicyName            string             `json:"policyName"`
+	AllowedEndpoints      []string           `json:"allowed_endpoints"`
+	EgressPolicy          string             `json:"egress_policy"`
+	DisableTelemetry      bool               `json:"disable_telemetry"`
+	DisableSudo           bool               `json:"disable_sudo"`
+	DisableFileMonitoring bool               `json:"disable_file_monitoring"`
+	Attachments           *PolicyAttachments `json:"attachments,omitempty"`
 }
 
 func (c *APIClient) CreateGitHubPolicyStorePolicy(ctx context.Context, policy *GitHubPolicyStorePolicy) error {
 	if policy == nil {
 		return fmt.Errorf("empty policy provided")
 	}
+	
+	// Create policy without attachments for API call
+	policyForCreation := &GitHubPolicyStorePolicy{
+		Owner:                 policy.Owner,
+		PolicyName:            policy.PolicyName,
+		AllowedEndpoints:      policy.AllowedEndpoints,
+		EgressPolicy:          policy.EgressPolicy,
+		DisableTelemetry:      policy.DisableTelemetry,
+		DisableSudo:           policy.DisableSudo,
+		DisableFileMonitoring: policy.DisableFileMonitoring,
+		// Explicitly omit Attachments for creation
+	}
+	
 	URI := fmt.Sprintf("%s/v1/github/%s/actions/policies/%s", c.BaseURL, policy.Owner, policy.PolicyName)
-	_, err := c.post(ctx, URI, policy)
+	_, err := c.post(ctx, URI, policyForCreation)
 	if err != nil {
 		return fmt.Errorf("failed to create config: %w", err)
 	}
@@ -49,3 +82,31 @@ func (c *APIClient) DeleteGitHubPolicyStorePolicy(ctx context.Context, owner str
 	}
 	return nil
 }
+
+// New hierarchical attachment request structure
+type GitHubPolicyAttachRequest struct {
+	Org      *OrgResource `json:"org,omitempty"`
+	Clusters []string     `json:"clusters,omitempty"`
+}
+
+func (c *APIClient) AttachGitHubPolicyStorePolicy(ctx context.Context, owner string, policyName string, request *GitHubPolicyAttachRequest) error {
+	if request == nil {
+		return fmt.Errorf("empty attach request provided")
+	}
+	URI := fmt.Sprintf("%s/v1/github/%s/actions/policies/%s/attach", c.BaseURL, owner, policyName)
+	_, err := c.post(ctx, URI, request)
+	if err != nil {
+		return fmt.Errorf("failed to attach policy: %w", err)
+	}
+	return nil
+}
+
+func (c *APIClient) DetachGitHubPolicyStorePolicy(ctx context.Context, owner string, policyName string) error {
+	URI := fmt.Sprintf("%s/v1/github/%s/actions/policies/%s/attach", c.BaseURL, owner, policyName)
+	_, err := c.delete(ctx, URI)
+	if err != nil {
+		return fmt.Errorf("failed to detach policy: %w", err)
+	}
+	return nil
+}
+

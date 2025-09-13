@@ -51,11 +51,11 @@ func TestAccGithubRunPolicyResource(t *testing.T) {
 
 func TestGithubRunPolicyResource_Create(t *testing.T) {
 	resource := &githubRunPolicyResource{}
-	
+
 	// Verify resource is properly initialized
 	assert.NotNil(t, resource)
 	assert.Nil(t, resource.client)
-	
+
 	// Test that we can set a client
 	mockClient := &stepsecurityapi.MockStepSecurityClient{}
 	resource.client = mockClient
@@ -64,10 +64,10 @@ func TestGithubRunPolicyResource_Create(t *testing.T) {
 
 func TestGithubRunPolicyResource_UpdateModelFromAPI(t *testing.T) {
 	resource := &githubRunPolicyResource{}
-	
+
 	ctx := context.Background()
 	model := &githubRunPolicyResourceModel{}
-	
+
 	apiResponse := &stepsecurityapi.RunPolicy{
 		Owner:         "test-org",
 		Customer:      "test-customer",
@@ -93,10 +93,10 @@ func TestGithubRunPolicyResource_UpdateModelFromAPI(t *testing.T) {
 			},
 		},
 	}
-	
+
 	var diags diag.Diagnostics
 	resource.updateModelFromAPI(ctx, model, apiResponse, &diags)
-	
+
 	assert.Equal(t, "test-org", model.Owner.ValueString())
 	assert.Equal(t, "test-policy-123", model.PolicyID.ValueString())
 	assert.Equal(t, "Test Policy", model.Name.ValueString())

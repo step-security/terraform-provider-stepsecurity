@@ -94,6 +94,17 @@ func (m *MockStepSecurityClient) DeleteGitHubPolicyStorePolicy(ctx context.Conte
 	return args.Error(0)
 }
 
+func (m *MockStepSecurityClient) AttachGitHubPolicyStorePolicy(ctx context.Context, owner string, policyName string, request *GitHubPolicyAttachRequest) error {
+	args := m.Called(ctx, owner, policyName, request)
+	return args.Error(0)
+}
+
+func (m *MockStepSecurityClient) DetachGitHubPolicyStorePolicy(ctx context.Context, owner string, policyName string) error {
+	args := m.Called(ctx, owner, policyName)
+	return args.Error(0)
+}
+
+
 func (m *MockStepSecurityClient) CreateSuppressionRule(ctx context.Context, rule SuppressionRule) (*SuppressionRule, error) {
 	args := m.Called(ctx, rule)
 	return args.Get(0).(*SuppressionRule), args.Error(1)

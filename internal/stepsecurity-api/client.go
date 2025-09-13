@@ -34,6 +34,8 @@ type Client interface {
 	CreateGitHubPolicyStorePolicy(ctx context.Context, policy *GitHubPolicyStorePolicy) error
 	GetGitHubPolicyStorePolicy(ctx context.Context, owner string, policyName string) (*GitHubPolicyStorePolicy, error)
 	DeleteGitHubPolicyStorePolicy(ctx context.Context, owner string, policyName string) error
+	AttachGitHubPolicyStorePolicy(ctx context.Context, owner string, policyName string, request *GitHubPolicyAttachRequest) error
+	DetachGitHubPolicyStorePolicy(ctx context.Context, owner string, policyName string) error
 
 	// Suppression Rules
 	CreateSuppressionRule(ctx context.Context, rule SuppressionRule) (*SuppressionRule, error)

@@ -33,8 +33,8 @@ type githubRunPoliciesDataSource struct {
 
 // githubRunPoliciesDataSourceModel maps the data source schema data.
 type githubRunPoliciesDataSourceModel struct {
-	Owner        types.String `tfsdk:"owner"`
-	RunPolicies  types.List   `tfsdk:"run_policies"`
+	Owner       types.String `tfsdk:"owner"`
+	RunPolicies types.List   `tfsdk:"run_policies"`
 }
 
 // Metadata returns the data source type name.
@@ -210,13 +210,13 @@ func (d *githubRunPoliciesDataSource) Read(ctx context.Context, req datasource.R
 
 		// Handle policy configuration
 		policyConfigAttrs := map[string]attr.Value{
-			"owner":                            types.StringValue(policy.PolicyConfig.Owner),
-			"name":                             types.StringValue(policy.PolicyConfig.Name),
-			"enable_action_policy":             types.BoolValue(policy.PolicyConfig.EnableActionPolicy),
-			"enable_runs_on_policy":            types.BoolValue(policy.PolicyConfig.EnableRunsOnPolicy),
-			"enable_secrets_policy":            types.BoolValue(policy.PolicyConfig.EnableSecretsPolicy),
+			"owner":                             types.StringValue(policy.PolicyConfig.Owner),
+			"name":                              types.StringValue(policy.PolicyConfig.Name),
+			"enable_action_policy":              types.BoolValue(policy.PolicyConfig.EnableActionPolicy),
+			"enable_runs_on_policy":             types.BoolValue(policy.PolicyConfig.EnableRunsOnPolicy),
+			"enable_secrets_policy":             types.BoolValue(policy.PolicyConfig.EnableSecretsPolicy),
 			"enable_compromised_actions_policy": types.BoolValue(policy.PolicyConfig.EnableCompromisedActionsPolicy),
-			"is_dry_run":                       types.BoolValue(policy.PolicyConfig.IsDryRun),
+			"is_dry_run":                        types.BoolValue(policy.PolicyConfig.IsDryRun),
 		}
 
 		// Handle allowed actions map
@@ -245,48 +245,48 @@ func (d *githubRunPoliciesDataSource) Read(ctx context.Context, req datasource.R
 
 		// Create the policy config object
 		policyConfigAttrTypes := map[string]attr.Type{
-			"owner":                            types.StringType,
-			"name":                             types.StringType,
-			"enable_action_policy":             types.BoolType,
-			"allowed_actions":                  types.MapType{ElemType: types.StringType},
-			"enable_runs_on_policy":            types.BoolType,
-			"disallowed_runner_labels":         types.SetType{ElemType: types.StringType},
-			"enable_secrets_policy":            types.BoolType,
+			"owner":                             types.StringType,
+			"name":                              types.StringType,
+			"enable_action_policy":              types.BoolType,
+			"allowed_actions":                   types.MapType{ElemType: types.StringType},
+			"enable_runs_on_policy":             types.BoolType,
+			"disallowed_runner_labels":          types.SetType{ElemType: types.StringType},
+			"enable_secrets_policy":             types.BoolType,
 			"enable_compromised_actions_policy": types.BoolType,
-			"is_dry_run":                       types.BoolType,
+			"is_dry_run":                        types.BoolType,
 		}
 
 		policyConfigObj, _ := types.ObjectValue(policyConfigAttrTypes, policyConfigAttrs)
 
 		// Create run policy object
 		runPolicyAttrs := map[string]attr.Value{
-			"owner":             types.StringValue(policy.Owner),
-			"customer":          types.StringValue(policy.Customer),
-			"policy_id":         types.StringValue(policy.PolicyID),
-			"name":              types.StringValue(policy.Name),
-			"created_by":        types.StringValue(policy.CreatedBy),
-			"created_at":        types.StringValue(policy.CreatedAt.Format(time.RFC3339)),
-			"last_updated_by":   types.StringValue(policy.LastUpdatedBy),
-			"last_updated_at":   types.StringValue(policy.LastUpdatedAt.Format(time.RFC3339)),
-			"all_repos":         types.BoolValue(policy.AllRepos),
-			"all_orgs":          types.BoolValue(policy.AllOrgs),
-			"repositories":      reposList,
-			"policy_config":     policyConfigObj,
+			"owner":           types.StringValue(policy.Owner),
+			"customer":        types.StringValue(policy.Customer),
+			"policy_id":       types.StringValue(policy.PolicyID),
+			"name":            types.StringValue(policy.Name),
+			"created_by":      types.StringValue(policy.CreatedBy),
+			"created_at":      types.StringValue(policy.CreatedAt.Format(time.RFC3339)),
+			"last_updated_by": types.StringValue(policy.LastUpdatedBy),
+			"last_updated_at": types.StringValue(policy.LastUpdatedAt.Format(time.RFC3339)),
+			"all_repos":       types.BoolValue(policy.AllRepos),
+			"all_orgs":        types.BoolValue(policy.AllOrgs),
+			"repositories":    reposList,
+			"policy_config":   policyConfigObj,
 		}
 
 		runPolicyAttrTypes := map[string]attr.Type{
-			"owner":             types.StringType,
-			"customer":          types.StringType,
-			"policy_id":         types.StringType,
-			"name":              types.StringType,
-			"created_by":        types.StringType,
-			"created_at":        types.StringType,
-			"last_updated_by":   types.StringType,
-			"last_updated_at":   types.StringType,
-			"all_repos":         types.BoolType,
-			"all_orgs":          types.BoolType,
-			"repositories":      types.ListType{ElemType: types.StringType},
-			"policy_config":     types.ObjectType{AttrTypes: policyConfigAttrTypes},
+			"owner":           types.StringType,
+			"customer":        types.StringType,
+			"policy_id":       types.StringType,
+			"name":            types.StringType,
+			"created_by":      types.StringType,
+			"created_at":      types.StringType,
+			"last_updated_by": types.StringType,
+			"last_updated_at": types.StringType,
+			"all_repos":       types.BoolType,
+			"all_orgs":        types.BoolType,
+			"repositories":    types.ListType{ElemType: types.StringType},
+			"policy_config":   types.ObjectType{AttrTypes: policyConfigAttrTypes},
 		}
 
 		runPolicyObj, _ := types.ObjectValue(runPolicyAttrTypes, runPolicyAttrs)
@@ -295,27 +295,27 @@ func (d *githubRunPoliciesDataSource) Read(ctx context.Context, req datasource.R
 
 	// Create the final list
 	runPolicyAttrTypes := map[string]attr.Type{
-		"owner":             types.StringType,
-		"customer":          types.StringType,
-		"policy_id":         types.StringType,
-		"name":              types.StringType,
-		"created_by":        types.StringType,
-		"created_at":        types.StringType,
-		"last_updated_by":   types.StringType,
-		"last_updated_at":   types.StringType,
-		"all_repos":         types.BoolType,
-		"all_orgs":          types.BoolType,
-		"repositories":      types.ListType{ElemType: types.StringType},
+		"owner":           types.StringType,
+		"customer":        types.StringType,
+		"policy_id":       types.StringType,
+		"name":            types.StringType,
+		"created_by":      types.StringType,
+		"created_at":      types.StringType,
+		"last_updated_by": types.StringType,
+		"last_updated_at": types.StringType,
+		"all_repos":       types.BoolType,
+		"all_orgs":        types.BoolType,
+		"repositories":    types.ListType{ElemType: types.StringType},
 		"policy_config": types.ObjectType{AttrTypes: map[string]attr.Type{
-			"owner":                            types.StringType,
-			"name":                             types.StringType,
-			"enable_action_policy":             types.BoolType,
-			"allowed_actions":                  types.MapType{ElemType: types.StringType},
-			"enable_runs_on_policy":            types.BoolType,
-			"disallowed_runner_labels":         types.SetType{ElemType: types.StringType},
-			"enable_secrets_policy":            types.BoolType,
+			"owner":                             types.StringType,
+			"name":                              types.StringType,
+			"enable_action_policy":              types.BoolType,
+			"allowed_actions":                   types.MapType{ElemType: types.StringType},
+			"enable_runs_on_policy":             types.BoolType,
+			"disallowed_runner_labels":          types.SetType{ElemType: types.StringType},
+			"enable_secrets_policy":             types.BoolType,
 			"enable_compromised_actions_policy": types.BoolType,
-			"is_dry_run":                       types.BoolType,
+			"is_dry_run":                        types.BoolType,
 		}},
 	}
 
