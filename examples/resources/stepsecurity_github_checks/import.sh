@@ -1,0 +1,2 @@
+
+terraform import 'stepsecurity_github_checks.github_checks' ORG_NAME/OWNER_NAME

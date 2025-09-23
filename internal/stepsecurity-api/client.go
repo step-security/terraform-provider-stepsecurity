@@ -49,6 +49,10 @@ type Client interface {
 	GetRunPolicy(ctx context.Context, owner string, policyID string) (*RunPolicy, error)
 	UpdateRunPolicy(ctx context.Context, owner string, policyID string, policy UpdateRunPolicyRequest) (*RunPolicy, error)
 	DeleteRunPolicy(ctx context.Context, owner string, policyID string) error
+
+	GetPRChecksConfig(ctx context.Context, owner string) (GitHubPRChecksConfig, error)
+	UpdatePRChecksConfig(ctx context.Context, owner string, req GitHubPRChecksConfig) error
+	DeletePRChecksConfig(ctx context.Context, owner string) error
 }
 
 type APIClient struct {
