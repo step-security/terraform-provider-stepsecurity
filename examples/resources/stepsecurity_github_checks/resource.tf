@@ -38,7 +38,7 @@ resource "stepsecurity_github_checks" "test-organization" {
     repos = ["test-repo-1"] # applies to only test-repo-1
   }
   baseline_check = {
-    repos      = ["*"] # applies to all repositories in the organization
+    repos      = ["*"]           # applies to all repositories in the organization
     omit_repos = ["test-repo-2"] # omits test-repo-2 from baseline check
   }
 

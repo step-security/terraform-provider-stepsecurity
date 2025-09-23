@@ -46,14 +46,14 @@ resource "stepsecurity_github_checks" "test-organization" {
     }
   ]
   required_checks = {
-    repos = ["*"]
+    repos = ["*"] # applies to all repositories in the organization
   }
   optional_checks = {
-    repos = ["test-repo-1"]
+    repos = ["test-repo-1"] # applies to only test-repo-1
   }
   baseline_check = {
-    repos      = ["*"]
-    omit_repos = ["test-repo-2"]
+    repos      = ["*"]           # applies to all repositories in the organization
+    omit_repos = ["test-repo-2"] # omits test-repo-2 from baseline check
   }
 
 }

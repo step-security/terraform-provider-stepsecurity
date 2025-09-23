@@ -55,7 +55,6 @@ func createNullSettingsObject() types.Object {
 }
 
 func TestAccGithubChecksResource(t *testing.T) {
-	t.Setenv("TF_ACC", "1")
 	res.Test(t, res.TestCase{
 		PreCheck:                 func() { testAccPreCheck(t) },
 		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
