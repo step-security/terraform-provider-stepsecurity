@@ -150,3 +150,19 @@ func (m *MockStepSecurityClient) DeleteRunPolicy(ctx context.Context, owner stri
 	args := m.Called(ctx, owner, policyID)
 	return args.Error(0)
 }
+
+// GitHub PR Checks methods
+func (m *MockStepSecurityClient) GetPRChecksConfig(ctx context.Context, owner string) (GitHubPRChecksConfig, error) {
+	args := m.Called(ctx, owner)
+	return args.Get(0).(GitHubPRChecksConfig), args.Error(1)
+}
+
+func (m *MockStepSecurityClient) UpdatePRChecksConfig(ctx context.Context, owner string, req GitHubPRChecksConfig) error {
+	args := m.Called(ctx, owner, req)
+	return args.Error(0)
+}
+
+func (m *MockStepSecurityClient) DeletePRChecksConfig(ctx context.Context, owner string) error {
+	args := m.Called(ctx, owner)
+	return args.Error(0)
+}
