@@ -95,7 +95,7 @@ Optional:
 
 Required:
 
-- `control` (String) Control name. Available controls: Script Injection, NPM Package Compromised Updates, NPM Package Cooldown, PWN Request
+- `control` (String) Control name. Available controls: NPM Package Compromised Updates, NPM Package Cooldown, PWN Request, Script Injection
 - `enable` (Boolean) Whether the control is enabled
 - `type` (String) Check type where this control should run.Can only be 'required'/'optional'
 

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"sort"
 )
 
 var (
@@ -45,6 +46,9 @@ func GetAvailableControls() []string {
 	for control := range AvailableControls {
 		controls = append(controls, control)
 	}
+	sort.Slice(controls, func(i, j int) bool {
+		return controls[i] < controls[j]
+	})
 	return controls
 }
 
