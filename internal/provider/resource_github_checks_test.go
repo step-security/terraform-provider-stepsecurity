@@ -818,14 +818,14 @@ func TestGithubChecksResource_ConvertToState(t *testing.T) {
 								},
 							},
 						},
-						"script_injection_check": {
-							Enabled:  true,
-							Type:     "optional",
-							Settings: map[string]any{},
-						},
 						"pwn_request_check": {
 							Enabled:  false,
 							Type:     "required",
+							Settings: map[string]any{},
+						},
+						"script_injection_check": {
+							Enabled:  true,
+							Type:     "optional",
 							Settings: map[string]any{},
 						},
 					},
@@ -856,15 +856,15 @@ func TestGithubChecksResource_ConvertToState(t *testing.T) {
 						Settings: createSettingsObject(func() *int64 { v := int64(5); return &v }(), []string{"lodash", "express"}),
 					},
 					{
-						Control:  types.StringValue("Script Injection"),
-						Enable:   types.BoolValue(true),
-						Type:     types.StringValue("optional"),
-						Settings: createNullSettingsObject(),
-					},
-					{
 						Control:  types.StringValue("PWN Request"),
 						Enable:   types.BoolValue(false),
 						Type:     types.StringValue("required"),
+						Settings: createNullSettingsObject(),
+					},
+					{
+						Control:  types.StringValue("Script Injection"),
+						Enable:   types.BoolValue(true),
+						Type:     types.StringValue("optional"),
 						Settings: createNullSettingsObject(),
 					},
 				},

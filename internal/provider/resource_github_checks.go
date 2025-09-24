@@ -3,6 +3,7 @@ package provider
 import (
 	"context"
 	"fmt"
+	"sort"
 	"strings"
 
 	"github.com/hashicorp/terraform-plugin-framework/attr"
@@ -76,7 +77,7 @@ func (r *githubChecksResource) Schema(_ context.Context, _ resource.SchemaReques
 					Attributes: map[string]schema.Attribute{
 						"control": schema.StringAttribute{
 							Required:    true,
-							Description: "Control name",
+							Description: "Control name. Available controls: " + strings.Join(stepsecurityapi.GetAvailableControls(), ", "),
 						},
 						"enable": schema.BoolAttribute{
 							Required:    true,
@@ -367,7 +368,6 @@ func (r *githubChecksResource) ModifyPlan(ctx context.Context, req resource.Modi
 		return
 	}
 
-	isPlanModified := false
 	for ind, control := range plan.Controls {
 
 		if control.Control.ValueString() == "NPM Package Cooldown" && control.Settings.IsNull() {
@@ -384,16 +384,20 @@ func (r *githubChecksResource) ModifyPlan(ctx context.Context, req resource.Modi
 			}
 			control.Settings, _ = types.ObjectValue(settingsType.AttrTypes, settingsMap)
 			plan.Controls[ind] = control
-			isPlanModified = true
 		}
 	}
 
-	if isPlanModified {
-		diags = resp.Plan.Set(ctx, plan)
-		resp.Diagnostics.Append(diags...)
-		if resp.Diagnostics.HasError() {
-			return
-		}
+	// Sort controls by name to ensure deterministic order
+	// This prevents Terraform from detecting changes due to inconsistent ordering
+	sort.Slice(plan.Controls, func(i, j int) bool {
+		return plan.Controls[i].Control.ValueString() < plan.Controls[j].Control.ValueString()
+	})
+
+	// Set the plan back (either because it was modified or to ensure consistent ordering)
+	diags = resp.Plan.Set(ctx, plan)
+	resp.Diagnostics.Append(diags...)
+	if resp.Diagnostics.HasError() {
+		return
 	}
 
 }
@@ -803,6 +807,12 @@ func (r *githubChecksResource) convertToState(owner string, config stepsecuritya
 
 		model.Controls = append(model.Controls, c)
 	}
+
+	// Sort controls by name to ensure deterministic order
+	// This prevents Terraform from detecting changes due to random map iteration order
+	sort.Slice(model.Controls, func(i, j int) bool {
+		return model.Controls[i].Control.ValueString() < model.Controls[j].Control.ValueString()
+	})
 
 	// Flags for applying checks to all repos
 	isBaselineAll := config.EnableBaselineCheckForAllNewRepos != nil && *config.EnableBaselineCheckForAllNewRepos
