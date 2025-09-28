@@ -11,6 +11,7 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringplanmodifier"
+	"github.com/hashicorp/terraform-plugin-framework/schema/validator"
 	"github.com/hashicorp/terraform-plugin-framework/types"
 	stepsecurityapi "github.com/step-security/terraform-provider-stepsecurity/internal/stepsecurity-api"
 )
@@ -75,6 +76,50 @@ func (m applyToOrgDefault) PlanModifyBool(ctx context.Context, req planmodifier.
 	resp.PlanValue = types.BoolValue(!hasRepositories)
 }
 
+// noEmptyListValidator validates that a list is not empty
+type noEmptyListValidator struct {
+	fieldName string
+}
+
+func (v noEmptyListValidator) Description(ctx context.Context) string {
+	return fmt.Sprintf("Empty %s array is not allowed", v.fieldName)
+}
+
+func (v noEmptyListValidator) MarkdownDescription(ctx context.Context) string {
+	return fmt.Sprintf("Empty %s array is not allowed", v.fieldName)
+}
+
+func (v noEmptyListValidator) ValidateList(ctx context.Context, req validator.ListRequest, resp *validator.ListResponse) {
+	// Skip validation if value is null or unknown
+	if req.ConfigValue.IsNull() || req.ConfigValue.IsUnknown() {
+		return
+	}
+
+	// Check if the list is empty
+	if len(req.ConfigValue.Elements()) == 0 {
+		switch v.fieldName {
+		case "repositories":
+			resp.Diagnostics.AddAttributeError(
+				req.Path,
+				"Invalid Configuration",
+				"Empty repositories array is not allowed. Either remove the repositories field entirely to apply to the entire organization, or specify specific repositories.",
+			)
+		case "workflows":
+			resp.Diagnostics.AddAttributeError(
+				req.Path,
+				"Invalid Configuration",
+				"Empty workflows array is not allowed. Either remove the workflows field entirely to apply to the entire repository, or specify specific workflow files.",
+			)
+		default:
+			resp.Diagnostics.AddAttributeError(
+				req.Path,
+				"Invalid Configuration",
+				fmt.Sprintf("Empty %s array is not allowed.", v.fieldName),
+			)
+		}
+	}
+}
+
 // Ensure the implementation satisfies the expected interfaces.
 var (
 	_ resource.Resource                = &githubPolicyStoreAttachmentResource{}
@@ -137,6 +182,9 @@ func (r *githubPolicyStoreAttachmentResource) Schema(_ context.Context, _ resour
 					"repositories": schema.ListNestedAttribute{
 						Optional:    true,
 						Description: "List of repository-level attachments",
+						Validators: []validator.List{
+							noEmptyListValidator{fieldName: "repositories"},
+						},
 						NestedObject: schema.NestedAttributeObject{
 							Attributes: map[string]schema.Attribute{
 								"name": schema.StringAttribute{
@@ -155,6 +203,9 @@ func (r *githubPolicyStoreAttachmentResource) Schema(_ context.Context, _ resour
 									ElementType: types.StringType,
 									Optional:    true,
 									Description: "List of specific workflows",
+									Validators: []validator.List{
+										noEmptyListValidator{fieldName: "workflows"},
+									},
 								},
 							},
 						},
