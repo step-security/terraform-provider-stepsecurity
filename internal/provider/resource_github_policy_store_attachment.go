@@ -9,12 +9,116 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
-	"github.com/hashicorp/terraform-plugin-framework/resource/schema/booldefault"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringplanmodifier"
+	"github.com/hashicorp/terraform-plugin-framework/schema/validator"
 	"github.com/hashicorp/terraform-plugin-framework/types"
 	stepsecurityapi "github.com/step-security/terraform-provider-stepsecurity/internal/stepsecurity-api"
 )
+
+// applyToRepoDefault is a plan modifier that sets apply_to_repo based on workflows
+type applyToRepoDefault struct{}
+
+func (m applyToRepoDefault) Description(ctx context.Context) string {
+	return "Sets apply_to_repo to false when workflows are specified, true otherwise"
+}
+
+func (m applyToRepoDefault) MarkdownDescription(ctx context.Context) string {
+	return "Sets apply_to_repo to false when workflows are specified, true otherwise"
+}
+
+func (m applyToRepoDefault) PlanModifyBool(ctx context.Context, req planmodifier.BoolRequest, resp *planmodifier.BoolResponse) {
+	// Skip if we already have a configured value
+	if !req.ConfigValue.IsNull() {
+		return
+	}
+
+	// Get the workflows attribute from the same object
+	workflowsPath := req.Path.ParentPath().AtName("workflows")
+	var workflows types.List
+	resp.Diagnostics.Append(req.Plan.GetAttribute(ctx, workflowsPath, &workflows)...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+
+	// Set apply_to_repo based on whether workflows are specified
+	hasWorkflows := !workflows.IsNull() && len(workflows.Elements()) > 0
+	resp.PlanValue = types.BoolValue(!hasWorkflows)
+}
+
+// applyToOrgDefault is a plan modifier that sets apply_to_org based on repositories
+type applyToOrgDefault struct{}
+
+func (m applyToOrgDefault) Description(ctx context.Context) string {
+	return "Sets apply_to_org to true when no repositories are specified or repositories is empty, false otherwise"
+}
+
+func (m applyToOrgDefault) MarkdownDescription(ctx context.Context) string {
+	return "Sets apply_to_org to true when no repositories are specified or repositories is empty, false otherwise"
+}
+
+func (m applyToOrgDefault) PlanModifyBool(ctx context.Context, req planmodifier.BoolRequest, resp *planmodifier.BoolResponse) {
+	// Skip if we already have a configured value
+	if !req.ConfigValue.IsNull() {
+		return
+	}
+
+	// Get the repositories attribute from the same object
+	repositoriesPath := req.Path.ParentPath().AtName("repositories")
+	var repositories types.List
+	resp.Diagnostics.Append(req.Plan.GetAttribute(ctx, repositoriesPath, &repositories)...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+
+	// Set apply_to_org based on whether repositories are specified
+	hasRepositories := !repositories.IsNull() && len(repositories.Elements()) > 0
+	resp.PlanValue = types.BoolValue(!hasRepositories)
+}
+
+// noEmptyListValidator validates that a list is not empty
+type noEmptyListValidator struct {
+	fieldName string
+}
+
+func (v noEmptyListValidator) Description(ctx context.Context) string {
+	return fmt.Sprintf("Empty %s array is not allowed", v.fieldName)
+}
+
+func (v noEmptyListValidator) MarkdownDescription(ctx context.Context) string {
+	return fmt.Sprintf("Empty %s array is not allowed", v.fieldName)
+}
+
+func (v noEmptyListValidator) ValidateList(ctx context.Context, req validator.ListRequest, resp *validator.ListResponse) {
+	// Skip validation if value is null or unknown
+	if req.ConfigValue.IsNull() || req.ConfigValue.IsUnknown() {
+		return
+	}
+
+	// Check if the list is empty
+	if len(req.ConfigValue.Elements()) == 0 {
+		switch v.fieldName {
+		case "repositories":
+			resp.Diagnostics.AddAttributeError(
+				req.Path,
+				"Invalid Configuration",
+				"Empty repositories array is not allowed. Either remove the repositories field entirely to apply to the entire organization, or specify specific repositories.",
+			)
+		case "workflows":
+			resp.Diagnostics.AddAttributeError(
+				req.Path,
+				"Invalid Configuration",
+				"Empty workflows array is not allowed. Either remove the workflows field entirely to apply to the entire repository, or specify specific workflow files.",
+			)
+		default:
+			resp.Diagnostics.AddAttributeError(
+				req.Path,
+				"Invalid Configuration",
+				fmt.Sprintf("Empty %s array is not allowed.", v.fieldName),
+			)
+		}
+	}
+}
 
 // Ensure the implementation satisfies the expected interfaces.
 var (
@@ -70,12 +174,17 @@ func (r *githubPolicyStoreAttachmentResource) Schema(_ context.Context, _ resour
 					"apply_to_org": schema.BoolAttribute{
 						Optional:    true,
 						Computed:    true,
-						Default:     booldefault.StaticBool(false),
 						Description: "If true, applies to entire organization. Defaults to true when no repositories are specified, false when repositories are specified",
+						PlanModifiers: []planmodifier.Bool{
+							applyToOrgDefault{},
+						},
 					},
 					"repositories": schema.ListNestedAttribute{
 						Optional:    true,
 						Description: "List of repository-level attachments",
+						Validators: []validator.List{
+							noEmptyListValidator{fieldName: "repositories"},
+						},
 						NestedObject: schema.NestedAttributeObject{
 							Attributes: map[string]schema.Attribute{
 								"name": schema.StringAttribute{
@@ -85,13 +194,18 @@ func (r *githubPolicyStoreAttachmentResource) Schema(_ context.Context, _ resour
 								"apply_to_repo": schema.BoolAttribute{
 									Optional:    true,
 									Computed:    true,
-									Default:     booldefault.StaticBool(false),
 									Description: "If true, applies to entire repository. Automatically set to false when workflows are specified, otherwise defaults to true",
+									PlanModifiers: []planmodifier.Bool{
+										applyToRepoDefault{},
+									},
 								},
 								"workflows": schema.ListAttribute{
 									ElementType: types.StringType,
 									Optional:    true,
 									Description: "List of specific workflows",
+									Validators: []validator.List{
+										noEmptyListValidator{fieldName: "workflows"},
+									},
 								},
 							},
 						},
@@ -408,10 +522,22 @@ func (r *githubPolicyStoreAttachmentResource) updateAttachmentState(policy *step
 				workflowAttrs = append(workflowAttrs, types.StringValue(workflow))
 			}
 
+			// Handle empty workflows as null to match schema expectations
+			var workflowsList types.List
+			if len(workflowAttrs) == 0 {
+				workflowsList = types.ListNull(types.StringType)
+			} else {
+				workflowsList = types.ListValueMust(types.StringType, workflowAttrs)
+			}
+
+			// Calculate apply_to_repo consistently with createAttachment logic
+			hasWorkflows := len(repo.Workflows) > 0
+			applyToRepo := !hasWorkflows
+
 			repoAttrs := map[string]attr.Value{
 				"name":          types.StringValue(repo.Name),
-				"apply_to_repo": types.BoolValue(repo.ApplyToRepo),
-				"workflows":     types.ListValueMust(types.StringType, workflowAttrs),
+				"apply_to_repo": types.BoolValue(applyToRepo),
+				"workflows":     workflowsList,
 			}
 
 			repoObjs = append(repoObjs, types.ObjectValueMust(map[string]attr.Type{
@@ -421,11 +547,20 @@ func (r *githubPolicyStoreAttachmentResource) updateAttachmentState(policy *step
 			}, repoAttrs))
 		}
 
-		orgAttrs["repositories"] = types.ListValueMust(types.ObjectType{AttrTypes: map[string]attr.Type{
-			"name":          types.StringType,
-			"apply_to_repo": types.BoolType,
-			"workflows":     types.ListType{ElemType: types.StringType},
-		}}, repoObjs)
+		// Handle empty repositories as null to match schema expectations
+		if len(repoObjs) == 0 {
+			orgAttrs["repositories"] = types.ListNull(types.ObjectType{AttrTypes: map[string]attr.Type{
+				"name":          types.StringType,
+				"apply_to_repo": types.BoolType,
+				"workflows":     types.ListType{ElemType: types.StringType},
+			}})
+		} else {
+			orgAttrs["repositories"] = types.ListValueMust(types.ObjectType{AttrTypes: map[string]attr.Type{
+				"name":          types.StringType,
+				"apply_to_repo": types.BoolType,
+				"workflows":     types.ListType{ElemType: types.StringType},
+			}}, repoObjs)
+		}
 
 		state.Org = types.ObjectValueMust(map[string]attr.Type{
 			"apply_to_org": types.BoolType,
