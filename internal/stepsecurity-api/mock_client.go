@@ -166,3 +166,14 @@ func (m *MockStepSecurityClient) DeletePRChecksConfig(ctx context.Context, owner
 	args := m.Called(ctx, owner)
 	return args.Error(0)
 }
+
+// GitHub PR Template methods
+func (m *MockStepSecurityClient) GetGitHubPRTemplate(ctx context.Context, owner string) (*GitHubPRTemplate, error) {
+	args := m.Called(ctx, owner)
+	return args.Get(0).(*GitHubPRTemplate), args.Error(1)
+}
+
+func (m *MockStepSecurityClient) UpdateGitHubPRTemplate(ctx context.Context, owner string, template GitHubPRTemplate) error {
+	args := m.Called(ctx, owner, template)
+	return args.Error(0)
+}
