@@ -79,6 +79,14 @@ func (m *MockStepSecurityClient) DeletePolicyDrivenPRPolicy(ctx context.Context,
 	return args.Error(0)
 }
 
+func (m *MockStepSecurityClient) GetSubscriptionStatus(ctx context.Context, owner, repo string) (*SubscriptionStatus, error) {
+	args := m.Called(ctx, owner, repo)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).(*SubscriptionStatus), args.Error(1)
+}
+
 func (m *MockStepSecurityClient) CreateGitHubPolicyStorePolicy(ctx context.Context, policy *GitHubPolicyStorePolicy) error {
 	args := m.Called(ctx, policy)
 	return args.Error(0)

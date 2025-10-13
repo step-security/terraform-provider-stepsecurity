@@ -17,6 +17,7 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/types"
 	"github.com/hashicorp/terraform-plugin-framework/types/basetypes"
+	"github.com/hashicorp/terraform-plugin-log/tflog"
 )
 
 // Ensure the implementation satisfies the expected interfaces.
@@ -24,6 +25,7 @@ var (
 	_ resource.Resource                   = &policyDrivenPRResource{}
 	_ resource.ResourceWithConfigure      = &policyDrivenPRResource{}
 	_ resource.ResourceWithValidateConfig = &policyDrivenPRResource{}
+	_ resource.ResourceWithModifyPlan     = &policyDrivenPRResource{}
 	_ resource.ResourceWithImportState    = &policyDrivenPRResource{}
 )
 
@@ -119,6 +121,12 @@ func (r *policyDrivenPRResource) Schema(_ context.Context, _ resource.SchemaRequ
 						Description: "When enabled, this creates a PR/issue to restrict GitHub token permissions. GitHub's Security Hardening guide recommends restricting permissions to the minimum required",
 						Default:     booldefault.StaticBool(false),
 					},
+					"secure_docker_file": schema.BoolAttribute{
+						Optional:    true,
+						Computed:    true,
+						Description: "When enabled, this creates a PR/issue to secure Dockerfile by pinning base images to SHA.",
+						Default:     booldefault.StaticBool(false),
+					},
 					"actions_to_exempt_while_pinning": schema.ListAttribute{
 						ElementType: types.StringType,
 						Optional:    true,
@@ -143,12 +151,68 @@ func (r *policyDrivenPRResource) Schema(_ context.Context, _ resource.SchemaRequ
 							),
 						),
 					},
+					"update_precommit_file": schema.ListAttribute{
+						ElementType: types.StringType,
+						Optional:    true,
+						Computed:    true,
+						Description: "List of pre-commit file paths to update (e.g., ['.pre-commit-config.yaml']).",
+						Default: listdefault.StaticValue(
+							types.ListValueMust(
+								types.StringType,
+								[]attr.Value{},
+							),
+						),
+					},
+					"package_ecosystem": schema.ListNestedAttribute{
+						Optional:    true,
+						Description: "List of package ecosystems to enable for dependency updates.",
+						NestedObject: schema.NestedAttributeObject{
+							Attributes: map[string]schema.Attribute{
+								"package": schema.StringAttribute{
+									Required:    true,
+									Description: "Package ecosystem (e.g., 'npm', 'pip', 'docker').",
+								},
+								"interval": schema.StringAttribute{
+									Required:    true,
+									Description: "Update interval (e.g., 'daily', 'weekly', 'monthly').",
+								},
+							},
+						},
+					},
+					"add_workflows": schema.StringAttribute{
+						Optional:    true,
+						Description: "Additional workflows to add as part of policy-driven PR.",
+					},
 				},
 			},
 			"selected_repos": schema.ListAttribute{
 				ElementType: types.StringType,
 				Required:    true,
-				Description: "List of repositories to apply the policy-driven PR to. Can provide ['*'] to apply to all current and future repositories.",
+				Description: "List of repositories to apply the policy-driven PR to. Use ['*'] to apply to all repositories.",
+			},
+			"excluded_repos": schema.ListAttribute{
+				ElementType: types.StringType,
+				Optional:    true,
+				Computed:    true,
+				Description: "List of repositories to exclude when selected_repos is ['*']. Only valid when applying org-level config to all repos.",
+				Default: listdefault.StaticValue(
+					types.ListValueMust(
+						types.StringType,
+						[]attr.Value{},
+					),
+				),
+			},
+			"use_repo_level_config": schema.BoolAttribute{
+				Optional:    true,
+				Computed:    true,
+				Description: "Set to true to apply configuration at repo level. Only one of use_repo_level_config or use_org_level_config can be true.",
+				Default:     booldefault.StaticBool(false),
+			},
+			"use_org_level_config": schema.BoolAttribute{
+				Optional:    true,
+				Computed:    true,
+				Description: "Set to true to apply configuration at org level. Only one of use_repo_level_config or use_org_level_config can be true.",
+				Default:     booldefault.StaticBool(false),
 			},
 		},
 	}
@@ -182,17 +246,29 @@ type policyDrivenPRModel struct {
 	Owner                 types.String `tfsdk:"owner"`
 	AutoRemdiationOptions types.Object `tfsdk:"auto_remediation_options"`
 	SelectedRepos         types.List   `tfsdk:"selected_repos"`
+	ExcludedRepos         types.List   `tfsdk:"excluded_repos"`
+	UseRepoLevelConfig    types.Bool   `tfsdk:"use_repo_level_config"`
+	UseOrgLevelConfig     types.Bool   `tfsdk:"use_org_level_config"`
 }
 
 type autoRemdiationOptionsModel struct {
-	CreatePR                                types.Bool `tfsdk:"create_pr"`
-	CreateIssue                             types.Bool `tfsdk:"create_issue"`
-	CreateGitHubAdvancedSecurityAlert       types.Bool `tfsdk:"create_github_advanced_security_alert"`
-	PinActionsToSHA                         types.Bool `tfsdk:"pin_actions_to_sha"`
-	HardenGitHubHostedRunner                types.Bool `tfsdk:"harden_github_hosted_runner"`
-	RestrictGitHubTokenPermissions          types.Bool `tfsdk:"restrict_github_token_permissions"`
-	ActionsToExemptWhilePinning             types.List `tfsdk:"actions_to_exempt_while_pinning"`
-	ActionsToReplaceWithStepSecurityActions types.List `tfsdk:"actions_to_replace_with_step_security_actions"`
+	CreatePR                                types.Bool   `tfsdk:"create_pr"`
+	CreateIssue                             types.Bool   `tfsdk:"create_issue"`
+	CreateGitHubAdvancedSecurityAlert       types.Bool   `tfsdk:"create_github_advanced_security_alert"`
+	PinActionsToSHA                         types.Bool   `tfsdk:"pin_actions_to_sha"`
+	HardenGitHubHostedRunner                types.Bool   `tfsdk:"harden_github_hosted_runner"`
+	RestrictGitHubTokenPermissions          types.Bool   `tfsdk:"restrict_github_token_permissions"`
+	SecureDockerFile                        types.Bool   `tfsdk:"secure_docker_file"`
+	ActionsToExemptWhilePinning             types.List   `tfsdk:"actions_to_exempt_while_pinning"`
+	ActionsToReplaceWithStepSecurityActions types.List   `tfsdk:"actions_to_replace_with_step_security_actions"`
+	UpdatePrecommitFile                     types.List   `tfsdk:"update_precommit_file"`
+	PackageEcosystem                        types.List   `tfsdk:"package_ecosystem"`
+	AddWorkflows                            types.String `tfsdk:"add_workflows"`
+}
+
+type packageEcosystemModel struct {
+	Package  types.String `tfsdk:"package"`
+	Interval types.String `tfsdk:"interval"`
 }
 
 type ActionsToReplaceModel struct {
@@ -213,6 +289,42 @@ func (r *policyDrivenPRResource) ValidateConfig(ctx context.Context, req resourc
 			"Selected Repos is required",
 			"At least one repo is required in selected_repos",
 		)
+		return
+	}
+
+	// Get selected repos
+	var selectedRepos []string
+	elements := config.SelectedRepos.Elements()
+	for _, elem := range elements {
+		selectedRepos = append(selectedRepos, elem.(types.String).ValueString())
+	}
+
+	// Validate use_org_level_config and use_repo_level_config
+	useOrgLevel := !config.UseOrgLevelConfig.IsNull() && config.UseOrgLevelConfig.ValueBool()
+	useRepoLevel := !config.UseRepoLevelConfig.IsNull() && config.UseRepoLevelConfig.ValueBool()
+
+	if useOrgLevel && useRepoLevel {
+		resp.Diagnostics.AddError(
+			"Invalid Configuration",
+			"use_org_level_config and use_repo_level_config cannot both be true. Choose one.",
+		)
+	}
+
+	if !useOrgLevel && !useRepoLevel {
+		resp.Diagnostics.AddError(
+			"Invalid Configuration",
+			"Either use_org_level_config or use_repo_level_config must be set to true.",
+		)
+	}
+
+	// Validate excluded_repos only makes sense with org-level config
+	if !config.ExcludedRepos.IsNull() && len(config.ExcludedRepos.Elements()) > 0 {
+		if !useOrgLevel {
+			resp.Diagnostics.AddError(
+				"Invalid Configuration",
+				"excluded_repos can only be used when use_org_level_config is true",
+			)
+		}
 	}
 
 	// Extract auto_remediation_options for validation
@@ -239,6 +351,97 @@ func (r *policyDrivenPRResource) ValidateConfig(ctx context.Context, req resourc
 				"GitHub Advanced Security Alert can only be triggered when issue creation is enabled",
 			)
 		}
+
+	}
+}
+
+// ModifyPlan is called during terraform plan to check v2 features and show warnings
+func (r *policyDrivenPRResource) ModifyPlan(ctx context.Context, req resource.ModifyPlanRequest, resp *resource.ModifyPlanResponse) {
+	// If the entire plan is null, the resource is being destroyed, so we don't need to validate
+	if req.Plan.Raw.IsNull() {
+		return
+	}
+
+	// If the state is null, this is a create operation
+	// If both state and plan are present, this is an update operation
+	var plan policyDrivenPRModel
+	diags := req.Plan.Get(ctx, &plan)
+	resp.Diagnostics.Append(diags...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+
+	// Extract auto_remediation_options
+	if plan.AutoRemdiationOptions.IsNull() || plan.AutoRemdiationOptions.IsUnknown() {
+		return
+	}
+
+	var options autoRemdiationOptionsModel
+	diags = plan.AutoRemdiationOptions.As(ctx, &options, basetypes.ObjectAsOptions{})
+	resp.Diagnostics.Append(diags...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+
+	// Check v2 features during plan phase
+	hasUpdatePrecommit := !options.UpdatePrecommitFile.IsNull() && !options.UpdatePrecommitFile.IsUnknown() && len(options.UpdatePrecommitFile.Elements()) > 0
+	hasPackageEcosystem := !options.PackageEcosystem.IsNull() && !options.PackageEcosystem.IsUnknown() && len(options.PackageEcosystem.Elements()) > 0
+	hasAddWorkflows := !options.AddWorkflows.IsNull() && !options.AddWorkflows.IsUnknown() && options.AddWorkflows.ValueString() != ""
+	hasV2Features := hasUpdatePrecommit || hasPackageEcosystem || hasAddWorkflows
+
+	if !hasV2Features {
+		return
+	}
+
+	// Get selected repos to determine which repo to check
+	var selectedRepos []string
+	if !plan.SelectedRepos.IsNull() {
+		elements := plan.SelectedRepos.Elements()
+		selectedRepos = make([]string, len(elements))
+		for i, elem := range elements {
+			selectedRepos[i] = elem.(types.String).ValueString()
+		}
+	}
+
+	// Determine which repo to check for subscription status
+	checkRepo := "[all]"
+	if len(selectedRepos) > 0 && selectedRepos[0] != "*" {
+		checkRepo = selectedRepos[0]
+	}
+
+	status, err := r.client.GetSubscriptionStatus(ctx, plan.Owner.ValueString(), checkRepo)
+
+	if err != nil {
+		tflog.Warn(ctx, "Failed to check subscription status during plan, skipping v2 validation", map[string]interface{}{
+			"error": err.Error(),
+		})
+		return
+	}
+
+	if status == nil {
+		tflog.Warn(ctx, "Subscription status returned nil during plan, skipping v2 validation", map[string]interface{}{})
+		return
+	}
+
+	v2Enabled := status.AppFeatureFlags.IsPolicyDrivenPrV2Enabled
+
+	if !v2Enabled {
+		warningMessage := "Policy-driven PR v2 is not enabled for this subscription. The following v2-only features will be ignored:\n"
+		if hasUpdatePrecommit {
+			warningMessage += "- update_precommit_file\n"
+		}
+		if hasPackageEcosystem {
+			warningMessage += "- package_ecosystem\n"
+		}
+		if hasAddWorkflows {
+			warningMessage += "- add_workflows\n"
+		}
+		warningMessage += "\nTo use these features, please upgrade your subscription to enable policy-driven PR v2."
+
+		resp.Diagnostics.AddWarning(
+			"Policy-driven PR v2 Not Enabled",
+			warningMessage,
+		)
 	}
 }
 
@@ -269,6 +472,15 @@ func (r *policyDrivenPRResource) Create(ctx context.Context, req resource.Create
 		}
 	}
 
+	var excludedRepos []string
+	if !plan.ExcludedRepos.IsNull() {
+		elements := plan.ExcludedRepos.Elements()
+		excludedRepos = make([]string, len(elements))
+		for i, elem := range elements {
+			excludedRepos[i] = elem.(types.String).ValueString()
+		}
+	}
+
 	var actionsToExempt []string
 	if !options.ActionsToExemptWhilePinning.IsNull() {
 		elements := options.ActionsToExemptWhilePinning.Elements()
@@ -287,6 +499,35 @@ func (r *policyDrivenPRResource) Create(ctx context.Context, req resource.Create
 		}
 	}
 
+	// Extract new optional fields
+	var packageEcosystem []stepsecurityapi.DependabotConfig
+	if !options.PackageEcosystem.IsNull() {
+		var ecosystemModels []packageEcosystemModel
+		diags := options.PackageEcosystem.ElementsAs(ctx, &ecosystemModels, false)
+		resp.Diagnostics.Append(diags...)
+		if !resp.Diagnostics.HasError() {
+			for _, model := range ecosystemModels {
+				packageEcosystem = append(packageEcosystem, stepsecurityapi.DependabotConfig{
+					Package:  model.Package.ValueString(),
+					Interval: model.Interval.ValueString(),
+				})
+			}
+		}
+	}
+
+	var updatePrecommitFile []string
+	if !options.UpdatePrecommitFile.IsNull() {
+		elements := options.UpdatePrecommitFile.Elements()
+		updatePrecommitFile = make([]string, len(elements))
+		for i, elem := range elements {
+			updatePrecommitFile[i] = elem.(types.String).ValueString()
+		}
+	}
+
+	// Get config levels from plan
+	useOrgLevel := plan.UseOrgLevelConfig.ValueBool()
+	useRepoLevel := plan.UseRepoLevelConfig.ValueBool()
+
 	// convert to stepsecurityapi.PolicyDrivenPRPolicy
 	stepSecurityPolicy := stepsecurityapi.PolicyDrivenPRPolicy{
 		Owner: plan.Owner.ValueString(),
@@ -297,10 +538,16 @@ func (r *policyDrivenPRResource) Create(ctx context.Context, req resource.Create
 			PinActionsToSHA:                         options.PinActionsToSHA.ValueBool(),
 			HardenGitHubHostedRunner:                options.HardenGitHubHostedRunner.ValueBool(),
 			RestrictGitHubTokenPermissions:          options.RestrictGitHubTokenPermissions.ValueBool(),
+			SecureDockerFile:                        options.SecureDockerFile.ValueBool(),
 			ActionsToExemptWhilePinning:             actionsToExempt,
 			ActionsToReplaceWithStepSecurityActions: actionsToReplace,
+			UpdatePrecommitFile:                     updatePrecommitFile,
+			PackageEcosystem:                        packageEcosystem,
+			AddWorkflows:                            options.AddWorkflows.ValueString(),
 		},
-		SelectedRepos: selectedRepos,
+		SelectedRepos:      selectedRepos,
+		UseRepoLevelConfig: useRepoLevel,
+		UseOrgLevelConfig:  useOrgLevel,
 	}
 
 	// Create policy-driven PR in StepSecurity
@@ -311,6 +558,18 @@ func (r *policyDrivenPRResource) Create(ctx context.Context, req resource.Create
 			err.Error(),
 		)
 		return
+	}
+
+	// Handle Scenario 4: Opt-out specific repos by deleting their configs
+	if len(selectedRepos) == 1 && selectedRepos[0] == "*" && len(excludedRepos) > 0 {
+		err = r.client.DeletePolicyDrivenPRPolicy(ctx, plan.Owner.ValueString(), excludedRepos)
+		if err != nil {
+			resp.Diagnostics.AddError(
+				"Unable to Exclude Repos from Policy-Driven PR",
+				fmt.Sprintf("Failed to exclude repos: %s", err.Error()),
+			)
+			return
+		}
 	}
 
 	// Set the ID (use owner as the unique identifier)
@@ -380,6 +639,15 @@ func (r *policyDrivenPRResource) Update(ctx context.Context, req resource.Update
 		}
 	}
 
+	var stateExcludedRepos []string
+	if !state.ExcludedRepos.IsNull() {
+		elements := state.ExcludedRepos.Elements()
+		stateExcludedRepos = make([]string, len(elements))
+		for i, elem := range elements {
+			stateExcludedRepos[i] = elem.(types.String).ValueString()
+		}
+	}
+
 	var planRepos []string
 	if !plan.SelectedRepos.IsNull() {
 		elements := plan.SelectedRepos.Elements()
@@ -389,10 +657,38 @@ func (r *policyDrivenPRResource) Update(ctx context.Context, req resource.Update
 		}
 	}
 
+	var planExcludedRepos []string
+	if !plan.ExcludedRepos.IsNull() {
+		elements := plan.ExcludedRepos.Elements()
+		planExcludedRepos = make([]string, len(elements))
+		for i, elem := range elements {
+			planExcludedRepos[i] = elem.(types.String).ValueString()
+		}
+	}
+
+	// Determine repos to be removed
 	var removedRepos []string
-	for _, repo := range stateRepos {
-		if !slices.Contains(planRepos, repo) {
-			removedRepos = append(removedRepos, repo)
+
+	// If switching from org-level to repo-level, need to delete org config
+	stateIsOrgLevel := len(stateRepos) == 1 && stateRepos[0] == "*"
+	planIsOrgLevel := len(planRepos) == 1 && planRepos[0] == "*"
+
+	if stateIsOrgLevel && !planIsOrgLevel {
+		// Switching from org-level to repo-level
+		removedRepos = append(removedRepos, "*")
+	} else if !stateIsOrgLevel && !planIsOrgLevel {
+		// Both repo-level, check for removed repos
+		for _, repo := range stateRepos {
+			if !slices.Contains(planRepos, repo) {
+				removedRepos = append(removedRepos, repo)
+			}
+		}
+	}
+
+	// Handle repos that were excluded in state but not in plan (need to add them back)
+	for _, repo := range stateExcludedRepos {
+		if !slices.Contains(planExcludedRepos, repo) {
+			// Repo was excluded before but not anymore, will be added by create call
 		}
 	}
 
@@ -422,6 +718,35 @@ func (r *policyDrivenPRResource) Update(ctx context.Context, req resource.Update
 		}
 	}
 
+	// Extract new optional fields for update
+	var packageEcosystemPlan []stepsecurityapi.DependabotConfig
+	if !planOptions.PackageEcosystem.IsNull() {
+		var ecosystemModels []packageEcosystemModel
+		diags := planOptions.PackageEcosystem.ElementsAs(ctx, &ecosystemModels, false)
+		resp.Diagnostics.Append(diags...)
+		if !resp.Diagnostics.HasError() {
+			for _, model := range ecosystemModels {
+				packageEcosystemPlan = append(packageEcosystemPlan, stepsecurityapi.DependabotConfig{
+					Package:  model.Package.ValueString(),
+					Interval: model.Interval.ValueString(),
+				})
+			}
+		}
+	}
+
+	var updatePrecommitFilePlan []string
+	if !planOptions.UpdatePrecommitFile.IsNull() {
+		elements := planOptions.UpdatePrecommitFile.Elements()
+		updatePrecommitFilePlan = make([]string, len(elements))
+		for i, elem := range elements {
+			updatePrecommitFilePlan[i] = elem.(types.String).ValueString()
+		}
+	}
+
+	// Get config levels from plan
+	useOrgLevel := plan.UseOrgLevelConfig.ValueBool()
+	useRepoLevel := plan.UseRepoLevelConfig.ValueBool()
+
 	policy := stepsecurityapi.PolicyDrivenPRPolicy{
 		Owner: plan.Owner.ValueString(),
 		AutoRemdiationOptions: stepsecurityapi.AutoRemdiationOptions{
@@ -431,10 +756,16 @@ func (r *policyDrivenPRResource) Update(ctx context.Context, req resource.Update
 			PinActionsToSHA:                         planOptions.PinActionsToSHA.ValueBool(),
 			HardenGitHubHostedRunner:                planOptions.HardenGitHubHostedRunner.ValueBool(),
 			RestrictGitHubTokenPermissions:          planOptions.RestrictGitHubTokenPermissions.ValueBool(),
+			SecureDockerFile:                        planOptions.SecureDockerFile.ValueBool(),
 			ActionsToExemptWhilePinning:             actionsToExempt,
 			ActionsToReplaceWithStepSecurityActions: actionsToReplace,
+			UpdatePrecommitFile:                     updatePrecommitFilePlan,
+			PackageEcosystem:                        packageEcosystemPlan,
+			AddWorkflows:                            planOptions.AddWorkflows.ValueString(),
 		},
-		SelectedRepos: planRepos,
+		SelectedRepos:      planRepos,
+		UseRepoLevelConfig: useRepoLevel,
+		UseOrgLevelConfig:  useOrgLevel,
 	}
 
 	// Update policy-driven PR in StepSecurity
@@ -445,6 +776,21 @@ func (r *policyDrivenPRResource) Update(ctx context.Context, req resource.Update
 			err.Error(),
 		)
 		return
+	}
+
+	// Handle newly excluded repos for Scenario 4
+	for _, repo := range planExcludedRepos {
+		if !slices.Contains(stateExcludedRepos, repo) {
+			// New exclusion - delete the config for this repo
+			err = r.client.DeletePolicyDrivenPRPolicy(ctx, plan.Owner.ValueString(), []string{repo})
+			if err != nil {
+				resp.Diagnostics.AddError(
+					"Unable to Exclude Repo from Policy-Driven PR",
+					fmt.Sprintf("Failed to exclude repo %s: %s", repo, err.Error()),
+				)
+				return
+			}
+		}
 	}
 
 	// Set the ID (use owner as the unique identifier)
@@ -506,6 +852,59 @@ func (r *policyDrivenPRResource) updatePolicyDrivenPRState(ctx context.Context, 
 	}
 	replaceList, _ := types.ListValueFrom(ctx, types.StringType, replaceElements)
 
+	// Handle new optional fields
+	var packageEcosystemList types.List
+	if len(stepSecurityPolicy.AutoRemdiationOptions.PackageEcosystem) > 0 {
+		var ecosystemObjects []attr.Value
+		for _, ecosystem := range stepSecurityPolicy.AutoRemdiationOptions.PackageEcosystem {
+			obj, _ := types.ObjectValue(
+				map[string]attr.Type{
+					"package":  types.StringType,
+					"interval": types.StringType,
+				},
+				map[string]attr.Value{
+					"package":  types.StringValue(ecosystem.Package),
+					"interval": types.StringValue(ecosystem.Interval),
+				},
+			)
+			ecosystemObjects = append(ecosystemObjects, obj)
+		}
+		packageEcosystemList, _ = types.ListValue(
+			types.ObjectType{
+				AttrTypes: map[string]attr.Type{
+					"package":  types.StringType,
+					"interval": types.StringType,
+				},
+			},
+			ecosystemObjects,
+		)
+	} else {
+		packageEcosystemList = types.ListNull(types.ObjectType{
+			AttrTypes: map[string]attr.Type{
+				"package":  types.StringType,
+				"interval": types.StringType,
+			},
+		})
+	}
+
+	var updatePrecommitFileList types.List
+	if len(stepSecurityPolicy.AutoRemdiationOptions.UpdatePrecommitFile) > 0 {
+		fileElements := make([]types.String, len(stepSecurityPolicy.AutoRemdiationOptions.UpdatePrecommitFile))
+		for i, file := range stepSecurityPolicy.AutoRemdiationOptions.UpdatePrecommitFile {
+			fileElements[i] = types.StringValue(file)
+		}
+		updatePrecommitFileList, _ = types.ListValueFrom(ctx, types.StringType, fileElements)
+	} else {
+		updatePrecommitFileList = types.ListNull(types.StringType)
+	}
+
+	var addWorkflowsValue types.String
+	if stepSecurityPolicy.AutoRemdiationOptions.AddWorkflows != "" {
+		addWorkflowsValue = types.StringValue(stepSecurityPolicy.AutoRemdiationOptions.AddWorkflows)
+	} else {
+		addWorkflowsValue = types.StringNull()
+	}
+
 	optionsObj, _ := types.ObjectValue(
 		map[string]attr.Type{
 			"create_pr":                                     types.BoolType,
@@ -514,8 +913,19 @@ func (r *policyDrivenPRResource) updatePolicyDrivenPRState(ctx context.Context, 
 			"harden_github_hosted_runner":                   types.BoolType,
 			"pin_actions_to_sha":                            types.BoolType,
 			"restrict_github_token_permissions":             types.BoolType,
+			"secure_docker_file":                            types.BoolType,
 			"actions_to_exempt_while_pinning":               types.ListType{ElemType: types.StringType},
 			"actions_to_replace_with_step_security_actions": types.ListType{ElemType: types.StringType},
+			"update_precommit_file":                         types.ListType{ElemType: types.StringType},
+			"package_ecosystem": types.ListType{
+				ElemType: types.ObjectType{
+					AttrTypes: map[string]attr.Type{
+						"package":  types.StringType,
+						"interval": types.StringType,
+					},
+				},
+			},
+			"add_workflows": types.StringType,
 		},
 		map[string]attr.Value{
 			"create_pr":                                     types.BoolValue(stepSecurityPolicy.AutoRemdiationOptions.CreatePR),
@@ -524,11 +934,19 @@ func (r *policyDrivenPRResource) updatePolicyDrivenPRState(ctx context.Context, 
 			"harden_github_hosted_runner":                   types.BoolValue(stepSecurityPolicy.AutoRemdiationOptions.HardenGitHubHostedRunner),
 			"pin_actions_to_sha":                            types.BoolValue(stepSecurityPolicy.AutoRemdiationOptions.PinActionsToSHA),
 			"restrict_github_token_permissions":             types.BoolValue(stepSecurityPolicy.AutoRemdiationOptions.RestrictGitHubTokenPermissions),
+			"secure_docker_file":                            types.BoolValue(stepSecurityPolicy.AutoRemdiationOptions.SecureDockerFile),
 			"actions_to_exempt_while_pinning":               exemptList,
 			"actions_to_replace_with_step_security_actions": replaceList,
+			"update_precommit_file":                         updatePrecommitFileList,
+			"package_ecosystem":                             packageEcosystemList,
+			"add_workflows":                                 addWorkflowsValue,
 		},
 	)
 	state.AutoRemdiationOptions = optionsObj
+
+	// Set config level fields
+	state.UseRepoLevelConfig = types.BoolValue(stepSecurityPolicy.UseRepoLevelConfig)
+	state.UseOrgLevelConfig = types.BoolValue(stepSecurityPolicy.UseOrgLevelConfig)
 
 	// Only update selected_repos if it's null/unknown (preserve planned values)
 	if state.SelectedRepos.IsNull() || state.SelectedRepos.IsUnknown() {
