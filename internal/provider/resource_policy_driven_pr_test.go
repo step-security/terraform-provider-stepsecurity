@@ -315,11 +315,11 @@ func TestPolicyDrivenPRResource_ClientInteraction(t *testing.T) {
 
 			// Create mock client
 			mockClient := &stepsecurityapi.MockStepSecurityClient{}
-			mockClient.On("GetPolicyDrivenPRPolicy", mock.Anything, "test-org").Return(tc.mockResponse, tc.mockError)
+			mockClient.On("GetPolicyDrivenPRPolicy", mock.Anything, "test-org", mock.Anything).Return(tc.mockResponse, tc.mockError)
 
 			// Test the core client interaction logic directly
 			ctx := context.Background()
-			policy, err := mockClient.GetPolicyDrivenPRPolicy(ctx, "test-org")
+			policy, err := mockClient.GetPolicyDrivenPRPolicy(ctx, "test-org", []string{})
 
 			if tc.expectedError {
 				if err == nil {

@@ -64,7 +64,12 @@ func (m *MockStepSecurityClient) CreatePolicyDrivenPRPolicy(ctx context.Context,
 	return args.Error(0)
 }
 
-func (m *MockStepSecurityClient) GetPolicyDrivenPRPolicy(ctx context.Context, owner string) (*PolicyDrivenPRPolicy, error) {
+func (m *MockStepSecurityClient) GetPolicyDrivenPRPolicy(ctx context.Context, owner string, repos []string) (*PolicyDrivenPRPolicy, error) {
+	args := m.Called(ctx, owner, repos)
+	return args.Get(0).(*PolicyDrivenPRPolicy), args.Error(1)
+}
+
+func (m *MockStepSecurityClient) DiscoverPolicyDrivenPRConfig(ctx context.Context, owner string) (*PolicyDrivenPRPolicy, error) {
 	args := m.Called(ctx, owner)
 	return args.Get(0).(*PolicyDrivenPRPolicy), args.Error(1)
 }
@@ -111,7 +116,6 @@ func (m *MockStepSecurityClient) DetachGitHubPolicyStorePolicy(ctx context.Conte
 	args := m.Called(ctx, owner, policyName)
 	return args.Error(0)
 }
-
 
 func (m *MockStepSecurityClient) CreateSuppressionRule(ctx context.Context, rule SuppressionRule) (*SuppressionRule, error) {
 	args := m.Called(ctx, rule)

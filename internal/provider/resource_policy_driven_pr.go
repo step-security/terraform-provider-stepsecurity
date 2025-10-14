@@ -8,7 +8,6 @@ import (
 	stepsecurityapi "github.com/step-security/terraform-provider-stepsecurity/internal/stepsecurity-api"
 
 	"github.com/hashicorp/terraform-plugin-framework/attr"
-	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/booldefault"
@@ -194,7 +193,7 @@ func (r *policyDrivenPRResource) Schema(_ context.Context, _ resource.SchemaRequ
 				ElementType: types.StringType,
 				Optional:    true,
 				Computed:    true,
-				Description: "List of repositories to exclude when selected_repos is ['*']. Only valid when applying org-level config to all repos.",
+				Description: "List of repositories to exclude when selected_repos is ['*']. It restores their original configs (preserving configs from other Terraform resources) or deletes configs for repos that had none.",
 				Default: listdefault.StaticValue(
 					types.ListValueMust(
 						types.StringType,
@@ -223,22 +222,152 @@ func (r *policyDrivenPRResource) ImportState(ctx context.Context, req resource.I
 	// The import ID should be the owner name
 	owner := req.ID
 
-	// Set the owner in the state
-	resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("owner"), owner)...)
-
-	// Now call Read to populate the rest of the state
-	readReq := resource.ReadRequest{
-		State: resp.State,
+	// Discover the policy configuration for this owner
+	policy, err := r.client.DiscoverPolicyDrivenPRConfig(ctx, owner)
+	if err != nil {
+		resp.Diagnostics.AddError(
+			"Unable to Import Policy-Driven PR",
+			fmt.Sprintf("Failed to discover policy configuration: %s", err.Error()),
+		)
+		return
 	}
-	readResp := &resource.ReadResponse{
-		State: resp.State,
+
+	if policy == nil || len(policy.SelectedRepos) == 0 {
+		resp.Diagnostics.AddError(
+			"Unable to Import Policy-Driven PR",
+			fmt.Sprintf("No policy-driven PR configuration found for owner '%s'", owner),
+		)
+		return
 	}
 
-	r.Read(ctx, readReq, readResp)
+	// Convert the discovered policy to Terraform state
+	var state policyDrivenPRModel
+	state.ID = types.StringValue(owner)
+	state.Owner = types.StringValue(owner)
 
-	// Copy any diagnostics and updated state from Read
-	resp.Diagnostics.Append(readResp.Diagnostics...)
-	resp.State = readResp.State
+	// Set selected_repos
+	repoElements := make([]types.String, len(policy.SelectedRepos))
+	for i, repo := range policy.SelectedRepos {
+		repoElements[i] = types.StringValue(repo)
+	}
+	repoList, _ := types.ListValueFrom(ctx, types.StringType, repoElements)
+	state.SelectedRepos = repoList
+
+	// Set excluded_repos (empty by default for import)
+	state.ExcludedRepos = types.ListValueMust(types.StringType, []attr.Value{})
+
+	// Set config levels
+	state.UseRepoLevelConfig = types.BoolValue(policy.UseRepoLevelConfig)
+	state.UseOrgLevelConfig = types.BoolValue(policy.UseOrgLevelConfig)
+
+	// Set auto_remediation_options
+	exemptElements := make([]types.String, len(policy.AutoRemdiationOptions.ActionsToExemptWhilePinning))
+	for i, action := range policy.AutoRemdiationOptions.ActionsToExemptWhilePinning {
+		exemptElements[i] = types.StringValue(action)
+	}
+	exemptList, _ := types.ListValueFrom(ctx, types.StringType, exemptElements)
+
+	replaceElements := make([]types.String, len(policy.AutoRemdiationOptions.ActionsToReplaceWithStepSecurityActions))
+	for i, action := range policy.AutoRemdiationOptions.ActionsToReplaceWithStepSecurityActions {
+		replaceElements[i] = types.StringValue(action)
+	}
+	replaceList, _ := types.ListValueFrom(ctx, types.StringType, replaceElements)
+
+	var packageEcosystemList types.List
+	if len(policy.AutoRemdiationOptions.PackageEcosystem) > 0 {
+		var ecosystemObjects []attr.Value
+		for _, ecosystem := range policy.AutoRemdiationOptions.PackageEcosystem {
+			obj, _ := types.ObjectValue(
+				map[string]attr.Type{
+					"package":  types.StringType,
+					"interval": types.StringType,
+				},
+				map[string]attr.Value{
+					"package":  types.StringValue(ecosystem.Package),
+					"interval": types.StringValue(ecosystem.Interval),
+				},
+			)
+			ecosystemObjects = append(ecosystemObjects, obj)
+		}
+		packageEcosystemList, _ = types.ListValue(
+			types.ObjectType{
+				AttrTypes: map[string]attr.Type{
+					"package":  types.StringType,
+					"interval": types.StringType,
+				},
+			},
+			ecosystemObjects,
+		)
+	} else {
+		packageEcosystemList = types.ListNull(types.ObjectType{
+			AttrTypes: map[string]attr.Type{
+				"package":  types.StringType,
+				"interval": types.StringType,
+			},
+		})
+	}
+
+	var updatePrecommitFileList types.List
+	if len(policy.AutoRemdiationOptions.UpdatePrecommitFile) > 0 {
+		fileElements := make([]types.String, len(policy.AutoRemdiationOptions.UpdatePrecommitFile))
+		for i, file := range policy.AutoRemdiationOptions.UpdatePrecommitFile {
+			fileElements[i] = types.StringValue(file)
+		}
+		updatePrecommitFileList, _ = types.ListValueFrom(ctx, types.StringType, fileElements)
+	} else {
+		// Return empty list instead of null to match schema default
+		updatePrecommitFileList = types.ListValueMust(types.StringType, []attr.Value{})
+	}
+
+	var addWorkflowsValue types.String
+	if policy.AutoRemdiationOptions.AddWorkflows != "" {
+		addWorkflowsValue = types.StringValue(policy.AutoRemdiationOptions.AddWorkflows)
+	} else {
+		addWorkflowsValue = types.StringNull()
+	}
+
+	optionsObj, _ := types.ObjectValue(
+		map[string]attr.Type{
+			"create_pr":                                     types.BoolType,
+			"create_issue":                                  types.BoolType,
+			"create_github_advanced_security_alert":         types.BoolType,
+			"harden_github_hosted_runner":                   types.BoolType,
+			"pin_actions_to_sha":                            types.BoolType,
+			"restrict_github_token_permissions":             types.BoolType,
+			"secure_docker_file":                            types.BoolType,
+			"actions_to_exempt_while_pinning":               types.ListType{ElemType: types.StringType},
+			"actions_to_replace_with_step_security_actions": types.ListType{ElemType: types.StringType},
+			"update_precommit_file":                         types.ListType{ElemType: types.StringType},
+			"package_ecosystem": types.ListType{
+				ElemType: types.ObjectType{
+					AttrTypes: map[string]attr.Type{
+						"package":  types.StringType,
+						"interval": types.StringType,
+					},
+				},
+			},
+			"add_workflows": types.StringType,
+		},
+		map[string]attr.Value{
+			"create_pr":                                     types.BoolValue(policy.AutoRemdiationOptions.CreatePR),
+			"create_issue":                                  types.BoolValue(policy.AutoRemdiationOptions.CreateIssue),
+			"create_github_advanced_security_alert":         types.BoolValue(policy.AutoRemdiationOptions.CreateGitHubAdvancedSecurityAlert),
+			"harden_github_hosted_runner":                   types.BoolValue(policy.AutoRemdiationOptions.HardenGitHubHostedRunner),
+			"pin_actions_to_sha":                            types.BoolValue(policy.AutoRemdiationOptions.PinActionsToSHA),
+			"restrict_github_token_permissions":             types.BoolValue(policy.AutoRemdiationOptions.RestrictGitHubTokenPermissions),
+			"secure_docker_file":                            types.BoolValue(policy.AutoRemdiationOptions.SecureDockerFile),
+			"actions_to_exempt_while_pinning":               exemptList,
+			"actions_to_replace_with_step_security_actions": replaceList,
+			"update_precommit_file":                         updatePrecommitFileList,
+			"package_ecosystem":                             packageEcosystemList,
+			"add_workflows":                                 addWorkflowsValue,
+		},
+	)
+	state.AutoRemdiationOptions = optionsObj
+
+	// Set the state
+	diags := resp.State.Set(ctx, state)
+	resp.Diagnostics.Append(diags...)
 }
 
 type policyDrivenPRModel struct {
@@ -317,12 +446,29 @@ func (r *policyDrivenPRResource) ValidateConfig(ctx context.Context, req resourc
 		)
 	}
 
-	// Validate excluded_repos only makes sense with org-level config
+	// Validate wildcard usage with config levels
+	hasWildcard := len(selectedRepos) == 1 && selectedRepos[0] == "*"
+
+	if useRepoLevel && hasWildcard {
+		resp.Diagnostics.AddError(
+			"Invalid Configuration",
+			"selected_repos cannot be ['*'] when use_repo_level_config is true. Wildcard is only supported with org-level config.",
+		)
+	}
+
+	if useOrgLevel && !hasWildcard {
+		resp.Diagnostics.AddError(
+			"Invalid Configuration",
+			"selected_repos must be ['*'] (wildcard) when use_org_level_config is true. Support for org-level config with specific repositories will be added soon.",
+		)
+	}
+
+	// Validate excluded_repos only makes sense with wildcard
 	if !config.ExcludedRepos.IsNull() && len(config.ExcludedRepos.Elements()) > 0 {
-		if !useOrgLevel {
+		if !hasWildcard {
 			resp.Diagnostics.AddError(
 				"Invalid Configuration",
-				"excluded_repos can only be used when use_org_level_config is true",
+				"excluded_repos can only be used when selected_repos is ['*'] (wildcard for all repos)",
 			)
 		}
 	}
@@ -550,6 +696,27 @@ func (r *policyDrivenPRResource) Create(ctx context.Context, req resource.Create
 		UseOrgLevelConfig:  useOrgLevel,
 	}
 
+	// Handle excluded repos: Save their current configs before applying org-level config
+	var excludedRepoConfigs map[string]*stepsecurityapi.PolicyDrivenPRPolicy
+	if len(selectedRepos) == 1 && selectedRepos[0] == "*" && len(excludedRepos) > 0 {
+		excludedRepoConfigs = make(map[string]*stepsecurityapi.PolicyDrivenPRPolicy)
+		for _, repo := range excludedRepos {
+			// Read current config for this excluded repo
+			currentConfig, err := r.client.GetPolicyDrivenPRPolicy(ctx, plan.Owner.ValueString(), []string{repo})
+			if err != nil {
+				tflog.Warn(ctx, "Failed to get current config for excluded repo", map[string]interface{}{
+					"repo":  repo,
+					"error": err.Error(),
+				})
+				continue
+			}
+			// Store the config if it exists and has settings
+			if currentConfig != nil {
+				excludedRepoConfigs[repo] = currentConfig
+			}
+		}
+	}
+
 	// Create policy-driven PR in StepSecurity
 	err := r.client.CreatePolicyDrivenPRPolicy(ctx, stepSecurityPolicy)
 	if err != nil {
@@ -560,8 +727,25 @@ func (r *policyDrivenPRResource) Create(ctx context.Context, req resource.Create
 		return
 	}
 
-	// Handle Scenario 4: Opt-out specific repos by deleting their configs
-	if len(selectedRepos) == 1 && selectedRepos[0] == "*" && len(excludedRepos) > 0 {
+	// Restore original configs for excluded repos to prevent them from inheriting org-level config
+	if len(excludedRepoConfigs) > 0 {
+		for repo, originalConfig := range excludedRepoConfigs {
+			// Restore the original config for this repo
+			originalConfig.SelectedRepos = []string{repo}
+			err = r.client.CreatePolicyDrivenPRPolicy(ctx, *originalConfig)
+			if err != nil {
+				resp.Diagnostics.AddError(
+					"Unable to Restore Config for Excluded Repo",
+					fmt.Sprintf("Failed to restore config for repo %s: %s", repo, err.Error()),
+				)
+				return
+			}
+			tflog.Info(ctx, "Restored original config for excluded repo", map[string]interface{}{
+				"repo": repo,
+			})
+		}
+	} else if len(selectedRepos) == 1 && selectedRepos[0] == "*" && len(excludedRepos) > 0 {
+		// For excluded repos that had no previous config, delete them to prevent inheritance
 		err = r.client.DeletePolicyDrivenPRPolicy(ctx, plan.Owner.ValueString(), excludedRepos)
 		if err != nil {
 			resp.Diagnostics.AddError(
@@ -592,9 +776,38 @@ func (r *policyDrivenPRResource) Read(ctx context.Context, req resource.ReadRequ
 		return
 	}
 
+	// Get current state repos to determine what to query
+	var stateSelectedRepos []string
+	if !state.SelectedRepos.IsNull() {
+		elements := state.SelectedRepos.Elements()
+		stateSelectedRepos = make([]string, len(elements))
+		for i, elem := range elements {
+			stateSelectedRepos[i] = elem.(types.String).ValueString()
+		}
+	}
+
+	var stateExcludedRepos []string
+	if !state.ExcludedRepos.IsNull() {
+		elements := state.ExcludedRepos.Elements()
+		stateExcludedRepos = make([]string, len(elements))
+		for i, elem := range elements {
+			stateExcludedRepos[i] = elem.(types.String).ValueString()
+		}
+	}
+
+	// Query based on what's in the state
+	// For org-level (selected_repos = ["*"]), query org config
+	// For repo-level, query specific repos
+	var reposToQuery []string
+	if len(stateSelectedRepos) == 1 && stateSelectedRepos[0] == "*" {
+		reposToQuery = []string{"*"}
+	} else {
+		reposToQuery = append([]string{}, stateSelectedRepos...)
+	}
+
 	// Get policy-driven PR from StepSecurity
-	stepSecurityPolicy, err := r.client.GetPolicyDrivenPRPolicy(ctx, state.Owner.ValueString())
-	if err != nil || stepSecurityPolicy == nil {
+	stepSecurityPolicy, err := r.client.GetPolicyDrivenPRPolicy(ctx, state.Owner.ValueString(), reposToQuery)
+	if err != nil {
 		resp.Diagnostics.AddError(
 			"Unable to Read Policy-Driven PR",
 			err.Error(),
@@ -602,8 +815,16 @@ func (r *policyDrivenPRResource) Read(ctx context.Context, req resource.ReadRequ
 		return
 	}
 
-	// overwrite items with refreshed state
-	r.updatePolicyDrivenPRState(ctx, *stepSecurityPolicy, &state)
+	if stepSecurityPolicy == nil {
+		resp.Diagnostics.AddError(
+			"Unable to Read Policy-Driven PR",
+			"Policy returned nil",
+		)
+		return
+	}
+
+	// Update state with API response, preserving selected_repos and excluded_repos from state
+	r.updatePolicyDrivenPRState(ctx, *stepSecurityPolicy, &state, stateSelectedRepos, stateExcludedRepos)
 
 	// Set state to fully populated data
 	diags = resp.State.Set(ctx, state)
@@ -768,6 +989,27 @@ func (r *policyDrivenPRResource) Update(ctx context.Context, req resource.Update
 		UseOrgLevelConfig:  useOrgLevel,
 	}
 
+	// Handle excluded repos: Save their current configs before updating org-level config
+	var excludedRepoConfigs map[string]*stepsecurityapi.PolicyDrivenPRPolicy
+	if len(planRepos) == 1 && planRepos[0] == "*" && len(planExcludedRepos) > 0 {
+		excludedRepoConfigs = make(map[string]*stepsecurityapi.PolicyDrivenPRPolicy)
+		for _, repo := range planExcludedRepos {
+			// Read current config for this excluded repo
+			currentConfig, err := r.client.GetPolicyDrivenPRPolicy(ctx, plan.Owner.ValueString(), []string{repo})
+			if err != nil {
+				tflog.Warn(ctx, "Failed to get current config for excluded repo", map[string]interface{}{
+					"repo":  repo,
+					"error": err.Error(),
+				})
+				continue
+			}
+			// Store the config if it exists and has settings
+			if currentConfig != nil {
+				excludedRepoConfigs[repo] = currentConfig
+			}
+		}
+	}
+
 	// Update policy-driven PR in StepSecurity
 	err := r.client.UpdatePolicyDrivenPRPolicy(ctx, policy, removedRepos)
 	if err != nil {
@@ -778,17 +1020,39 @@ func (r *policyDrivenPRResource) Update(ctx context.Context, req resource.Update
 		return
 	}
 
-	// Handle newly excluded repos for Scenario 4
-	for _, repo := range planExcludedRepos {
-		if !slices.Contains(stateExcludedRepos, repo) {
-			// New exclusion - delete the config for this repo
-			err = r.client.DeletePolicyDrivenPRPolicy(ctx, plan.Owner.ValueString(), []string{repo})
+	// Restore original configs for excluded repos to prevent them from inheriting org-level config
+	if len(excludedRepoConfigs) > 0 {
+		for repo, originalConfig := range excludedRepoConfigs {
+			// Restore the original config for this repo
+			originalConfig.SelectedRepos = []string{repo}
+			err = r.client.CreatePolicyDrivenPRPolicy(ctx, *originalConfig)
 			if err != nil {
 				resp.Diagnostics.AddError(
-					"Unable to Exclude Repo from Policy-Driven PR",
-					fmt.Sprintf("Failed to exclude repo %s: %s", repo, err.Error()),
+					"Unable to Restore Config for Excluded Repo",
+					fmt.Sprintf("Failed to restore config for repo %s: %s", repo, err.Error()),
 				)
 				return
+			}
+			tflog.Info(ctx, "Restored original config for excluded repo", map[string]interface{}{
+				"repo": repo,
+			})
+		}
+	}
+
+	// Handle newly excluded repos that had no previous config - delete them to prevent inheritance
+	for _, repo := range planExcludedRepos {
+		if !slices.Contains(stateExcludedRepos, repo) {
+			// Check if this repo had a config that we restored
+			if _, restored := excludedRepoConfigs[repo]; !restored {
+				// New exclusion with no previous config - delete it
+				err = r.client.DeletePolicyDrivenPRPolicy(ctx, plan.Owner.ValueString(), []string{repo})
+				if err != nil {
+					resp.Diagnostics.AddError(
+						"Unable to Exclude Repo from Policy-Driven PR",
+						fmt.Sprintf("Failed to exclude repo %s: %s", repo, err.Error()),
+					)
+					return
+				}
 			}
 		}
 	}
@@ -834,7 +1098,7 @@ func (r *policyDrivenPRResource) Delete(ctx context.Context, req resource.Delete
 	}
 }
 
-func (r *policyDrivenPRResource) updatePolicyDrivenPRState(ctx context.Context, stepSecurityPolicy stepsecurityapi.PolicyDrivenPRPolicy, state *policyDrivenPRModel) {
+func (r *policyDrivenPRResource) updatePolicyDrivenPRState(ctx context.Context, stepSecurityPolicy stepsecurityapi.PolicyDrivenPRPolicy, state *policyDrivenPRModel, stateSelectedRepos []string, stateExcludedRepos []string) {
 	// Update basic fields
 	state.ID = types.StringValue(stepSecurityPolicy.Owner)
 	state.Owner = types.StringValue(stepSecurityPolicy.Owner)
@@ -895,7 +1159,8 @@ func (r *policyDrivenPRResource) updatePolicyDrivenPRState(ctx context.Context, 
 		}
 		updatePrecommitFileList, _ = types.ListValueFrom(ctx, types.StringType, fileElements)
 	} else {
-		updatePrecommitFileList = types.ListNull(types.StringType)
+		// Return empty list instead of null to match schema default
+		updatePrecommitFileList = types.ListValueMust(types.StringType, []attr.Value{})
 	}
 
 	var addWorkflowsValue types.String
@@ -944,17 +1209,29 @@ func (r *policyDrivenPRResource) updatePolicyDrivenPRState(ctx context.Context, 
 	)
 	state.AutoRemdiationOptions = optionsObj
 
-	// Set config level fields
-	state.UseRepoLevelConfig = types.BoolValue(stepSecurityPolicy.UseRepoLevelConfig)
-	state.UseOrgLevelConfig = types.BoolValue(stepSecurityPolicy.UseOrgLevelConfig)
+	// Note: We do NOT set UseRepoLevelConfig and UseOrgLevelConfig here.
+	// These fields represent the user's intent and should be preserved from the existing state.
+	// When org-level config is applied to specific repos (not wildcard), the API stores it per-repo,
+	// making it impossible to distinguish from repo-level config when reading back.
+	// Therefore, we trust the state to maintain the user's original configuration intent.
 
-	// Only update selected_repos if it's null/unknown (preserve planned values)
-	if state.SelectedRepos.IsNull() || state.SelectedRepos.IsUnknown() {
-		repoElements := make([]types.String, len(stepSecurityPolicy.SelectedRepos))
-		for i, repo := range stepSecurityPolicy.SelectedRepos {
+	// Preserve selected_repos and excluded_repos from state to avoid diffs
+	// This ensures that the order and exact values match what the user configured
+	if len(stateSelectedRepos) > 0 {
+		repoElements := make([]types.String, len(stateSelectedRepos))
+		for i, repo := range stateSelectedRepos {
 			repoElements[i] = types.StringValue(repo)
 		}
 		repoList, _ := types.ListValueFrom(ctx, types.StringType, repoElements)
 		state.SelectedRepos = repoList
+	}
+
+	if len(stateExcludedRepos) > 0 {
+		excludedElements := make([]types.String, len(stateExcludedRepos))
+		for i, repo := range stateExcludedRepos {
+			excludedElements[i] = types.StringValue(repo)
+		}
+		excludedList, _ := types.ListValueFrom(ctx, types.StringType, excludedElements)
+		state.ExcludedRepos = excludedList
 	}
 }

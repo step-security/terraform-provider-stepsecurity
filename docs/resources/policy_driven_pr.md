@@ -127,7 +127,7 @@ import {
 
 ### Optional
 
-- `excluded_repos` (List of String) List of repositories to exclude when selected_repos is ['*']. Only valid when applying org-level config to all repos.
+- `excluded_repos` (List of String) List of repositories to exclude when selected_repos is ['*']. It restores their original configs (preserving configs from other Terraform resources) or deletes configs for repos that had none.
 - `use_org_level_config` (Boolean) Set to true to apply configuration at org level. Only one of use_repo_level_config or use_org_level_config can be true.
 - `use_repo_level_config` (Boolean) Set to true to apply configuration at repo level. Only one of use_repo_level_config or use_org_level_config can be true.
 
