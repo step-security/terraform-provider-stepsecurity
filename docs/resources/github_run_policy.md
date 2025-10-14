@@ -137,6 +137,7 @@ resource "stepsecurity_github_run_policy" "secrets_policy_all_orgs" {
     owner                 = "my-org"
     name                  = "Secrets Policy - All Orgs"
     enable_secrets_policy = true
+    exempted_users        = ["dependabot[bot]", "renovate[bot]"]
   }
 }
 
@@ -150,6 +151,7 @@ resource "stepsecurity_github_run_policy" "secrets_policy_all_repos" {
     owner                 = "my-org"
     name                  = "Secrets Policy - All Repos"
     enable_secrets_policy = true
+    exempted_users        = ["dependabot[bot]", "github_username"]
   }
 }
 
@@ -287,6 +289,7 @@ Optional:
 - `enable_compromised_actions_policy` (Boolean) Whether to enable the compromised actions policy.
 - `enable_runs_on_policy` (Boolean) Whether to enable the runs-on policy.
 - `enable_secrets_policy` (Boolean) Whether to enable the secrets policy.
+- `exempted_users` (Set of String) Set of exempted users (can be bots/usernames) for the secrets exfiltration policy. These users will not be subject to the secrets policy checks.
 - `is_dry_run` (Boolean) Whether this policy is in dry-run mode.
 
 ## Import

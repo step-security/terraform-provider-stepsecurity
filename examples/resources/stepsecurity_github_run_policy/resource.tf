@@ -122,6 +122,7 @@ resource "stepsecurity_github_run_policy" "secrets_policy_all_orgs" {
     owner                 = "my-org"
     name                  = "Secrets Policy - All Orgs"
     enable_secrets_policy = true
+    exempted_users        = ["dependabot[bot]", "renovate[bot]"]
   }
 }
 
@@ -135,6 +136,7 @@ resource "stepsecurity_github_run_policy" "secrets_policy_all_repos" {
     owner                 = "my-org"
     name                  = "Secrets Policy - All Repos"
     enable_secrets_policy = true
+    exempted_users        = ["dependabot[bot]", "github_username"]
   }
 }
 

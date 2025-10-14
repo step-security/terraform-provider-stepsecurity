@@ -32,6 +32,7 @@ type RunPolicyConfig struct {
 	EnableSecretsPolicy            bool                `json:"enable_secrets_policy,omitempty"`
 	EnableCompromisedActionsPolicy bool                `json:"enable_compromised_actions_policy,omitempty"`
 	IsDryRun                       bool                `json:"is_dry_run,omitempty"`
+	ExemptedUsers                  []string            `json:"exempted_users,omitempty"`
 }
 
 type CreateRunPolicyRequest struct {
