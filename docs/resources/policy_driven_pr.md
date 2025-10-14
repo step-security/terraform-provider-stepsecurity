@@ -31,10 +31,8 @@ provider "stepsecurity" {
 # ============================================================================
 # Creates policy that applies to ALL repositories in the organization
 resource "stepsecurity_policy_driven_pr" "org_level_all" {
-  owner                 = "test-organization"
-  selected_repos        = ["*"] # Wildcard applies to all repos
-  use_org_level_config  = true  # Apply at org level
-  use_repo_level_config = false
+  owner          = "test-organization"
+  selected_repos = ["*"] # Wildcard applies to all repos
   auto_remediation_options = {
     create_pr                             = true
     create_issue                          = false
@@ -53,10 +51,8 @@ resource "stepsecurity_policy_driven_pr" "org_level_all" {
 # Applies configuration to specific repositories
 # Config is applied at repo level
 resource "stepsecurity_policy_driven_pr" "repo_level_config" {
-  owner                 = "test-organization"
-  selected_repos        = ["test-repo-1", "test-repo-2"]
-  use_org_level_config  = false
-  use_repo_level_config = true # Apply at repo level
+  owner          = "test-organization"
+  selected_repos = ["test-repo-1", "test-repo-2"]
   auto_remediation_options = {
     create_pr                                     = true
     create_issue                                  = false
@@ -79,7 +75,7 @@ resource "stepsecurity_policy_driven_pr" "repo_level_config" {
         interval = "weekly"
       }
     ]
-    add_workflows = "security-scan.yml"
+    add_workflows = "https://github.com/[owner]/[repo]"
   }
 }
 
@@ -89,11 +85,9 @@ resource "stepsecurity_policy_driven_pr" "repo_level_config" {
 # Applies org-level config to all repos EXCEPT the ones in excluded_repos
 # Excluded repos will not have any policy-driven PR config applied
 resource "stepsecurity_policy_driven_pr" "org_level_with_exclusions" {
-  owner                 = "test-organization"
-  selected_repos        = ["*"]
-  excluded_repos        = ["archived-repo", "test-repo-old"] # These repos opt-out
-  use_org_level_config  = true                               # Apply at org level
-  use_repo_level_config = false
+  owner          = "test-organization"
+  selected_repos = ["*"]
+  excluded_repos = ["archived-repo", "test-repo-old"] # These repos opt-out
   auto_remediation_options = {
     create_pr                             = true
     create_issue                          = false
@@ -128,8 +122,6 @@ import {
 ### Optional
 
 - `excluded_repos` (List of String) List of repositories to exclude when selected_repos is ['*']. It restores their original configs (preserving configs from other Terraform resources) or deletes configs for repos that had none.
-- `use_org_level_config` (Boolean) Set to true to apply configuration at org level. Only one of use_repo_level_config or use_org_level_config can be true.
-- `use_repo_level_config` (Boolean) Set to true to apply configuration at repo level. Only one of use_repo_level_config or use_org_level_config can be true.
 
 ### Read-Only
 

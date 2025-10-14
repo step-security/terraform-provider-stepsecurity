@@ -201,18 +201,6 @@ func (r *policyDrivenPRResource) Schema(_ context.Context, _ resource.SchemaRequ
 					),
 				),
 			},
-			"use_repo_level_config": schema.BoolAttribute{
-				Optional:    true,
-				Computed:    true,
-				Description: "Set to true to apply configuration at repo level. Only one of use_repo_level_config or use_org_level_config can be true.",
-				Default:     booldefault.StaticBool(false),
-			},
-			"use_org_level_config": schema.BoolAttribute{
-				Optional:    true,
-				Computed:    true,
-				Description: "Set to true to apply configuration at org level. Only one of use_repo_level_config or use_org_level_config can be true.",
-				Default:     booldefault.StaticBool(false),
-			},
 		},
 	}
 }
@@ -255,10 +243,6 @@ func (r *policyDrivenPRResource) ImportState(ctx context.Context, req resource.I
 
 	// Set excluded_repos (empty by default for import)
 	state.ExcludedRepos = types.ListValueMust(types.StringType, []attr.Value{})
-
-	// Set config levels
-	state.UseRepoLevelConfig = types.BoolValue(policy.UseRepoLevelConfig)
-	state.UseOrgLevelConfig = types.BoolValue(policy.UseOrgLevelConfig)
 
 	// Set auto_remediation_options
 	exemptElements := make([]types.String, len(policy.AutoRemdiationOptions.ActionsToExemptWhilePinning))
@@ -376,8 +360,6 @@ type policyDrivenPRModel struct {
 	AutoRemdiationOptions types.Object `tfsdk:"auto_remediation_options"`
 	SelectedRepos         types.List   `tfsdk:"selected_repos"`
 	ExcludedRepos         types.List   `tfsdk:"excluded_repos"`
-	UseRepoLevelConfig    types.Bool   `tfsdk:"use_repo_level_config"`
-	UseOrgLevelConfig     types.Bool   `tfsdk:"use_org_level_config"`
 }
 
 type autoRemdiationOptionsModel struct {
@@ -428,42 +410,8 @@ func (r *policyDrivenPRResource) ValidateConfig(ctx context.Context, req resourc
 		selectedRepos = append(selectedRepos, elem.(types.String).ValueString())
 	}
 
-	// Validate use_org_level_config and use_repo_level_config
-	useOrgLevel := !config.UseOrgLevelConfig.IsNull() && config.UseOrgLevelConfig.ValueBool()
-	useRepoLevel := !config.UseRepoLevelConfig.IsNull() && config.UseRepoLevelConfig.ValueBool()
-
-	if useOrgLevel && useRepoLevel {
-		resp.Diagnostics.AddError(
-			"Invalid Configuration",
-			"use_org_level_config and use_repo_level_config cannot both be true. Choose one.",
-		)
-	}
-
-	if !useOrgLevel && !useRepoLevel {
-		resp.Diagnostics.AddError(
-			"Invalid Configuration",
-			"Either use_org_level_config or use_repo_level_config must be set to true.",
-		)
-	}
-
-	// Validate wildcard usage with config levels
-	hasWildcard := len(selectedRepos) == 1 && selectedRepos[0] == "*"
-
-	if useRepoLevel && hasWildcard {
-		resp.Diagnostics.AddError(
-			"Invalid Configuration",
-			"selected_repos cannot be ['*'] when use_repo_level_config is true. Wildcard is only supported with org-level config.",
-		)
-	}
-
-	if useOrgLevel && !hasWildcard {
-		resp.Diagnostics.AddError(
-			"Invalid Configuration",
-			"selected_repos must be ['*'] (wildcard) when use_org_level_config is true. Support for org-level config with specific repositories will be added soon.",
-		)
-	}
-
 	// Validate excluded_repos only makes sense with wildcard
+	hasWildcard := len(selectedRepos) == 1 && selectedRepos[0] == "*"
 	if !config.ExcludedRepos.IsNull() && len(config.ExcludedRepos.Elements()) > 0 {
 		if !hasWildcard {
 			resp.Diagnostics.AddError(
@@ -670,9 +618,12 @@ func (r *policyDrivenPRResource) Create(ctx context.Context, req resource.Create
 		}
 	}
 
-	// Get config levels from plan
-	useOrgLevel := plan.UseOrgLevelConfig.ValueBool()
-	useRepoLevel := plan.UseRepoLevelConfig.ValueBool()
+	// Automatically compute config levels based on selected_repos
+	// If selected_repos = ["*"], use org-level config
+	// Otherwise, use repo-level config
+	hasWildcard := len(selectedRepos) == 1 && selectedRepos[0] == "*"
+	useOrgLevel := hasWildcard
+	useRepoLevel := !hasWildcard
 
 	// convert to stepsecurityapi.PolicyDrivenPRPolicy
 	stepSecurityPolicy := stepsecurityapi.PolicyDrivenPRPolicy{
@@ -698,6 +649,7 @@ func (r *policyDrivenPRResource) Create(ctx context.Context, req resource.Create
 
 	// Handle excluded repos: Save their current configs before applying org-level config
 	var excludedRepoConfigs map[string]*stepsecurityapi.PolicyDrivenPRPolicy
+	var err error
 	if len(selectedRepos) == 1 && selectedRepos[0] == "*" && len(excludedRepos) > 0 {
 		excludedRepoConfigs = make(map[string]*stepsecurityapi.PolicyDrivenPRPolicy)
 		for _, repo := range excludedRepos {
@@ -718,7 +670,7 @@ func (r *policyDrivenPRResource) Create(ctx context.Context, req resource.Create
 	}
 
 	// Create policy-driven PR in StepSecurity
-	err := r.client.CreatePolicyDrivenPRPolicy(ctx, stepSecurityPolicy)
+	err = r.client.CreatePolicyDrivenPRPolicy(ctx, stepSecurityPolicy)
 	if err != nil {
 		resp.Diagnostics.AddError(
 			"Unable to Create Policy-Driven PR",
@@ -821,6 +773,106 @@ func (r *policyDrivenPRResource) Read(ctx context.Context, req resource.ReadRequ
 			"Policy returned nil",
 		)
 		return
+	}
+
+	// Extract current state's v2 feature values before updating
+	var currentStateOptions autoRemdiationOptionsModel
+	var hasV2FeaturesInState bool
+	if !state.AutoRemdiationOptions.IsNull() {
+		diags := state.AutoRemdiationOptions.As(ctx, &currentStateOptions, basetypes.ObjectAsOptions{})
+		if diags.HasError() {
+			// If we can't extract, just continue without preserving
+			hasV2FeaturesInState = false
+		} else {
+			// Check if state has v2 features
+			hasUpdatePrecommit := !currentStateOptions.UpdatePrecommitFile.IsNull() && len(currentStateOptions.UpdatePrecommitFile.Elements()) > 0
+			hasPackageEcosystem := !currentStateOptions.PackageEcosystem.IsNull() && len(currentStateOptions.PackageEcosystem.Elements()) > 0
+			hasAddWorkflows := !currentStateOptions.AddWorkflows.IsNull() && currentStateOptions.AddWorkflows.ValueString() != ""
+			hasV2FeaturesInState = hasUpdatePrecommit || hasPackageEcosystem || hasAddWorkflows
+		}
+	}
+
+	// Check if v2 is enabled
+	checkRepo := "[all]"
+	if len(stateSelectedRepos) > 0 && stateSelectedRepos[0] != "*" {
+		checkRepo = stateSelectedRepos[0]
+	}
+
+	var v2Enabled bool
+	if hasV2FeaturesInState {
+		status, err := r.client.GetSubscriptionStatus(ctx, state.Owner.ValueString(), checkRepo)
+		if err != nil {
+			tflog.Warn(ctx, "Failed to check subscription status during read, assuming v2 disabled", map[string]interface{}{
+				"error": err.Error(),
+			})
+			v2Enabled = false
+		} else if status != nil {
+			v2Enabled = status.AppFeatureFlags.IsPolicyDrivenPrV2Enabled
+		}
+	}
+
+	// Preserve features from state if API returns empty but state has values (avoid unnecessary diffs)
+	// This handles both v1 features that might not be supported and v2 features when v2 is disabled
+	if hasV2FeaturesInState && !v2Enabled {
+		// Preserve v2 features from current state
+		stepSecurityPolicy.AutoRemdiationOptions.UpdatePrecommitFile = []string{}
+		if !currentStateOptions.UpdatePrecommitFile.IsNull() {
+			elements := currentStateOptions.UpdatePrecommitFile.Elements()
+			for _, elem := range elements {
+				stepSecurityPolicy.AutoRemdiationOptions.UpdatePrecommitFile = append(
+					stepSecurityPolicy.AutoRemdiationOptions.UpdatePrecommitFile,
+					elem.(types.String).ValueString(),
+				)
+			}
+		}
+
+		stepSecurityPolicy.AutoRemdiationOptions.PackageEcosystem = []stepsecurityapi.DependabotConfig{}
+		if !currentStateOptions.PackageEcosystem.IsNull() {
+			var ecosystemModels []packageEcosystemModel
+			currentStateOptions.PackageEcosystem.ElementsAs(ctx, &ecosystemModels, false)
+			for _, model := range ecosystemModels {
+				stepSecurityPolicy.AutoRemdiationOptions.PackageEcosystem = append(
+					stepSecurityPolicy.AutoRemdiationOptions.PackageEcosystem,
+					stepsecurityapi.DependabotConfig{
+						Package:  model.Package.ValueString(),
+						Interval: model.Interval.ValueString(),
+					},
+				)
+			}
+		}
+
+		if !currentStateOptions.AddWorkflows.IsNull() {
+			stepSecurityPolicy.AutoRemdiationOptions.AddWorkflows = currentStateOptions.AddWorkflows.ValueString()
+		}
+
+		tflog.Info(ctx, "Preserving v2 features in state as v2 is not enabled")
+	}
+
+	// Also preserve v1 features if API returns empty arrays but state has values
+	if len(stepSecurityPolicy.AutoRemdiationOptions.ActionsToExemptWhilePinning) == 0 &&
+		!currentStateOptions.ActionsToExemptWhilePinning.IsNull() &&
+		len(currentStateOptions.ActionsToExemptWhilePinning.Elements()) > 0 {
+		elements := currentStateOptions.ActionsToExemptWhilePinning.Elements()
+		for _, elem := range elements {
+			stepSecurityPolicy.AutoRemdiationOptions.ActionsToExemptWhilePinning = append(
+				stepSecurityPolicy.AutoRemdiationOptions.ActionsToExemptWhilePinning,
+				elem.(types.String).ValueString(),
+			)
+		}
+		tflog.Info(ctx, "Preserving actions_to_exempt_while_pinning from state")
+	}
+
+	if len(stepSecurityPolicy.AutoRemdiationOptions.ActionsToReplaceWithStepSecurityActions) == 0 &&
+		!currentStateOptions.ActionsToReplaceWithStepSecurityActions.IsNull() &&
+		len(currentStateOptions.ActionsToReplaceWithStepSecurityActions.Elements()) > 0 {
+		elements := currentStateOptions.ActionsToReplaceWithStepSecurityActions.Elements()
+		for _, elem := range elements {
+			stepSecurityPolicy.AutoRemdiationOptions.ActionsToReplaceWithStepSecurityActions = append(
+				stepSecurityPolicy.AutoRemdiationOptions.ActionsToReplaceWithStepSecurityActions,
+				elem.(types.String).ValueString(),
+			)
+		}
+		tflog.Info(ctx, "Preserving actions_to_replace_with_step_security_actions from state")
 	}
 
 	// Update state with API response, preserving selected_repos and excluded_repos from state
@@ -964,9 +1016,12 @@ func (r *policyDrivenPRResource) Update(ctx context.Context, req resource.Update
 		}
 	}
 
-	// Get config levels from plan
-	useOrgLevel := plan.UseOrgLevelConfig.ValueBool()
-	useRepoLevel := plan.UseRepoLevelConfig.ValueBool()
+	// Automatically compute config levels based on planRepos
+	// If planRepos = ["*"], use org-level config
+	// Otherwise, use repo-level config
+	planHasWildcard := len(planRepos) == 1 && planRepos[0] == "*"
+	useOrgLevel := planHasWildcard
+	useRepoLevel := !planHasWildcard
 
 	policy := stepsecurityapi.PolicyDrivenPRPolicy{
 		Owner: plan.Owner.ValueString(),
