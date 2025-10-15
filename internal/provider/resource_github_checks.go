@@ -6,6 +6,8 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/google/go-cmp/cmp"
+	"github.com/google/go-cmp/cmp/cmpopts"
 	"github.com/hashicorp/terraform-plugin-framework/attr"
 	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
@@ -368,6 +370,8 @@ func (r *githubChecksResource) ModifyPlan(ctx context.Context, req resource.Modi
 		return
 	}
 
+	modified := false
+
 	for ind, control := range plan.Controls {
 
 		if control.Control.ValueString() == "NPM Package Cooldown" && control.Settings.IsNull() {
@@ -384,20 +388,17 @@ func (r *githubChecksResource) ModifyPlan(ctx context.Context, req resource.Modi
 			}
 			control.Settings, _ = types.ObjectValue(settingsType.AttrTypes, settingsMap)
 			plan.Controls[ind] = control
+			modified = true
 		}
 	}
 
-	// Sort controls by name to ensure deterministic order
-	// This prevents Terraform from detecting changes due to inconsistent ordering
-	sort.Slice(plan.Controls, func(i, j int) bool {
-		return plan.Controls[i].Control.ValueString() < plan.Controls[j].Control.ValueString()
-	})
-
-	// Set the plan back (either because it was modified or to ensure consistent ordering)
-	diags = resp.Plan.Set(ctx, plan)
-	resp.Diagnostics.Append(diags...)
-	if resp.Diagnostics.HasError() {
-		return
+	// Set the plan back (either because it was modified )
+	if modified {
+		diags = resp.Plan.Set(ctx, plan)
+		resp.Diagnostics.Append(diags...)
+		if resp.Diagnostics.HasError() {
+			return
+		}
 	}
 
 }
@@ -429,10 +430,11 @@ func (r *githubChecksResource) Create(ctx context.Context, req resource.CreateRe
 		return
 	}
 
-	plan = r.convertToState(plan.Owner.ValueString(), *createRequest)
-	plan.Owner = types.StringValue(plan.Owner.ValueString())
+	state := r.convertToState(plan.Owner.ValueString(), *createRequest)
+	state.Owner = types.StringValue(plan.Owner.ValueString())
+	r.updateStateListsWithOrderFromPlan(ctx, plan, &state)
 
-	diags = resp.State.Set(ctx, plan)
+	diags = resp.State.Set(ctx, state)
 	resp.Diagnostics.Append(diags...)
 	if resp.Diagnostics.HasError() {
 		return
@@ -458,9 +460,10 @@ func (r *githubChecksResource) Read(ctx context.Context, req resource.ReadReques
 		return
 	}
 
-	state = r.convertToState(state.Owner.ValueString(), config)
+	newState := r.convertToState(state.Owner.ValueString(), config)
+	r.updateStateListsWithOrderFromPlan(ctx, state, &newState)
 
-	diags = resp.State.Set(ctx, state)
+	diags = resp.State.Set(ctx, newState)
 	resp.Diagnostics.Append(diags...)
 	if resp.Diagnostics.HasError() {
 		return
@@ -494,10 +497,11 @@ func (r *githubChecksResource) Update(ctx context.Context, req resource.UpdateRe
 		return
 	}
 
-	plan = r.convertToState(plan.Owner.ValueString(), *updateRequest)
-	plan.Owner = types.StringValue(plan.Owner.ValueString())
+	state := r.convertToState(plan.Owner.ValueString(), *updateRequest)
+	state.Owner = types.StringValue(plan.Owner.ValueString())
+	r.updateStateListsWithOrderFromPlan(ctx, plan, &state)
 
-	diags = resp.State.Set(ctx, plan)
+	diags = resp.State.Set(ctx, state)
 	resp.Diagnostics.Append(diags...)
 	if resp.Diagnostics.HasError() {
 		return
@@ -940,4 +944,88 @@ func (r *githubChecksResource) convertToState(owner string, config stepsecuritya
 	}
 
 	return model
+}
+
+func (r *githubChecksResource) updateStateListsWithOrderFromPlan(ctx context.Context, plan githubChecksModel, state *githubChecksModel) {
+	if state == nil {
+		return
+	}
+
+	// Update state with plan if the lists are equal for required checks
+	if plan.RequiredChecks != nil && state.RequiredChecks != nil {
+		planRepos := r.listToStringSlice(plan.RequiredChecks.Repos)
+		stateRepos := r.listToStringSlice(state.RequiredChecks.Repos)
+		if cmp.Equal(planRepos, stateRepos, cmpopts.SortSlices(func(a, b string) bool { return a < b })) {
+			state.RequiredChecks.Repos = plan.RequiredChecks.Repos
+		}
+		planOmitRepos := r.listToStringSlice(plan.RequiredChecks.OmitRepos)
+		stateOmitRepos := r.listToStringSlice(state.RequiredChecks.OmitRepos)
+		if cmp.Equal(planOmitRepos, stateOmitRepos, cmpopts.SortSlices(func(a, b string) bool { return a < b })) {
+			state.RequiredChecks.OmitRepos = plan.RequiredChecks.OmitRepos
+		}
+	}
+
+	// Update state with plan if the lists are equal for optional checks
+	if plan.OptionalChecks != nil && state.OptionalChecks != nil {
+		planRepos := r.listToStringSlice(plan.OptionalChecks.Repos)
+		stateRepos := r.listToStringSlice(state.OptionalChecks.Repos)
+		if cmp.Equal(planRepos, stateRepos, cmpopts.SortSlices(func(a, b string) bool { return a < b })) {
+			state.OptionalChecks.Repos = plan.OptionalChecks.Repos
+		}
+		planOmitRepos := r.listToStringSlice(plan.OptionalChecks.OmitRepos)
+		stateOmitRepos := r.listToStringSlice(state.OptionalChecks.OmitRepos)
+		if cmp.Equal(planOmitRepos, stateOmitRepos, cmpopts.SortSlices(func(a, b string) bool { return a < b })) {
+			state.OptionalChecks.OmitRepos = plan.OptionalChecks.OmitRepos
+		}
+	}
+
+	// Update state with plan if the lists are equal for baseline checks
+	if plan.BaselineCheck != nil && state.BaselineCheck != nil {
+		planRepos := r.listToStringSlice(plan.BaselineCheck.Repos)
+		stateRepos := r.listToStringSlice(state.BaselineCheck.Repos)
+		if cmp.Equal(planRepos, stateRepos, cmpopts.SortSlices(func(a, b string) bool { return a < b })) {
+			state.BaselineCheck.Repos = plan.BaselineCheck.Repos
+		}
+		planOmitRepos := r.listToStringSlice(plan.BaselineCheck.OmitRepos)
+		stateOmitRepos := r.listToStringSlice(state.BaselineCheck.OmitRepos)
+		if cmp.Equal(planOmitRepos, stateOmitRepos, cmpopts.SortSlices(func(a, b string) bool { return a < b })) {
+			state.BaselineCheck.OmitRepos = plan.BaselineCheck.OmitRepos
+		}
+	}
+
+	// preserve order of controls
+	// Create a map of controls from state for efficient lookup
+	controls2Map := make(map[string]control)
+	for _, ctrl := range state.Controls {
+		controls2Map[ctrl.Control.ValueString()] = ctrl
+	}
+
+	// Reorder state controls to match plan order
+	orderedControls := make([]control, 0, len(plan.Controls))
+	for _, ctrl := range plan.Controls {
+		if _, exists := controls2Map[ctrl.Control.ValueString()]; !exists {
+			tflog.Info(ctx, "Control not found in state", map[string]any{
+				"control": ctrl.Control.ValueString(),
+			})
+			return
+		}
+		orderedControls = append(orderedControls, controls2Map[ctrl.Control.ValueString()])
+	}
+	state.Controls = orderedControls
+
+}
+
+// listToStringSlice converts types.List to []string
+func (r *githubChecksResource) listToStringSlice(list types.List) []string {
+	if list.IsNull() || list.IsUnknown() {
+		return nil
+	}
+	elements := list.Elements()
+	result := make([]string, 0, len(elements))
+	for _, elem := range elements {
+		if strVal, ok := elem.(types.String); ok {
+			result = append(result, strVal.ValueString())
+		}
+	}
+	return result
 }
