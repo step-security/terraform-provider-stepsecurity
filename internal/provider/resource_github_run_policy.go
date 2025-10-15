@@ -66,6 +66,7 @@ type policyConfigModel struct {
 	EnableSecretsPolicy            types.Bool   `tfsdk:"enable_secrets_policy"`
 	EnableCompromisedActionsPolicy types.Bool   `tfsdk:"enable_compromised_actions_policy"`
 	IsDryRun                       types.Bool   `tfsdk:"is_dry_run"`
+	ExemptedUsers                  types.Set    `tfsdk:"exempted_users"`
 }
 
 // Metadata returns the resource type name.
@@ -170,6 +171,11 @@ func (r *githubRunPolicyResource) Schema(_ context.Context, _ resource.SchemaReq
 						Computed:            true,
 						Default:             booldefault.StaticBool(false),
 						MarkdownDescription: "Whether this policy is in dry-run mode.",
+					},
+					"exempted_users": schema.SetAttribute{
+						ElementType:         types.StringType,
+						Optional:            true,
+						MarkdownDescription: "Set of exempted users (can be bots/usernames) for the secrets exfiltration policy. These users will not be subject to the secrets policy checks.",
 					},
 				},
 			},
@@ -281,6 +287,17 @@ func (r *githubRunPolicyResource) Create(ctx context.Context, req resource.Creat
 			disallowedMap[label] = struct{}{}
 		}
 		createRequest.PolicyConfig.DisallowedRunnerLabels = disallowedMap
+	}
+
+	// Handle exempted users list
+	if !policyConfig.ExemptedUsers.IsNull() {
+		var exemptedUsers []string
+		diags = policyConfig.ExemptedUsers.ElementsAs(ctx, &exemptedUsers, false)
+		resp.Diagnostics.Append(diags...)
+		if resp.Diagnostics.HasError() {
+			return
+		}
+		createRequest.PolicyConfig.ExemptedUsers = exemptedUsers
 	}
 
 	tflog.Debug(ctx, "Creating run policy", map[string]interface{}{
@@ -407,6 +424,17 @@ func (r *githubRunPolicyResource) Update(ctx context.Context, req resource.Updat
 			disallowedMap[label] = struct{}{}
 		}
 		updateRequest.PolicyConfig.DisallowedRunnerLabels = disallowedMap
+	}
+
+	// Handle exempted users list
+	if !policyConfig.ExemptedUsers.IsNull() {
+		var exemptedUsers []string
+		diags = policyConfig.ExemptedUsers.ElementsAs(ctx, &exemptedUsers, false)
+		resp.Diagnostics.Append(diags...)
+		if resp.Diagnostics.HasError() {
+			return
+		}
+		updateRequest.PolicyConfig.ExemptedUsers = exemptedUsers
 	}
 
 	// Update the run policy
@@ -552,6 +580,19 @@ func (r *githubRunPolicyResource) updateModelFromAPI(_ context.Context, model *g
 		policyConfigAttrs["disallowed_runner_labels"] = types.SetNull(types.StringType)
 	}
 
+	// Handle exempted users set
+	if policy.PolicyConfig.ExemptedUsers != nil {
+		exemptedUsersList := make([]attr.Value, len(policy.PolicyConfig.ExemptedUsers))
+		for i, user := range policy.PolicyConfig.ExemptedUsers {
+			exemptedUsersList[i] = types.StringValue(user)
+		}
+		setValue, setDiags := types.SetValue(types.StringType, exemptedUsersList)
+		diags.Append(setDiags...)
+		policyConfigAttrs["exempted_users"] = setValue
+	} else {
+		policyConfigAttrs["exempted_users"] = types.SetNull(types.StringType)
+	}
+
 	// Create the policy config object
 	policyConfigAttrTypes := map[string]attr.Type{
 		"owner":                             types.StringType,
@@ -563,6 +604,7 @@ func (r *githubRunPolicyResource) updateModelFromAPI(_ context.Context, model *g
 		"enable_secrets_policy":             types.BoolType,
 		"enable_compromised_actions_policy": types.BoolType,
 		"is_dry_run":                        types.BoolType,
+		"exempted_users":                    types.SetType{ElemType: types.StringType},
 	}
 
 	policyConfigObj, objDiags := types.ObjectValue(policyConfigAttrTypes, policyConfigAttrs)
