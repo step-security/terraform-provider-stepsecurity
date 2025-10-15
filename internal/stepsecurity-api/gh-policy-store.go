@@ -13,8 +13,8 @@ type PolicyAttachments struct {
 }
 
 type OrgResource struct {
-	Name       string         `json:"name"`                // org name
-	ApplyToOrg bool           `json:"apply_to_org"`        // if true, applies to entire org
+	Name       string         `json:"name"`         // org name
+	ApplyToOrg bool           `json:"apply_to_org"` // if true, applies to entire org
 	Repos      []RepoResource `json:"repos,omitempty"`
 }
 
@@ -40,7 +40,7 @@ func (c *APIClient) CreateGitHubPolicyStorePolicy(ctx context.Context, policy *G
 	if policy == nil {
 		return fmt.Errorf("empty policy provided")
 	}
-	
+
 	// Create policy without attachments for API call
 	policyForCreation := &GitHubPolicyStorePolicy{
 		Owner:                 policy.Owner,
@@ -52,7 +52,7 @@ func (c *APIClient) CreateGitHubPolicyStorePolicy(ctx context.Context, policy *G
 		DisableFileMonitoring: policy.DisableFileMonitoring,
 		// Explicitly omit Attachments for creation
 	}
-	
+
 	URI := fmt.Sprintf("%s/v1/github/%s/actions/policies/%s", c.BaseURL, policy.Owner, policy.PolicyName)
 	_, err := c.post(ctx, URI, policyForCreation)
 	if err != nil {
@@ -109,4 +109,3 @@ func (c *APIClient) DetachGitHubPolicyStorePolicy(ctx context.Context, owner str
 	}
 	return nil
 }
-

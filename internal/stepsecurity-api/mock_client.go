@@ -64,7 +64,12 @@ func (m *MockStepSecurityClient) CreatePolicyDrivenPRPolicy(ctx context.Context,
 	return args.Error(0)
 }
 
-func (m *MockStepSecurityClient) GetPolicyDrivenPRPolicy(ctx context.Context, owner string) (*PolicyDrivenPRPolicy, error) {
+func (m *MockStepSecurityClient) GetPolicyDrivenPRPolicy(ctx context.Context, owner string, repos []string) (*PolicyDrivenPRPolicy, error) {
+	args := m.Called(ctx, owner, repos)
+	return args.Get(0).(*PolicyDrivenPRPolicy), args.Error(1)
+}
+
+func (m *MockStepSecurityClient) DiscoverPolicyDrivenPRConfig(ctx context.Context, owner string) (*PolicyDrivenPRPolicy, error) {
 	args := m.Called(ctx, owner)
 	return args.Get(0).(*PolicyDrivenPRPolicy), args.Error(1)
 }
@@ -77,6 +82,14 @@ func (m *MockStepSecurityClient) UpdatePolicyDrivenPRPolicy(ctx context.Context,
 func (m *MockStepSecurityClient) DeletePolicyDrivenPRPolicy(ctx context.Context, owner string, repos []string) error {
 	args := m.Called(ctx, owner, repos)
 	return args.Error(0)
+}
+
+func (m *MockStepSecurityClient) GetSubscriptionStatus(ctx context.Context, owner, repo string) (*SubscriptionStatus, error) {
+	args := m.Called(ctx, owner, repo)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).(*SubscriptionStatus), args.Error(1)
 }
 
 func (m *MockStepSecurityClient) CreateGitHubPolicyStorePolicy(ctx context.Context, policy *GitHubPolicyStorePolicy) error {
@@ -103,7 +116,6 @@ func (m *MockStepSecurityClient) DetachGitHubPolicyStorePolicy(ctx context.Conte
 	args := m.Called(ctx, owner, policyName)
 	return args.Error(0)
 }
-
 
 func (m *MockStepSecurityClient) CreateSuppressionRule(ctx context.Context, rule SuppressionRule) (*SuppressionRule, error) {
 	args := m.Called(ctx, rule)
@@ -163,6 +175,22 @@ func (m *MockStepSecurityClient) UpdatePRChecksConfig(ctx context.Context, owner
 }
 
 func (m *MockStepSecurityClient) DeletePRChecksConfig(ctx context.Context, owner string) error {
+	args := m.Called(ctx, owner)
+	return args.Error(0)
+}
+
+// GitHub PR Template methods
+func (m *MockStepSecurityClient) GetGitHubPRTemplate(ctx context.Context, owner string) (*GitHubPRTemplate, error) {
+	args := m.Called(ctx, owner)
+	return args.Get(0).(*GitHubPRTemplate), args.Error(1)
+}
+
+func (m *MockStepSecurityClient) UpdateGitHubPRTemplate(ctx context.Context, owner string, template GitHubPRTemplate) error {
+	args := m.Called(ctx, owner, template)
+	return args.Error(0)
+}
+
+func (m *MockStepSecurityClient) DeleteGitHubPRTemplate(ctx context.Context, owner string) error {
 	args := m.Called(ctx, owner)
 	return args.Error(0)
 }
