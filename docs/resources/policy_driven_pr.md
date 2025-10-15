@@ -64,7 +64,7 @@ resource "stepsecurity_policy_driven_pr" "repo_level_config" {
     actions_to_exempt_while_pinning               = ["actions/checkout", "actions/setup-node"]
     actions_to_replace_with_step_security_actions = ["EnricoMi/publish-unit-test-result-action"]
     # v2-only features (requires policy-driven PR v2 to be enabled)
-    update_precommit_file = [".pre-commit-config.yaml"]
+    update_precommit_file = ["eslint"]
     package_ecosystem = [
       {
         package  = "npm"
