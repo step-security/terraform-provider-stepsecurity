@@ -35,7 +35,7 @@ resource "stepsecurity_github_checks" "test-organization" {
       enable  = true
       type    = "required"
       settings = {
-        cooldown_period                      = 3
+        cool_down_period                     = 3
         packages_to_exempt_in_cooldown_check = ["test-package/*"]
       }
     },

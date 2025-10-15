@@ -15,6 +15,10 @@ import (
 	stepsecurityapi "github.com/step-security/terraform-provider-stepsecurity/internal/stepsecurity-api"
 )
 
+var (
+	testOwner = "tf-acc-test"
+)
+
 // Helper function to create settings object for tests
 func createSettingsObject(cooldownPeriod *int64, packages []string) types.Object {
 	settingsMap := map[string]attr.Value{}
@@ -61,9 +65,9 @@ func TestAccGithubChecksResource(t *testing.T) {
 		Steps: []res.TestStep{
 			// Create and Read testing
 			{
-				Config: testProviderConfig() + testAccGithubChecksResourceConfig("tf-acc-test"),
+				Config: testProviderConfig() + testAccGithubChecksResourceConfig(testOwner),
 				Check: res.ComposeAggregateTestCheckFunc(
-					res.TestCheckResourceAttr("stepsecurity_github_checks.test", "owner", "tf-acc-test"),
+					res.TestCheckResourceAttr("stepsecurity_github_checks.test", "owner", testOwner),
 					res.TestCheckResourceAttr("stepsecurity_github_checks.test", "controls.#", "1"),
 					res.TestCheckResourceAttr("stepsecurity_github_checks.test", "controls.0.control", "NPM Package Cooldown"),
 					res.TestCheckResourceAttr("stepsecurity_github_checks.test", "controls.0.enable", "true"),
@@ -75,9 +79,9 @@ func TestAccGithubChecksResource(t *testing.T) {
 			},
 			// Update and Read testing
 			{
-				Config: testProviderConfig() + testAccGithubChecksResourceConfigUpdated("tf-acc-test"),
+				Config: testProviderConfig() + testAccGithubChecksResourceConfigUpdated(testOwner),
 				Check: res.ComposeAggregateTestCheckFunc(
-					res.TestCheckResourceAttr("stepsecurity_github_checks.test", "owner", "tf-acc-test"),
+					res.TestCheckResourceAttr("stepsecurity_github_checks.test", "owner", testOwner),
 					res.TestCheckResourceAttr("stepsecurity_github_checks.test", "controls.#", "1"),
 					res.TestCheckResourceAttr("stepsecurity_github_checks.test", "controls.0.settings.cool_down_period", "10"),
 				),
@@ -94,9 +98,9 @@ func TestAccGithubChecksResourceWithBaselineCheck(t *testing.T) {
 		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
 		Steps: []res.TestStep{
 			{
-				Config: testProviderConfig() + testAccGithubChecksResourceConfigWithBaseline("tf-acc-test"),
+				Config: testProviderConfig() + testAccGithubChecksResourceConfigWithBaseline(testOwner),
 				Check: res.ComposeAggregateTestCheckFunc(
-					res.TestCheckResourceAttr("stepsecurity_github_checks.test", "owner", "tf-acc-test"),
+					res.TestCheckResourceAttr("stepsecurity_github_checks.test", "owner", testOwner),
 					res.TestCheckResourceAttr("stepsecurity_github_checks.test", "baseline_check.repos.#", "1"),
 					res.TestCheckResourceAttr("stepsecurity_github_checks.test", "baseline_check.repos.0", "*"),
 				),
@@ -112,12 +116,73 @@ func TestAccGithubChecksResourceWithPackageExemptions(t *testing.T) {
 		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
 		Steps: []res.TestStep{
 			{
-				Config: testProviderConfig() + testAccGithubChecksResourceConfigWithPackageExemptions("tf-acc-test"),
+				Config: testProviderConfig() + testAccGithubChecksResourceConfigWithPackageExemptions(testOwner),
 				Check: res.ComposeAggregateTestCheckFunc(
-					res.TestCheckResourceAttr("stepsecurity_github_checks.test", "owner", "tf-acc-test"),
+					res.TestCheckResourceAttr("stepsecurity_github_checks.test", "owner", testOwner),
 					res.TestCheckResourceAttr("stepsecurity_github_checks.test", "controls.0.settings.packages_to_exempt_in_cooldown_check.#", "2"),
 					res.TestCheckResourceAttr("stepsecurity_github_checks.test", "controls.0.settings.packages_to_exempt_in_cooldown_check.0", "lodash"),
 					res.TestCheckResourceAttr("stepsecurity_github_checks.test", "controls.0.settings.packages_to_exempt_in_cooldown_check.1", "express"),
+				),
+			},
+		},
+	})
+}
+
+func TestAccGithubChecksResourceWithMultipleRepos(t *testing.T) {
+	t.Skip("Skipping as this test can't be run in parallel to TestAccGithubChecksResource")
+	res.Test(t, res.TestCase{
+		PreCheck:                 func() { testAccPreCheck(t) },
+		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+		Steps: []res.TestStep{
+			// Create with multiple repos in unsorted order
+			{
+				Config: testProviderConfig() + testAccGithubChecksResourceConfigWithMultipleRepos(testOwner),
+				Check: res.ComposeAggregateTestCheckFunc(
+					res.TestCheckResourceAttr("stepsecurity_github_checks.test", "owner", testOwner),
+					res.TestCheckResourceAttr("stepsecurity_github_checks.test", "controls.#", "2"),
+					res.TestCheckResourceAttr("stepsecurity_github_checks.test", "required_checks.repos.#", "2"),
+					res.TestCheckResourceAttr("stepsecurity_github_checks.test", "required_checks.repos.0", "gh-actions-test-repo-2"),
+					res.TestCheckResourceAttr("stepsecurity_github_checks.test", "required_checks.repos.1", "gh-actions-test-repo-1"),
+					res.TestCheckResourceAttr("stepsecurity_github_checks.test", "optional_checks.repos.#", "2"),
+					res.TestCheckResourceAttr("stepsecurity_github_checks.test", "optional_checks.repos.0", "gh-actions-test-repo-1"),
+					res.TestCheckResourceAttr("stepsecurity_github_checks.test", "optional_checks.repos.1", "gh-actions-test-repo-2"),
+				),
+			},
+			// Update with different order - should still be sorted
+			{
+				Config: testProviderConfig() + testAccGithubChecksResourceConfigWithMultipleReposUpdated(testOwner),
+				Check: res.ComposeAggregateTestCheckFunc(
+					res.TestCheckResourceAttr("stepsecurity_github_checks.test", "owner", testOwner),
+					// Verify repos remain sorted after update
+					res.TestCheckResourceAttr("stepsecurity_github_checks.test", "required_checks.repos.#", "2"),
+					res.TestCheckResourceAttr("stepsecurity_github_checks.test", "required_checks.repos.0", "gh-actions-test-repo-1"),
+					res.TestCheckResourceAttr("stepsecurity_github_checks.test", "required_checks.repos.1", "gh-actions-test-repo-2"),
+					// Verify optional repos remain sorted
+					res.TestCheckResourceAttr("stepsecurity_github_checks.test", "optional_checks.repos.#", "1"),
+					res.TestCheckResourceAttr("stepsecurity_github_checks.test", "optional_checks.repos.0", "gh-actions-test-repo-1"),
+				),
+			},
+		},
+	})
+}
+
+func TestAccGithubChecksResourceWithOmitRepos(t *testing.T) {
+	t.Skip("Skipping as this test can't be run in parallel to TestAccGithubChecksResource")
+	// t.Setenv("TF_ACC", "1")
+	res.Test(t, res.TestCase{
+		PreCheck:                 func() { testAccPreCheck(t) },
+		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+		Steps: []res.TestStep{
+			{
+				Config: testProviderConfig() + testAccGithubChecksResourceConfigWithOmitRepos("sailikhith-stepsecurity"),
+				Check: res.ComposeAggregateTestCheckFunc(
+					res.TestCheckResourceAttr("stepsecurity_github_checks.test", "owner", "sailikhith-stepsecurity"),
+					res.TestCheckResourceAttr("stepsecurity_github_checks.test", "required_checks.repos.#", "1"),
+					res.TestCheckResourceAttr("stepsecurity_github_checks.test", "required_checks.repos.0", "*"),
+					// Verify omit_repos are sorted alphabetically
+					res.TestCheckResourceAttr("stepsecurity_github_checks.test", "required_checks.omit_repos.#", "2"),
+					res.TestCheckResourceAttr("stepsecurity_github_checks.test", "required_checks.omit_repos.0", "gh-actions-test-repo-2"),
+					res.TestCheckResourceAttr("stepsecurity_github_checks.test", "required_checks.omit_repos.1", "gh-actions-test-repo-1"),
 				),
 			},
 		},
@@ -283,7 +348,7 @@ func TestGithubChecksResource_ValidateConfig(t *testing.T) {
 		{
 			name: "valid_config",
 			config: githubChecksModel{
-				Owner: types.StringValue("tf-acc-test"),
+				Owner: types.StringValue(testOwner),
 				Controls: []control{
 					{
 						Control:  types.StringValue("Script Injection"),
@@ -321,7 +386,7 @@ func TestGithubChecksResource_ValidateConfig(t *testing.T) {
 		{
 			name: "empty_controls",
 			config: githubChecksModel{
-				Owner:    types.StringValue("tf-acc-test"),
+				Owner:    types.StringValue(testOwner),
 				Controls: []control{},
 			},
 			expectedError: true,
@@ -330,7 +395,7 @@ func TestGithubChecksResource_ValidateConfig(t *testing.T) {
 		{
 			name: "invalid_control",
 			config: githubChecksModel{
-				Owner: types.StringValue("tf-acc-test"),
+				Owner: types.StringValue(testOwner),
 				Controls: []control{
 					{
 						Control:  types.StringValue("Invalid Control"),
@@ -346,7 +411,7 @@ func TestGithubChecksResource_ValidateConfig(t *testing.T) {
 		{
 			name: "invalid_type",
 			config: githubChecksModel{
-				Owner: types.StringValue("tf-acc-test"),
+				Owner: types.StringValue(testOwner),
 				Controls: []control{
 					{
 						Control:  types.StringValue("Script Injection"),
@@ -362,7 +427,7 @@ func TestGithubChecksResource_ValidateConfig(t *testing.T) {
 		{
 			name: "cooldown_period_out_of_range",
 			config: githubChecksModel{
-				Owner: types.StringValue("tf-acc-test"),
+				Owner: types.StringValue(testOwner),
 				Controls: []control{
 					{
 						Control:  types.StringValue("NPM Package Cooldown"),
@@ -1079,4 +1144,631 @@ resource "stepsecurity_github_checks" "test" {
   }
 }
 `, owner)
+}
+
+func testAccGithubChecksResourceConfigWithMultipleRepos(owner string) string {
+	return fmt.Sprintf(`
+resource "stepsecurity_github_checks" "test" {
+  owner = %[1]q
+
+  controls = [
+    {
+      control = "Script Injection"
+      enable  = true
+      type    = "required"
+    },
+    {
+      control = "PWN Request"
+      enable  = true
+      type    = "optional"
+    }
+  ]
+
+  required_checks = {
+    repos = ["gh-actions-test-repo-2", "gh-actions-test-repo-1"]
+  }
+
+  optional_checks = {
+    repos = ["gh-actions-test-repo-1", "gh-actions-test-repo-2"]
+  }
+}
+`, owner)
+}
+
+func testAccGithubChecksResourceConfigWithMultipleReposUpdated(owner string) string {
+	return fmt.Sprintf(`
+resource "stepsecurity_github_checks" "test" {
+  owner = %[1]q
+
+  controls = [
+    {
+      control = "Script Injection"
+      enable  = true
+      type    = "required"
+    },
+    {
+      control = "PWN Request"
+      enable  = true
+      type    = "optional"
+    }
+  ]
+
+  required_checks = {
+    repos = ["gh-actions-test-repo-1", "gh-actions-test-repo-2"]
+  }
+
+  optional_checks = {
+    repos = ["gh-actions-test-repo-1"]
+  }
+}
+`, owner)
+}
+
+func testAccGithubChecksResourceConfigWithOmitRepos(owner string) string {
+	return fmt.Sprintf(`
+resource "stepsecurity_github_checks" "test" {
+  owner = %[1]q
+
+  controls = [
+    {
+      control = "NPM Package Cooldown"
+      enable  = true
+      type    = "required"
+      settings = {
+        cool_down_period = 5
+      }
+    }
+  ]
+
+  required_checks = {
+    repos       = ["*"]
+    omit_repos  = ["gh-actions-test-repo-2", "gh-actions-test-repo-1"]
+  }
+}
+`, owner)
+}
+
+// Unit tests for comparison functions
+func TestGithubChecksResource_ListToStringSlice(t *testing.T) {
+	t.Parallel()
+
+	testCases := []struct {
+		name     string
+		list     types.List
+		expected []string
+	}{
+		{
+			name: "non_empty_list",
+			list: func() types.List {
+				elements := []attr.Value{
+					types.StringValue("repo1"),
+					types.StringValue("repo2"),
+					types.StringValue("repo3"),
+				}
+				list, _ := types.ListValue(types.StringType, elements)
+				return list
+			}(),
+			expected: []string{"repo1", "repo2", "repo3"},
+		},
+		{
+			name: "empty_list",
+			list: func() types.List {
+				elements := []attr.Value{}
+				list, _ := types.ListValue(types.StringType, elements)
+				return list
+			}(),
+			expected: []string{},
+		},
+		{
+			name:     "null_list",
+			list:     types.ListNull(types.StringType),
+			expected: nil,
+		},
+		{
+			name:     "unknown_list",
+			list:     types.ListUnknown(types.StringType),
+			expected: nil,
+		},
+		{
+			name: "single_element",
+			list: func() types.List {
+				elements := []attr.Value{types.StringValue("*")}
+				list, _ := types.ListValue(types.StringType, elements)
+				return list
+			}(),
+			expected: []string{"*"},
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			r := &githubChecksResource{}
+			got := r.listToStringSlice(tc.list)
+
+			assert.Equal(t, tc.expected, got, "listToStringSlice() result mismatch")
+		})
+	}
+}
+
+func TestGithubChecksResource_UpdateStateListsWithOrderFromPlan(t *testing.T) {
+	t.Parallel()
+
+	// Helper function to create a list from strings
+	createList := func(values []string) types.List {
+		if values == nil {
+			return types.ListNull(types.StringType)
+		}
+		elements := make([]attr.Value, len(values))
+		for i, v := range values {
+			elements[i] = types.StringValue(v)
+		}
+		list, _ := types.ListValue(types.StringType, elements)
+		return list
+	}
+
+	testCases := []struct {
+		name          string
+		plan          githubChecksModel
+		state         githubChecksModel
+		expectedState githubChecksModel
+	}{
+		{
+			name: "nil_state",
+			plan: githubChecksModel{
+				Owner: types.StringValue("test-org"),
+			},
+			state:         githubChecksModel{},
+			expectedState: githubChecksModel{},
+		},
+		{
+			name: "required_checks_repos_same_content_different_order",
+			plan: githubChecksModel{
+				Owner: types.StringValue("test-org"),
+				RequiredChecks: &checksConfig{
+					Repos: createList([]string{"repo1", "repo2", "repo3"}),
+				},
+			},
+			state: githubChecksModel{
+				Owner: types.StringValue("test-org"),
+				RequiredChecks: &checksConfig{
+					Repos: createList([]string{"repo3", "repo1", "repo2"}),
+				},
+			},
+			expectedState: githubChecksModel{
+				Owner: types.StringValue("test-org"),
+				RequiredChecks: &checksConfig{
+					Repos: createList([]string{"repo1", "repo2", "repo3"}),
+				},
+			},
+		},
+		{
+			name: "required_checks_repos_different_content",
+			plan: githubChecksModel{
+				Owner: types.StringValue("test-org"),
+				RequiredChecks: &checksConfig{
+					Repos: createList([]string{"repo1", "repo2"}),
+				},
+			},
+			state: githubChecksModel{
+				Owner: types.StringValue("test-org"),
+				RequiredChecks: &checksConfig{
+					Repos: createList([]string{"repo3", "repo4"}),
+				},
+			},
+			expectedState: githubChecksModel{
+				Owner: types.StringValue("test-org"),
+				RequiredChecks: &checksConfig{
+					Repos: createList([]string{"repo3", "repo4"}),
+				},
+			},
+		},
+		{
+			name: "required_checks_omit_repos_same_content_different_order",
+			plan: githubChecksModel{
+				Owner: types.StringValue("test-org"),
+				RequiredChecks: &checksConfig{
+					Repos:     createList([]string{"*"}),
+					OmitRepos: createList([]string{"exclude1", "exclude2"}),
+				},
+			},
+			state: githubChecksModel{
+				Owner: types.StringValue("test-org"),
+				RequiredChecks: &checksConfig{
+					Repos:     createList([]string{"*"}),
+					OmitRepos: createList([]string{"exclude2", "exclude1"}),
+				},
+			},
+			expectedState: githubChecksModel{
+				Owner: types.StringValue("test-org"),
+				RequiredChecks: &checksConfig{
+					Repos:     createList([]string{"*"}),
+					OmitRepos: createList([]string{"exclude1", "exclude2"}),
+				},
+			},
+		},
+		{
+			name: "optional_checks_repos_same_content_different_order",
+			plan: githubChecksModel{
+				Owner: types.StringValue("test-org"),
+				OptionalChecks: &checksConfig{
+					Repos: createList([]string{"opt1", "opt2"}),
+				},
+			},
+			state: githubChecksModel{
+				Owner: types.StringValue("test-org"),
+				OptionalChecks: &checksConfig{
+					Repos: createList([]string{"opt2", "opt1"}),
+				},
+			},
+			expectedState: githubChecksModel{
+				Owner: types.StringValue("test-org"),
+				OptionalChecks: &checksConfig{
+					Repos: createList([]string{"opt1", "opt2"}),
+				},
+			},
+		},
+		{
+			name: "optional_checks_omit_repos_same_content_different_order",
+			plan: githubChecksModel{
+				Owner: types.StringValue("test-org"),
+				OptionalChecks: &checksConfig{
+					Repos:     createList([]string{"*"}),
+					OmitRepos: createList([]string{"omit1", "omit2", "omit3"}),
+				},
+			},
+			state: githubChecksModel{
+				Owner: types.StringValue("test-org"),
+				OptionalChecks: &checksConfig{
+					Repos:     createList([]string{"*"}),
+					OmitRepos: createList([]string{"omit3", "omit2", "omit1"}),
+				},
+			},
+			expectedState: githubChecksModel{
+				Owner: types.StringValue("test-org"),
+				OptionalChecks: &checksConfig{
+					Repos:     createList([]string{"*"}),
+					OmitRepos: createList([]string{"omit1", "omit2", "omit3"}),
+				},
+			},
+		},
+		{
+			name: "baseline_check_repos_same_content_different_order",
+			plan: githubChecksModel{
+				Owner: types.StringValue("test-org"),
+				BaselineCheck: &checksConfig{
+					Repos: createList([]string{"base1", "base2"}),
+				},
+			},
+			state: githubChecksModel{
+				Owner: types.StringValue("test-org"),
+				BaselineCheck: &checksConfig{
+					Repos: createList([]string{"base2", "base1"}),
+				},
+			},
+			expectedState: githubChecksModel{
+				Owner: types.StringValue("test-org"),
+				BaselineCheck: &checksConfig{
+					Repos: createList([]string{"base1", "base2"}),
+				},
+			},
+		},
+		{
+			name: "baseline_check_omit_repos_same_content_different_order",
+			plan: githubChecksModel{
+				Owner: types.StringValue("test-org"),
+				BaselineCheck: &checksConfig{
+					Repos:     createList([]string{"*"}),
+					OmitRepos: createList([]string{"skip1", "skip2"}),
+				},
+			},
+			state: githubChecksModel{
+				Owner: types.StringValue("test-org"),
+				BaselineCheck: &checksConfig{
+					Repos:     createList([]string{"*"}),
+					OmitRepos: createList([]string{"skip2", "skip1"}),
+				},
+			},
+			expectedState: githubChecksModel{
+				Owner: types.StringValue("test-org"),
+				BaselineCheck: &checksConfig{
+					Repos:     createList([]string{"*"}),
+					OmitRepos: createList([]string{"skip1", "skip2"}),
+				},
+			},
+		},
+		{
+			name: "multiple_checks_all_same_content_different_order",
+			plan: githubChecksModel{
+				Owner: types.StringValue("test-org"),
+				RequiredChecks: &checksConfig{
+					Repos:     createList([]string{"req1", "req2"}),
+					OmitRepos: createList([]string{"omit1", "omit2"}),
+				},
+				OptionalChecks: &checksConfig{
+					Repos: createList([]string{"opt1", "opt2"}),
+				},
+				BaselineCheck: &checksConfig{
+					Repos: createList([]string{"base1", "base2"}),
+				},
+			},
+			state: githubChecksModel{
+				Owner: types.StringValue("test-org"),
+				RequiredChecks: &checksConfig{
+					Repos:     createList([]string{"req2", "req1"}),
+					OmitRepos: createList([]string{"omit2", "omit1"}),
+				},
+				OptionalChecks: &checksConfig{
+					Repos: createList([]string{"opt2", "opt1"}),
+				},
+				BaselineCheck: &checksConfig{
+					Repos: createList([]string{"base2", "base1"}),
+				},
+			},
+			expectedState: githubChecksModel{
+				Owner: types.StringValue("test-org"),
+				RequiredChecks: &checksConfig{
+					Repos:     createList([]string{"req1", "req2"}),
+					OmitRepos: createList([]string{"omit1", "omit2"}),
+				},
+				OptionalChecks: &checksConfig{
+					Repos: createList([]string{"opt1", "opt2"}),
+				},
+				BaselineCheck: &checksConfig{
+					Repos: createList([]string{"base1", "base2"}),
+				},
+			},
+		},
+		{
+			name: "controls_same_content_different_order",
+			plan: githubChecksModel{
+				Owner: types.StringValue("test-org"),
+				Controls: []control{
+					{
+						Control:  types.StringValue("Script Injection"),
+						Enable:   types.BoolValue(true),
+						Type:     types.StringValue("required"),
+						Settings: createNullSettingsObject(),
+					},
+					{
+						Control:  types.StringValue("PWN Request"),
+						Enable:   types.BoolValue(true),
+						Type:     types.StringValue("optional"),
+						Settings: createNullSettingsObject(),
+					},
+				},
+			},
+			state: githubChecksModel{
+				Owner: types.StringValue("test-org"),
+				Controls: []control{
+					{
+						Control:  types.StringValue("PWN Request"),
+						Enable:   types.BoolValue(true),
+						Type:     types.StringValue("optional"),
+						Settings: createNullSettingsObject(),
+					},
+					{
+						Control:  types.StringValue("Script Injection"),
+						Enable:   types.BoolValue(true),
+						Type:     types.StringValue("required"),
+						Settings: createNullSettingsObject(),
+					},
+				},
+			},
+			expectedState: githubChecksModel{
+				Owner: types.StringValue("test-org"),
+				Controls: []control{
+					{
+						Control:  types.StringValue("Script Injection"),
+						Enable:   types.BoolValue(true),
+						Type:     types.StringValue("required"),
+						Settings: createNullSettingsObject(),
+					},
+					{
+						Control:  types.StringValue("PWN Request"),
+						Enable:   types.BoolValue(true),
+						Type:     types.StringValue("optional"),
+						Settings: createNullSettingsObject(),
+					},
+				},
+			},
+		},
+		{
+			name: "controls_with_settings_same_content_different_order",
+			plan: githubChecksModel{
+				Owner: types.StringValue("test-org"),
+				Controls: []control{
+					{
+						Control:  types.StringValue("NPM Package Cooldown"),
+						Enable:   types.BoolValue(true),
+						Type:     types.StringValue("required"),
+						Settings: createSettingsObject(func() *int64 { v := int64(5); return &v }(), []string{"lodash", "express"}),
+					},
+					{
+						Control:  types.StringValue("Script Injection"),
+						Enable:   types.BoolValue(true),
+						Type:     types.StringValue("required"),
+						Settings: createNullSettingsObject(),
+					},
+				},
+			},
+			state: githubChecksModel{
+				Owner: types.StringValue("test-org"),
+				Controls: []control{
+					{
+						Control:  types.StringValue("Script Injection"),
+						Enable:   types.BoolValue(true),
+						Type:     types.StringValue("required"),
+						Settings: createNullSettingsObject(),
+					},
+					{
+						Control:  types.StringValue("NPM Package Cooldown"),
+						Enable:   types.BoolValue(true),
+						Type:     types.StringValue("required"),
+						Settings: createSettingsObject(func() *int64 { v := int64(5); return &v }(), []string{"express", "lodash"}),
+					},
+				},
+			},
+			expectedState: githubChecksModel{
+				Owner: types.StringValue("test-org"),
+				Controls: []control{
+					{
+						Control:  types.StringValue("NPM Package Cooldown"),
+						Enable:   types.BoolValue(true),
+						Type:     types.StringValue("required"),
+						Settings: createSettingsObject(func() *int64 { v := int64(5); return &v }(), []string{"express", "lodash"}),
+					},
+					{
+						Control:  types.StringValue("Script Injection"),
+						Enable:   types.BoolValue(true),
+						Type:     types.StringValue("required"),
+						Settings: createNullSettingsObject(),
+					},
+				},
+			},
+		},
+		{
+			name: "controls_missing_in_state",
+			plan: githubChecksModel{
+				Owner: types.StringValue("test-org"),
+				Controls: []control{
+					{
+						Control:  types.StringValue("Script Injection"),
+						Enable:   types.BoolValue(true),
+						Type:     types.StringValue("required"),
+						Settings: createNullSettingsObject(),
+					},
+					{
+						Control:  types.StringValue("PWN Request"),
+						Enable:   types.BoolValue(true),
+						Type:     types.StringValue("optional"),
+						Settings: createNullSettingsObject(),
+					},
+				},
+			},
+			state: githubChecksModel{
+				Owner: types.StringValue("test-org"),
+				Controls: []control{
+					{
+						Control:  types.StringValue("Script Injection"),
+						Enable:   types.BoolValue(true),
+						Type:     types.StringValue("required"),
+						Settings: createNullSettingsObject(),
+					},
+				},
+			},
+			expectedState: githubChecksModel{
+				Owner: types.StringValue("test-org"),
+				Controls: []control{
+					{
+						Control:  types.StringValue("Script Injection"),
+						Enable:   types.BoolValue(true),
+						Type:     types.StringValue("required"),
+						Settings: createNullSettingsObject(),
+					},
+				},
+			},
+		},
+		{
+			name: "plan_has_nil_required_checks_state_has_value",
+			plan: githubChecksModel{
+				Owner:          types.StringValue("test-org"),
+				RequiredChecks: nil,
+			},
+			state: githubChecksModel{
+				Owner: types.StringValue("test-org"),
+				RequiredChecks: &checksConfig{
+					Repos: createList([]string{"repo1"}),
+				},
+			},
+			expectedState: githubChecksModel{
+				Owner: types.StringValue("test-org"),
+				RequiredChecks: &checksConfig{
+					Repos: createList([]string{"repo1"}),
+				},
+			},
+		},
+		{
+			name: "plan_has_value_state_has_nil_optional_checks",
+			plan: githubChecksModel{
+				Owner: types.StringValue("test-org"),
+				OptionalChecks: &checksConfig{
+					Repos: createList([]string{"opt1"}),
+				},
+			},
+			state: githubChecksModel{
+				Owner:          types.StringValue("test-org"),
+				OptionalChecks: nil,
+			},
+			expectedState: githubChecksModel{
+				Owner:          types.StringValue("test-org"),
+				OptionalChecks: nil,
+			},
+		},
+		{
+			name: "empty_controls",
+			plan: githubChecksModel{
+				Owner:    types.StringValue("test-org"),
+				Controls: []control{},
+			},
+			state: githubChecksModel{
+				Owner:    types.StringValue("test-org"),
+				Controls: []control{},
+			},
+			expectedState: githubChecksModel{
+				Owner:    types.StringValue("test-org"),
+				Controls: []control{},
+			},
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			r := &githubChecksResource{}
+			ctx := context.Background()
+
+			// Make a copy of state to avoid modifying the test case
+			stateCopy := tc.state
+
+			r.updateStateListsWithOrderFromPlan(ctx, tc.plan, &stateCopy)
+
+			// For controls, we need to manually check the order
+			if len(tc.expectedState.Controls) > 0 {
+				assert.Equal(t, len(tc.expectedState.Controls), len(stateCopy.Controls), "Controls length mismatch")
+				for i := range tc.expectedState.Controls {
+					assert.Equal(t, tc.expectedState.Controls[i].Control.ValueString(), stateCopy.Controls[i].Control.ValueString(),
+						"Control name mismatch at index %d", i)
+					assert.Equal(t, tc.expectedState.Controls[i].Enable.ValueBool(), stateCopy.Controls[i].Enable.ValueBool(),
+						"Control enable mismatch at index %d", i)
+					assert.Equal(t, tc.expectedState.Controls[i].Type.ValueString(), stateCopy.Controls[i].Type.ValueString(),
+						"Control type mismatch at index %d", i)
+				}
+			}
+
+			// For lists, compare the string representation
+			if tc.expectedState.RequiredChecks != nil && stateCopy.RequiredChecks != nil {
+				assert.Equal(t, r.listToStringSlice(tc.expectedState.RequiredChecks.Repos),
+					r.listToStringSlice(stateCopy.RequiredChecks.Repos), "RequiredChecks.Repos mismatch")
+				assert.Equal(t, r.listToStringSlice(tc.expectedState.RequiredChecks.OmitRepos),
+					r.listToStringSlice(stateCopy.RequiredChecks.OmitRepos), "RequiredChecks.OmitRepos mismatch")
+			}
+
+			if tc.expectedState.OptionalChecks != nil && stateCopy.OptionalChecks != nil {
+				assert.Equal(t, r.listToStringSlice(tc.expectedState.OptionalChecks.Repos),
+					r.listToStringSlice(stateCopy.OptionalChecks.Repos), "OptionalChecks.Repos mismatch")
+				assert.Equal(t, r.listToStringSlice(tc.expectedState.OptionalChecks.OmitRepos),
+					r.listToStringSlice(stateCopy.OptionalChecks.OmitRepos), "OptionalChecks.OmitRepos mismatch")
+			}
+
+			if tc.expectedState.BaselineCheck != nil && stateCopy.BaselineCheck != nil {
+				assert.Equal(t, r.listToStringSlice(tc.expectedState.BaselineCheck.Repos),
+					r.listToStringSlice(stateCopy.BaselineCheck.Repos), "BaselineCheck.Repos mismatch")
+				assert.Equal(t, r.listToStringSlice(tc.expectedState.BaselineCheck.OmitRepos),
+					r.listToStringSlice(stateCopy.BaselineCheck.OmitRepos), "BaselineCheck.OmitRepos mismatch")
+			}
+		})
+	}
 }
