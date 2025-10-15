@@ -26,8 +26,31 @@ provider "stepsecurity" {
   customer = "abcdefg"  # can also be set as env variable STEP_SECURITY_CUSTOMER
 }
 
-# creates policy for auto remediation of findings detected by stepsecurity in selected repos by creating a pr.
-resource "stepsecurity_policy_driven_pr" "test-organization" {
+# ============================================================================
+# Scenario 1: Org-level config for all repos
+# ============================================================================
+# Creates policy that applies to ALL repositories in the organization
+resource "stepsecurity_policy_driven_pr" "org_level_all" {
+  owner          = "test-organization"
+  selected_repos = ["*"] # Wildcard applies to all repos
+  auto_remediation_options = {
+    create_pr                             = true
+    create_issue                          = false
+    create_github_advanced_security_alert = false
+    harden_github_hosted_runner           = true
+    pin_actions_to_sha                    = true
+    restrict_github_token_permissions     = false
+    secure_docker_file                    = false
+    actions_to_exempt_while_pinning       = ["actions/checkout", "actions/setup-node"]
+  }
+}
+
+# ============================================================================
+# Scenario 2: Repo-level config for specific repos
+# ============================================================================
+# Applies configuration to specific repositories
+# Config is applied at repo level
+resource "stepsecurity_policy_driven_pr" "repo_level_config" {
   owner          = "test-organization"
   selected_repos = ["test-repo-1", "test-repo-2"]
   auto_remediation_options = {
@@ -36,17 +59,53 @@ resource "stepsecurity_policy_driven_pr" "test-organization" {
     create_github_advanced_security_alert         = false
     harden_github_hosted_runner                   = true
     pin_actions_to_sha                            = true
-    restrict_github_token_permissions             = false
+    restrict_github_token_permissions             = true
+    secure_docker_file                            = true
     actions_to_exempt_while_pinning               = ["actions/checkout", "actions/setup-node"]
     actions_to_replace_with_step_security_actions = ["EnricoMi/publish-unit-test-result-action"]
+    # v2-only features (requires policy-driven PR v2 to be enabled)
+    update_precommit_file = ["eslint"]
+    package_ecosystem = [
+      {
+        package  = "npm"
+        interval = "daily"
+      },
+      {
+        package  = "pip"
+        interval = "weekly"
+      }
+    ]
+    add_workflows = "https://github.com/[owner]/[repo]"
   }
 }
 
+# ============================================================================
+# Scenario 3: Org-level config with exclusions (opt-out specific repos)
+# ============================================================================
+# Applies org-level config to all repos EXCEPT the ones in excluded_repos
+# Excluded repos will not have any policy-driven PR config applied
+resource "stepsecurity_policy_driven_pr" "org_level_with_exclusions" {
+  owner          = "test-organization"
+  selected_repos = ["*"]
+  excluded_repos = ["archived-repo", "test-repo-old"] # These repos opt-out
+  auto_remediation_options = {
+    create_pr                             = true
+    create_issue                          = false
+    create_github_advanced_security_alert = false
+    harden_github_hosted_runner           = true
+    pin_actions_to_sha                    = true
+    restrict_github_token_permissions     = false
+    secure_docker_file                    = false
+  }
+}
+
+# ============================================================================
 # For importing existing policy driven pr config to terraform state
-# this will be helpful to manage existing policy driven pr config using terraform
-# alternative to this is to use terraform import command
+# ============================================================================
+# This will be helpful to manage existing policy driven pr config using terraform
+# Alternative to this is to use terraform import command
 import {
-  to = stepsecurity_policy_driven_pr.test-organization
+  to = stepsecurity_policy_driven_pr.org_level_all
   id = "test-organization"
 }
 ```
@@ -58,7 +117,11 @@ import {
 
 - `auto_remediation_options` (Attributes) (see [below for nested schema](#nestedatt--auto_remediation_options))
 - `owner` (String) The owner/organization name where the policy-driven PR's to be created.
-- `selected_repos` (List of String) List of repositories to apply the policy-driven PR to. Can provide ['*'] to apply to all current and future repositories.
+- `selected_repos` (List of String) List of repositories to apply the policy-driven PR to. Use ['*'] to apply to all repositories.
+
+### Optional
+
+- `excluded_repos` (List of String) List of repositories to exclude when selected_repos is ['*']. It restores their original configs (preserving configs from other Terraform resources) or deletes configs for repos that had none.
 
 ### Read-Only
 
@@ -71,12 +134,24 @@ Optional:
 
 - `actions_to_exempt_while_pinning` (List of String) List of actions to exempt while pinning actions to SHA. When exempted, the action will not be pinned to SHA.
 - `actions_to_replace_with_step_security_actions` (List of String) List of actions to replace with Step Security actions. When provided, the actions will be replaced with Step Security actions.
+- `add_workflows` (String) Additional workflows to add as part of policy-driven PR.
 - `create_github_advanced_security_alert` (Boolean) Create a GitHub Advanced Security alert when a finding is detected. Note that this triggers only when issue creation is enabled.
 - `create_issue` (Boolean) Create an issue when a finding is detected.
 - `create_pr` (Boolean) Create a PR when a finding is detected.
 - `harden_github_hosted_runner` (Boolean) When enabled, this creates a PR/issue to install security agent on the GitHub-hosted runner to prevent exfiltration of credentials, monitor the build process, and detect compromised dependencies.
+- `package_ecosystem` (Attributes List) List of package ecosystems to enable for dependency updates. (see [below for nested schema](#nestedatt--auto_remediation_options--package_ecosystem))
 - `pin_actions_to_sha` (Boolean) When enabled, this creates a PR/issue to pin actions to SHA. GitHub's Security Hardening guide recommends pinning actions to full length commit for third party actions.
 - `restrict_github_token_permissions` (Boolean) When enabled, this creates a PR/issue to restrict GitHub token permissions. GitHub's Security Hardening guide recommends restricting permissions to the minimum required
+- `secure_docker_file` (Boolean) When enabled, this creates a PR/issue to secure Dockerfile by pinning base images to SHA.
+- `update_precommit_file` (List of String) List of pre-commit file paths to update (e.g., ['.pre-commit-config.yaml']).
+
+<a id="nestedatt--auto_remediation_options--package_ecosystem"></a>
+### Nested Schema for `auto_remediation_options.package_ecosystem`
+
+Required:
+
+- `interval` (String) Update interval (e.g., 'daily', 'weekly', 'monthly').
+- `package` (String) Package ecosystem (e.g., 'npm', 'pip', 'docker').
 
 ## Import
 

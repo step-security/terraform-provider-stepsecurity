@@ -26,9 +26,11 @@ type Client interface {
 
 	// policy-driven PRs
 	CreatePolicyDrivenPRPolicy(ctx context.Context, createRequest PolicyDrivenPRPolicy) error
-	GetPolicyDrivenPRPolicy(ctx context.Context, owner string) (*PolicyDrivenPRPolicy, error)
+	GetPolicyDrivenPRPolicy(ctx context.Context, owner string, repos []string) (*PolicyDrivenPRPolicy, error)
+	DiscoverPolicyDrivenPRConfig(ctx context.Context, owner string) (*PolicyDrivenPRPolicy, error)
 	UpdatePolicyDrivenPRPolicy(ctx context.Context, updateRequest PolicyDrivenPRPolicy, removedRepos []string) error
 	DeletePolicyDrivenPRPolicy(ctx context.Context, owner string, repos []string) error
+	GetSubscriptionStatus(ctx context.Context, owner, repo string) (*SubscriptionStatus, error)
 
 	// GitHub Policy Store
 	CreateGitHubPolicyStorePolicy(ctx context.Context, policy *GitHubPolicyStorePolicy) error
@@ -94,7 +96,7 @@ func (c *APIClient) do(req *http.Request) ([]byte, error) {
 		return nil, err
 	}
 
-	if res.StatusCode == http.StatusOK || res.StatusCode == http.StatusCreated {
+	if res.StatusCode == http.StatusOK || res.StatusCode == http.StatusCreated || res.StatusCode == http.StatusNoContent {
 		return body, err
 	}
 
