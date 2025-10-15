@@ -53,6 +53,11 @@ type Client interface {
 	GetPRChecksConfig(ctx context.Context, owner string) (GitHubPRChecksConfig, error)
 	UpdatePRChecksConfig(ctx context.Context, owner string, req GitHubPRChecksConfig) error
 	DeletePRChecksConfig(ctx context.Context, owner string) error
+
+	// GitHub PR Template
+	GetGitHubPRTemplate(ctx context.Context, owner string) (*GitHubPRTemplate, error)
+	UpdateGitHubPRTemplate(ctx context.Context, owner string, template GitHubPRTemplate) error
+	DeleteGitHubPRTemplate(ctx context.Context, owner string) error
 }
 
 type APIClient struct {
