@@ -33,7 +33,7 @@ resource "stepsecurity_github_supression_rule" "rule-1" {
   type        = "anomalous_outbound_network_call"
   action      = "ignore"
   description = "test"
-  destination {
+  destination = {
     domain = "*.amazonaws.com"
   }
   process = "*"
