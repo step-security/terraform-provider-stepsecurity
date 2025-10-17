@@ -100,7 +100,6 @@ func (r *githubSupressionRuleResource) Schema(_ context.Context, _ resource.Sche
 					},
 					"domain": schema.StringAttribute{
 						Optional:    true,
-						Computed:    true,
 						Description: "The domain to ignore. Can only be set when ip is not set.",
 					},
 				},
