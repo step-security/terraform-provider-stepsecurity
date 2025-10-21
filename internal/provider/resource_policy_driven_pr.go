@@ -182,6 +182,11 @@ func (r *policyDrivenPRResource) Schema(_ context.Context, _ resource.SchemaRequ
 						Optional:    true,
 						Description: "Additional workflows to add as part of policy-driven PR.",
 					},
+					"action_commit_map": schema.MapAttribute{
+						ElementType: types.StringType,
+						Optional:    true,
+						Description: "Map of actions to their corresponding commit SHAs to bypass pinning",
+					},
 				},
 			},
 			"selected_repos": schema.ListAttribute{
