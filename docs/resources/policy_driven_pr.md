@@ -132,6 +132,7 @@ import {
 
 Optional:
 
+- `action_commit_map` (Map of String) Map of actions to their corresponding commit SHAs to bypass pinning
 - `actions_to_exempt_while_pinning` (List of String) List of actions to exempt while pinning actions to SHA. When exempted, the action will not be pinned to SHA.
 - `actions_to_replace_with_step_security_actions` (List of String) List of actions to replace with Step Security actions. When provided, the actions will be replaced with Step Security actions.
 - `add_workflows` (String) Additional workflows to add as part of policy-driven PR.
