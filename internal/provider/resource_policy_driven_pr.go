@@ -346,7 +346,7 @@ func (r *policyDrivenPRResource) ImportState(ctx context.Context, req resource.I
 					},
 				},
 			},
-			"add_workflows":      types.StringType,
+			"add_workflows":     types.StringType,
 			"action_commit_map": types.MapType{ElemType: types.StringType},
 		},
 		map[string]attr.Value{
@@ -903,6 +903,16 @@ func (r *policyDrivenPRResource) Read(ctx context.Context, req resource.ReadRequ
 		tflog.Info(ctx, "Preserving actions_to_replace_with_step_security_actions from state")
 	}
 
+	if len(stepSecurityPolicy.AutoRemdiationOptions.ActionCommitMap) == 0 &&
+		!currentStateOptions.ActionCommitMap.IsNull() &&
+		len(currentStateOptions.ActionCommitMap.Elements()) > 0 {
+		stepSecurityPolicy.AutoRemdiationOptions.ActionCommitMap = make(map[string]string)
+		for key, value := range currentStateOptions.ActionCommitMap.Elements() {
+			stepSecurityPolicy.AutoRemdiationOptions.ActionCommitMap[key] = value.(types.String).ValueString()
+		}
+		tflog.Info(ctx, "Preserving action_commit_map from state")
+	}
+
 	// Update state with API response, preserving selected_repos and excluded_repos from state
 	r.updatePolicyDrivenPRState(ctx, *stepSecurityPolicy, &state, stateSelectedRepos, stateExcludedRepos)
 
@@ -1293,7 +1303,7 @@ func (r *policyDrivenPRResource) updatePolicyDrivenPRState(ctx context.Context, 
 					},
 				},
 			},
-			"add_workflows":      types.StringType,
+			"add_workflows":     types.StringType,
 			"action_commit_map": types.MapType{ElemType: types.StringType},
 		},
 		map[string]attr.Value{
