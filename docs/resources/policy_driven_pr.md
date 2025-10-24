@@ -76,10 +76,12 @@ resource "stepsecurity_policy_driven_pr" "repo_level_config" {
       }
     ]
     add_workflows = "https://github.com/[owner]/[repo]"
-    action_commit_map = { "codecov/codecov-action@v5" : "cf3f51a67d2820f7a7cefa0831889fbbef41ca57",
+    action_commit_map = {
+      "codecov/codecov-action@v5" : "cf3f51a67d2820f7a7cefa0831889fbbef41ca57",
       "codecov/codecov-action@v4" : "5ecb98a3c6b747ed38dc09f787459979aebb39be",
       "google-github-actions/auth@v2" : "ba79af03959ebeac9769e648f473a284504d9193",
-    "google-github-actions/auth@v3" : "7c6bc770dae815cd3e89ee6cdf493a5fab2cc093" }
+      "google-github-actions/auth@v3" : "7c6bc770dae815cd3e89ee6cdf493a5fab2cc093"
+    }
   }
 }
 
