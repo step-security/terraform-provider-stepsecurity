@@ -61,7 +61,7 @@ resource "stepsecurity_policy_driven_pr" "repo_level_config" {
         interval = "weekly"
       }
     ]
-    add_workflows     = "https://github.com/[owner]/[repo]",
+    add_workflows     = "https://github.com/[owner]/[repo]"
     action_commit_map = { "codecov/codecov-action@v5" : "cf3f51a67d2820f7a7cefa0831889fbbef41ca57" }
   }
 }
