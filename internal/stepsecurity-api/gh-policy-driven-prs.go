@@ -30,7 +30,7 @@ type AutoRemdiationOptions struct {
 	UpdatePrecommitFile                     []string           `json:"update_precommit_file,omitempty"`
 	PackageEcosystem                        []DependabotConfig `json:"package_ecosystem,omitempty"`
 	AddWorkflows                            string             `json:"add_workflows,omitempty"`
-	ActionCommitMap                         map[string]string  `json:"action_commit_map,omitempty"`
+	ActionCommitMap                         map[string]string  `json:"action_commit_map"`
 }
 
 // API request/response structures matching agent-api
@@ -57,7 +57,7 @@ type controlSettings struct {
 	PackageEcosystem              []DependabotConfig `json:"package_ecosystem,omitempty"`
 	AddWorkflows                  string             `json:"add_workflows,omitempty"`
 	ApplyIssuePRConfigForAllRepos *bool              `json:"apply_issue_pr_config_for_all_repos,omitempty"`
-	ActionCommitMap               map[string]string  `json:"action_commit_map,omitempty"`
+	ActionCommitMap               map[string]string  `json:"action_commit_map"`
 }
 
 type DependabotConfig struct {

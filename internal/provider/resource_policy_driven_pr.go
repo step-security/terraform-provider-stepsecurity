@@ -903,14 +903,14 @@ func (r *policyDrivenPRResource) Read(ctx context.Context, req resource.ReadRequ
 		tflog.Info(ctx, "Preserving actions_to_replace_with_step_security_actions from state")
 	}
 
-	if len(stepSecurityPolicy.AutoRemdiationOptions.ActionCommitMap) == 0 &&
-		!currentStateOptions.ActionCommitMap.IsNull() &&
-		len(currentStateOptions.ActionCommitMap.Elements()) > 0 {
+	if !currentStateOptions.ActionCommitMap.IsNull() {
 		stepSecurityPolicy.AutoRemdiationOptions.ActionCommitMap = make(map[string]string)
 		for key, value := range currentStateOptions.ActionCommitMap.Elements() {
 			stepSecurityPolicy.AutoRemdiationOptions.ActionCommitMap[key] = value.(types.String).ValueString()
 		}
 		tflog.Info(ctx, "Preserving action_commit_map from state")
+	} else if len(stepSecurityPolicy.AutoRemdiationOptions.ActionCommitMap) == 0 {
+		stepSecurityPolicy.AutoRemdiationOptions.ActionCommitMap = map[string]string{}
 	}
 
 	// Update state with API response, preserving selected_repos and excluded_repos from state
@@ -1060,6 +1060,8 @@ func (r *policyDrivenPRResource) Update(ctx context.Context, req resource.Update
 		for key, value := range planOptions.ActionCommitMap.Elements() {
 			actionCommitMapPlan[key] = value.(types.String).ValueString()
 		}
+	} else if len(planOptions.ActionCommitMap.Elements()) == 0 {
+		actionCommitMapPlan = map[string]string{}
 	}
 
 	// Automatically compute config levels based on planRepos
