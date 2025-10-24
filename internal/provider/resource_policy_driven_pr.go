@@ -182,6 +182,11 @@ func (r *policyDrivenPRResource) Schema(_ context.Context, _ resource.SchemaRequ
 						Optional:    true,
 						Description: "Additional workflows to add as part of policy-driven PR.",
 					},
+					"action_commit_map": schema.MapAttribute{
+						ElementType: types.StringType,
+						Optional:    true,
+						Description: "Map of actions to their corresponding commit SHAs to bypass pinning",
+					},
 				},
 			},
 			"selected_repos": schema.ListAttribute{
@@ -310,6 +315,17 @@ func (r *policyDrivenPRResource) ImportState(ctx context.Context, req resource.I
 		addWorkflowsValue = types.StringNull()
 	}
 
+	var actionCommitMapValue types.Map
+	if len(policy.AutoRemdiationOptions.ActionCommitMap) > 0 {
+		mapElements := make(map[string]attr.Value)
+		for key, value := range policy.AutoRemdiationOptions.ActionCommitMap {
+			mapElements[key] = types.StringValue(value)
+		}
+		actionCommitMapValue, _ = types.MapValue(types.StringType, mapElements)
+	} else {
+		actionCommitMapValue = types.MapNull(types.StringType)
+	}
+
 	optionsObj, _ := types.ObjectValue(
 		map[string]attr.Type{
 			"create_pr":                                     types.BoolType,
@@ -330,7 +346,8 @@ func (r *policyDrivenPRResource) ImportState(ctx context.Context, req resource.I
 					},
 				},
 			},
-			"add_workflows": types.StringType,
+			"add_workflows":     types.StringType,
+			"action_commit_map": types.MapType{ElemType: types.StringType},
 		},
 		map[string]attr.Value{
 			"create_pr":                                     types.BoolValue(policy.AutoRemdiationOptions.CreatePR),
@@ -345,6 +362,7 @@ func (r *policyDrivenPRResource) ImportState(ctx context.Context, req resource.I
 			"update_precommit_file":                         updatePrecommitFileList,
 			"package_ecosystem":                             packageEcosystemList,
 			"add_workflows":                                 addWorkflowsValue,
+			"action_commit_map":                             actionCommitMapValue,
 		},
 	)
 	state.AutoRemdiationOptions = optionsObj
@@ -375,6 +393,7 @@ type autoRemdiationOptionsModel struct {
 	UpdatePrecommitFile                     types.List   `tfsdk:"update_precommit_file"`
 	PackageEcosystem                        types.List   `tfsdk:"package_ecosystem"`
 	AddWorkflows                            types.String `tfsdk:"add_workflows"`
+	ActionCommitMap                         types.Map    `tfsdk:"action_commit_map"`
 }
 
 type packageEcosystemModel struct {
@@ -618,6 +637,14 @@ func (r *policyDrivenPRResource) Create(ctx context.Context, req resource.Create
 		}
 	}
 
+	var actionCommitMap map[string]string
+	if !options.ActionCommitMap.IsNull() {
+		actionCommitMap = make(map[string]string)
+		for key, value := range options.ActionCommitMap.Elements() {
+			actionCommitMap[key] = value.(types.String).ValueString()
+		}
+	}
+
 	// Automatically compute config levels based on selected_repos
 	// If selected_repos = ["*"], use org-level config
 	// Otherwise, use repo-level config
@@ -641,6 +668,7 @@ func (r *policyDrivenPRResource) Create(ctx context.Context, req resource.Create
 			UpdatePrecommitFile:                     updatePrecommitFile,
 			PackageEcosystem:                        packageEcosystem,
 			AddWorkflows:                            options.AddWorkflows.ValueString(),
+			ActionCommitMap:                         actionCommitMap,
 		},
 		SelectedRepos:      selectedRepos,
 		UseRepoLevelConfig: useRepoLevel,
@@ -875,6 +903,16 @@ func (r *policyDrivenPRResource) Read(ctx context.Context, req resource.ReadRequ
 		tflog.Info(ctx, "Preserving actions_to_replace_with_step_security_actions from state")
 	}
 
+	if !currentStateOptions.ActionCommitMap.IsNull() {
+		stepSecurityPolicy.AutoRemdiationOptions.ActionCommitMap = make(map[string]string)
+		for key, value := range currentStateOptions.ActionCommitMap.Elements() {
+			stepSecurityPolicy.AutoRemdiationOptions.ActionCommitMap[key] = value.(types.String).ValueString()
+		}
+		tflog.Info(ctx, "Preserving action_commit_map from state")
+	} else if len(stepSecurityPolicy.AutoRemdiationOptions.ActionCommitMap) == 0 {
+		stepSecurityPolicy.AutoRemdiationOptions.ActionCommitMap = map[string]string{}
+	}
+
 	// Update state with API response, preserving selected_repos and excluded_repos from state
 	r.updatePolicyDrivenPRState(ctx, *stepSecurityPolicy, &state, stateSelectedRepos, stateExcludedRepos)
 
@@ -1016,6 +1054,16 @@ func (r *policyDrivenPRResource) Update(ctx context.Context, req resource.Update
 		}
 	}
 
+	var actionCommitMapPlan map[string]string
+	if !planOptions.ActionCommitMap.IsNull() {
+		actionCommitMapPlan = make(map[string]string)
+		for key, value := range planOptions.ActionCommitMap.Elements() {
+			actionCommitMapPlan[key] = value.(types.String).ValueString()
+		}
+	} else if len(planOptions.ActionCommitMap.Elements()) == 0 {
+		actionCommitMapPlan = map[string]string{}
+	}
+
 	// Automatically compute config levels based on planRepos
 	// If planRepos = ["*"], use org-level config
 	// Otherwise, use repo-level config
@@ -1038,6 +1086,7 @@ func (r *policyDrivenPRResource) Update(ctx context.Context, req resource.Update
 			UpdatePrecommitFile:                     updatePrecommitFilePlan,
 			PackageEcosystem:                        packageEcosystemPlan,
 			AddWorkflows:                            planOptions.AddWorkflows.ValueString(),
+			ActionCommitMap:                         actionCommitMapPlan,
 		},
 		SelectedRepos:      planRepos,
 		UseRepoLevelConfig: useRepoLevel,
@@ -1225,6 +1274,17 @@ func (r *policyDrivenPRResource) updatePolicyDrivenPRState(ctx context.Context, 
 		addWorkflowsValue = types.StringNull()
 	}
 
+	var actionCommitMapValue types.Map
+	if len(stepSecurityPolicy.AutoRemdiationOptions.ActionCommitMap) > 0 {
+		mapElements := make(map[string]attr.Value)
+		for key, value := range stepSecurityPolicy.AutoRemdiationOptions.ActionCommitMap {
+			mapElements[key] = types.StringValue(value)
+		}
+		actionCommitMapValue, _ = types.MapValue(types.StringType, mapElements)
+	} else {
+		actionCommitMapValue = types.MapNull(types.StringType)
+	}
+
 	optionsObj, _ := types.ObjectValue(
 		map[string]attr.Type{
 			"create_pr":                                     types.BoolType,
@@ -1245,7 +1305,8 @@ func (r *policyDrivenPRResource) updatePolicyDrivenPRState(ctx context.Context, 
 					},
 				},
 			},
-			"add_workflows": types.StringType,
+			"add_workflows":     types.StringType,
+			"action_commit_map": types.MapType{ElemType: types.StringType},
 		},
 		map[string]attr.Value{
 			"create_pr":                                     types.BoolValue(stepSecurityPolicy.AutoRemdiationOptions.CreatePR),
@@ -1260,6 +1321,7 @@ func (r *policyDrivenPRResource) updatePolicyDrivenPRState(ctx context.Context, 
 			"update_precommit_file":                         updatePrecommitFileList,
 			"package_ecosystem":                             packageEcosystemList,
 			"add_workflows":                                 addWorkflowsValue,
+			"action_commit_map":                             actionCommitMapValue,
 		},
 	)
 	state.AutoRemdiationOptions = optionsObj
