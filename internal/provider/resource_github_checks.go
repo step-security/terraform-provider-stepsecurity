@@ -430,8 +430,17 @@ func (r *githubChecksResource) Create(ctx context.Context, req resource.CreateRe
 		return
 	}
 
-	state := r.convertToState(plan.Owner.ValueString(), *createRequest)
-	state.Owner = types.StringValue(plan.Owner.ValueString())
+	// Read back the actual state from the API
+	config, err := r.client.GetPRChecksConfig(ctx, plan.Owner.ValueString())
+	if err != nil {
+		resp.Diagnostics.AddError(
+			"Error reading GitHub Checks after creation",
+			err.Error(),
+		)
+		return
+	}
+
+	state := r.convertToState(plan.Owner.ValueString(), config)
 	r.updateStateListsWithOrderFromPlan(ctx, plan, &state)
 
 	diags = resp.State.Set(ctx, state)
@@ -497,8 +506,17 @@ func (r *githubChecksResource) Update(ctx context.Context, req resource.UpdateRe
 		return
 	}
 
-	state := r.convertToState(plan.Owner.ValueString(), *updateRequest)
-	state.Owner = types.StringValue(plan.Owner.ValueString())
+	// Read back the actual state from the API
+	config, err := r.client.GetPRChecksConfig(ctx, plan.Owner.ValueString())
+	if err != nil {
+		resp.Diagnostics.AddError(
+			"Error reading GitHub Checks after update",
+			err.Error(),
+		)
+		return
+	}
+
+	state := r.convertToState(plan.Owner.ValueString(), config)
 	r.updateStateListsWithOrderFromPlan(ctx, plan, &state)
 
 	diags = resp.State.Set(ctx, state)
