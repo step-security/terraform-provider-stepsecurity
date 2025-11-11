@@ -33,6 +33,9 @@ resource "stepsecurity_github_org_notification_settings" "test-organization" {
     slack_webhook_url = "https://hooks.slack.com/services/T00000000/B00000000/XXXXXXXXXXXXXXXXXXXXXXXX"
     teams_webhook_url = "https://outlook.office.com/webhook/00000000-0000-0000-0000-000000000000@00000000-0000-0000-0000-000000000000/IncomingWebhook/00000000000000000000000000000000"
     email             = "step-security@step-security.com"
+    # Optional: Configure Slack OAuth method for notifications
+    slack_notification_method = "oauth"        # "webhook" (default) or "oauth"
+    slack_channel_id          = "C01234567890" # Required when using OAuth method
   }
   notification_events = {
     domain_blocked                        = true
@@ -79,6 +82,8 @@ import {
 Optional:
 
 - `email` (String) The email address to receive notifications. If not provided, no notifications will be sent to the email address.
+- `slack_channel_id` (String) The Slack channel ID to post notifications to when using OAuth method. Required when slack_notification_method is 'oauth'.
+- `slack_notification_method` (String) The method to use for sending Slack notifications. Valid values are 'webhook' (default) or 'oauth'.
 - `slack_webhook_url` (String) The Slack webhook URL to receive notifications. If not provided, no notifications will be sent to Slack.
 - `teams_webhook_url` (String) The Microsoft Teams webhook URL to receive notifications. If not provided, no notifications will be sent to Microsoft Teams.
 

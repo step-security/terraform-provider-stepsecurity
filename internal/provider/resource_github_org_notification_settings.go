@@ -77,6 +77,18 @@ func (r *GithubRepoNotificationSettingsResource) Schema(_ context.Context, _ res
 						Description: "The email address to receive notifications. If not provided, no notifications will be sent to the email address.",
 						Default:     stringdefault.StaticString(" "),
 					},
+					"slack_channel_id": schema.StringAttribute{
+						Optional:    true,
+						Computed:    true,
+						Description: "The Slack channel ID to post notifications to when using OAuth method. Required when slack_notification_method is 'oauth'.",
+						Default:     stringdefault.StaticString(" "),
+					},
+					"slack_notification_method": schema.StringAttribute{
+						Optional:    true,
+						Computed:    true,
+						Description: "The method to use for sending Slack notifications. Valid values are 'webhook' (default) or 'oauth'.",
+						Default:     stringdefault.StaticString("webhook"),
+					},
 				},
 			},
 			"notification_events": schema.SingleNestedAttribute{
@@ -213,9 +225,11 @@ type githubNotificationSettingsModel struct {
 }
 
 type githubNotificationChannelsModel struct {
-	SlackWebhookURL types.String `tfsdk:"slack_webhook_url"`
-	TeamsWebhookURL types.String `tfsdk:"teams_webhook_url"`
-	Email           types.String `tfsdk:"email"`
+	SlackWebhookURL         types.String `tfsdk:"slack_webhook_url"`
+	TeamsWebhookURL         types.String `tfsdk:"teams_webhook_url"`
+	Email                   types.String `tfsdk:"email"`
+	SlackChannelID          types.String `tfsdk:"slack_channel_id"`
+	SlackNotificationMethod types.String `tfsdk:"slack_notification_method"`
 }
 
 type githubNotificationEventsModel struct {
@@ -264,6 +278,8 @@ func (r *GithubRepoNotificationSettingsResource) Create(ctx context.Context, req
 			SlackWebhookURL:                   channels.SlackWebhookURL.ValueString(),
 			TeamsWebhookURL:                   channels.TeamsWebhookURL.ValueString(),
 			Email:                             channels.Email.ValueString(),
+			SlackChannelID:                    channels.SlackChannelID.ValueString(),
+			SlackNotificationMethod:           channels.SlackNotificationMethod.ValueString(),
 			NotifyWhenDomainBlocked:           utilities.ConvertBoolToString(events.DomainBlocked.ValueBool()),
 			NotifyOnFileOverwrite:             utilities.ConvertBoolToString(events.FileOverwrite.ValueBool()),
 			NotifyWhenEndpointDiscovered:      utilities.ConvertBoolToString(events.NewEndpointDiscovered.ValueBool()),
@@ -326,14 +342,18 @@ func (r *GithubRepoNotificationSettingsResource) Read(ctx context.Context, req r
 	// Create notification channels object
 	channelsObj, _ := types.ObjectValue(
 		map[string]attr.Type{
-			"slack_webhook_url": types.StringType,
-			"teams_webhook_url": types.StringType,
-			"email":             types.StringType,
+			"slack_webhook_url":         types.StringType,
+			"teams_webhook_url":         types.StringType,
+			"email":                     types.StringType,
+			"slack_channel_id":          types.StringType,
+			"slack_notification_method": types.StringType,
 		},
 		map[string]attr.Value{
-			"slack_webhook_url": types.StringValue(settings.SlackWebhookURL),
-			"teams_webhook_url": types.StringValue(settings.TeamsWebhookURL),
-			"email":             types.StringValue(settings.Email),
+			"slack_webhook_url":         types.StringValue(settings.SlackWebhookURL),
+			"teams_webhook_url":         types.StringValue(settings.TeamsWebhookURL),
+			"email":                     types.StringValue(settings.Email),
+			"slack_channel_id":          types.StringValue(settings.SlackChannelID),
+			"slack_notification_method": types.StringValue(settings.SlackNotificationMethod),
 		},
 	)
 	state.NotificationChannels = channelsObj
@@ -410,6 +430,8 @@ func (r *GithubRepoNotificationSettingsResource) Update(ctx context.Context, req
 			SlackWebhookURL:                   channels.SlackWebhookURL.ValueString(),
 			TeamsWebhookURL:                   channels.TeamsWebhookURL.ValueString(),
 			Email:                             channels.Email.ValueString(),
+			SlackChannelID:                    channels.SlackChannelID.ValueString(),
+			SlackNotificationMethod:           channels.SlackNotificationMethod.ValueString(),
 			NotifyWhenDomainBlocked:           utilities.ConvertBoolToString(events.DomainBlocked.ValueBool()),
 			NotifyOnFileOverwrite:             utilities.ConvertBoolToString(events.FileOverwrite.ValueBool()),
 			NotifyWhenEndpointDiscovered:      utilities.ConvertBoolToString(events.NewEndpointDiscovered.ValueBool()),
