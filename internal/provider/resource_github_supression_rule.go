@@ -520,18 +520,21 @@ func (r *githubSupressionRuleResource) updateSuppressionRuleState(ctx context.Co
 			config.Destination = destination
 
 		case "endpoint":
-			destination, _ := types.ObjectValue(
-				map[string]attr.Type{
-					"ip":     types.StringType,
-					"domain": types.StringType,
-				},
-				map[string]attr.Value{
-					"domain": types.StringValue(value),
-					"ip":     types.StringNull(),
-				},
-			)
-			config.Destination = destination
-
+			if config.Type.ValueString() == "https_outbound_network_call" {
+				config.Endpoint = types.StringValue(value)
+			} else {
+				destination, _ := types.ObjectValue(
+					map[string]attr.Type{
+						"ip":     types.StringType,
+						"domain": types.StringType,
+					},
+					map[string]attr.Value{
+						"domain": types.StringValue(value),
+						"ip":     types.StringNull(),
+					},
+				)
+				config.Destination = destination
+			}
 		}
 	}
 }
