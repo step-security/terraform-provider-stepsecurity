@@ -216,19 +216,23 @@ func (r *githubSupressionRuleResource) ImportState(ctx context.Context, req reso
 }
 
 type supressionRuleModel struct {
-	RuleID      types.String `tfsdk:"rule_id"`
-	Name        types.String `tfsdk:"name"`
-	Action      types.String `tfsdk:"action"`
-	Type        types.String `tfsdk:"type"`
-	Description types.String `tfsdk:"description"`
-	Destination types.Object `tfsdk:"destination"`
-	Process     types.String `tfsdk:"process"`
-	File        types.String `tfsdk:"file"`
-	FilePath    types.String `tfsdk:"file_path"`
-	Owner       types.String `tfsdk:"owner"`
-	Repo        types.String `tfsdk:"repo"`
-	Workflow    types.String `tfsdk:"workflow"`
-	Job         types.String `tfsdk:"job"`
+	RuleID       types.String `tfsdk:"rule_id"`
+	Name         types.String `tfsdk:"name"`
+	Action       types.String `tfsdk:"action"`
+	Type         types.String `tfsdk:"type"`
+	Description  types.String `tfsdk:"description"`
+	Destination  types.Object `tfsdk:"destination"`
+	Process      types.String `tfsdk:"process"`
+	File         types.String `tfsdk:"file"`
+	FilePath     types.String `tfsdk:"file_path"`
+	Owner        types.String `tfsdk:"owner"`
+	Repo         types.String `tfsdk:"repo"`
+	Workflow     types.String `tfsdk:"workflow"`
+	Job          types.String `tfsdk:"job"`
+	SecretType   types.String `tfsdk:"secret_type"`
+	ArtifactName types.String `tfsdk:"artifact_name"`
+	Endpoint     types.String `tfsdk:"endpoint"`
+	Host         types.String `tfsdk:"host"`
 }
 
 type destinationModel struct {
@@ -401,6 +405,41 @@ func (r *githubSupressionRuleResource) getSuppressionRuleFromTfModel(ctx context
 		if !destination.Domain.IsNull() && destination.Domain.ValueString() != "" {
 			conditions["endpoint"] = destination.Domain.ValueString()
 		}
+
+	case "secret-in-build-log":
+		id = stepsecurityapi.SecretInBuildLog
+		conditions["secret_type"] = config.SecretType.ValueString()
+
+	case "secret-in-artifact":
+		id = stepsecurityapi.SecretInArtifact
+		conditions["secret_type"] = config.SecretType.ValueString()
+		conditions["file"] = config.ArtifactName.ValueString()
+
+	case "suspicious-network-call":
+		id = stepsecurityapi.SuspiciousNetworkCall
+		conditions["endpoint"] = config.Endpoint.ValueString()
+
+	case "https-outbound-network-call":
+		id = stepsecurityapi.HttpsOutboundNetworkCall
+		conditions["host"] = config.Host.ValueString()
+		conditions["file_path"] = config.FilePath.ValueString()
+
+	case "action-uses-imposter-commit":
+		id = stepsecurityapi.ActionUsesImpostedCommit
+		conditions["action"] = config.Action.ValueString()
+
+	case "runner-worker-memory-read":
+		id = stepsecurityapi.RunnerWorkerMemoryRead
+		conditions["current_exe"] = config.Process.ValueString()
+
+	case "privileged-container":
+		id = stepsecurityapi.DetectionPrivilegedContainer
+		conditions["current_exe"] = config.Process.ValueString()
+
+	case "reverse-shell":
+		id = stepsecurityapi.DetectionReverseShell
+		conditions["current_exe"] = config.Process.ValueString()
+
 	}
 
 	return &stepsecurityapi.SuppressionRule{
@@ -427,6 +466,22 @@ func (r *githubSupressionRuleResource) updateSuppressionRuleState(ctx context.Co
 		config.Type = types.StringValue("source_code_overwritten")
 	case stepsecurityapi.AnomalousOutboundNetworkCall:
 		config.Type = types.StringValue("anomalous_outbound_network_call")
+	case stepsecurityapi.HttpsOutboundNetworkCall:
+		config.Type = types.StringValue("https_outbound_network_call")
+	case stepsecurityapi.SecretInBuildLog:
+		config.Type = types.StringValue("secret_in_build_log")
+	case stepsecurityapi.SecretInArtifact:
+		config.Type = types.StringValue("secret_in_artifact")
+	case stepsecurityapi.ActionUsesImpostedCommit:
+		config.Type = types.StringValue("action_uses_imposter_commit")
+	case stepsecurityapi.DetectionPrivilegedContainer:
+		config.Type = types.StringValue("privileged_container")
+	case stepsecurityapi.DetectionReverseShell:
+		config.Type = types.StringValue("reverse_shell")
+	case stepsecurityapi.SuspiciousNetworkCall:
+		config.Type = types.StringValue("suspicious_network_call")
+	case stepsecurityapi.RunnerWorkerMemoryRead:
+		config.Type = types.StringValue("runner_worker_memory_read")
 	}
 
 	for key, value := range rule.Conditions {
@@ -445,6 +500,12 @@ func (r *githubSupressionRuleResource) updateSuppressionRuleState(ctx context.Co
 			config.FilePath = types.StringValue(value)
 		case "process":
 			config.Process = types.StringValue(value)
+		case "secret_type":
+			config.SecretType = types.StringValue(value)
+		case "artifact_name":
+			config.ArtifactName = types.StringValue(value)
+		case "host":
+			config.Host = types.StringValue(value)
 		case "ip_address":
 			destination, _ := types.ObjectValue(
 				map[string]attr.Type{
