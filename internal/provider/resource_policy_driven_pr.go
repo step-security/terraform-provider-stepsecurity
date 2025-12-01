@@ -194,6 +194,16 @@ func (r *policyDrivenPRResource) Schema(_ context.Context, _ resource.SchemaRequ
 				Required:    true,
 				Description: "List of repositories to apply the policy-driven PR to. Use ['*'] to apply to all repositories.",
 			},
+			"selected_repos_filter": schema.SingleNestedAttribute{
+				Optional: true,
+				Attributes: map[string]schema.Attribute{
+					"include_repos_only_with_topics": schema.SetAttribute{
+						ElementType: types.StringType,
+						Optional:    true,
+						Description: "Topics that repos should have when selected_repos is ['*'].",
+					},
+				},
+			},
 			"excluded_repos": schema.ListAttribute{
 				ElementType: types.StringType,
 				Optional:    true,
@@ -248,6 +258,30 @@ func (r *policyDrivenPRResource) ImportState(ctx context.Context, req resource.I
 
 	// Set excluded_repos (empty by default for import)
 	state.ExcludedRepos = types.ListValueMust(types.StringType, []attr.Value{})
+
+	// Set selected_repos_filter
+	if len(policy.SelectedReposFilter.ReposTopics) > 0 {
+		topicsElements := make([]attr.Value, len(policy.SelectedReposFilter.ReposTopics))
+		for i, topic := range policy.SelectedReposFilter.ReposTopics {
+			topicsElements[i] = types.StringValue(topic)
+		}
+		topicsSet, _ := types.SetValue(types.StringType, topicsElements)
+
+		filterObj, _ := types.ObjectValue(
+			map[string]attr.Type{
+				"include_repos_only_with_topics": types.SetType{ElemType: types.StringType},
+			},
+			map[string]attr.Value{
+				"include_repos_only_with_topics": topicsSet,
+			},
+		)
+		state.SelectedReposFilter = filterObj
+	} else {
+		// Set to null if no filter is present
+		state.SelectedReposFilter = types.ObjectNull(map[string]attr.Type{
+			"include_repos_only_with_topics": types.SetType{ElemType: types.StringType},
+		})
+	}
 
 	// Set auto_remediation_options
 	exemptElements := make([]types.String, len(policy.AutoRemdiationOptions.ActionsToExemptWhilePinning))
@@ -377,7 +411,12 @@ type policyDrivenPRModel struct {
 	Owner                 types.String `tfsdk:"owner"`
 	AutoRemdiationOptions types.Object `tfsdk:"auto_remediation_options"`
 	SelectedRepos         types.List   `tfsdk:"selected_repos"`
+	SelectedReposFilter   types.Object `tfsdk:"selected_repos_filter"`
 	ExcludedRepos         types.List   `tfsdk:"excluded_repos"`
+}
+
+type selectedReposFilterModel struct {
+	IncludeReposOnlyWithTopics types.Set `tfsdk:"include_repos_only_with_topics"`
 }
 
 type autoRemdiationOptionsModel struct {
@@ -437,6 +476,26 @@ func (r *policyDrivenPRResource) ValidateConfig(ctx context.Context, req resourc
 				"Invalid Configuration",
 				"excluded_repos can only be used when selected_repos is ['*'] (wildcard for all repos)",
 			)
+		}
+	}
+
+	// Validate selected_repos_filter only makes sense with wildcard
+	hasSelectedReposFilter := !config.SelectedReposFilter.IsNull() && !config.SelectedReposFilter.IsUnknown()
+	if hasSelectedReposFilter {
+		var selectedReposFilter selectedReposFilterModel
+		diags = config.SelectedReposFilter.As(ctx, &selectedReposFilter, basetypes.ObjectAsOptions{})
+		resp.Diagnostics.Append(diags...)
+		if resp.Diagnostics.HasError() {
+			return
+		}
+		hasTopicsFilter := !selectedReposFilter.IncludeReposOnlyWithTopics.IsNull() && !selectedReposFilter.IncludeReposOnlyWithTopics.IsUnknown()
+		if !hasWildcard && hasTopicsFilter {
+			if !hasWildcard {
+				resp.Diagnostics.AddError(
+					"Invalid Configuration",
+					"topics under selected_repos_filter can only be used when selected_repos is ['*'] (wildcard for all repos)",
+				)
+			}
 		}
 	}
 
@@ -585,6 +644,25 @@ func (r *policyDrivenPRResource) Create(ctx context.Context, req resource.Create
 		}
 	}
 
+	var selectedReposFilterForAllRepos stepsecurityapi.ApplyIssuePRConfigForAllReposFilter
+	if !plan.SelectedReposFilter.IsNull() {
+		var selectedReposFilter selectedReposFilterModel
+		diags := plan.SelectedReposFilter.As(ctx, &selectedReposFilter, basetypes.ObjectAsOptions{})
+		resp.Diagnostics.Append(diags...)
+		if resp.Diagnostics.HasError() {
+			return
+		}
+		var reposTopics []string
+		if !selectedReposFilter.IncludeReposOnlyWithTopics.IsNull() && !selectedReposFilter.IncludeReposOnlyWithTopics.IsUnknown() {
+			elements := selectedReposFilter.IncludeReposOnlyWithTopics.Elements()
+			reposTopics = make([]string, len(elements))
+			for i, elem := range elements {
+				reposTopics[i] = elem.(types.String).ValueString()
+			}
+		}
+		selectedReposFilterForAllRepos.ReposTopics = reposTopics
+	}
+
 	var excludedRepos []string
 	if !plan.ExcludedRepos.IsNull() {
 		elements := plan.ExcludedRepos.Elements()
@@ -670,9 +748,10 @@ func (r *policyDrivenPRResource) Create(ctx context.Context, req resource.Create
 			AddWorkflows:                            options.AddWorkflows.ValueString(),
 			ActionCommitMap:                         actionCommitMap,
 		},
-		SelectedRepos:      selectedRepos,
-		UseRepoLevelConfig: useRepoLevel,
-		UseOrgLevelConfig:  useOrgLevel,
+		SelectedRepos:       selectedRepos,
+		SelectedReposFilter: selectedReposFilterForAllRepos,
+		UseRepoLevelConfig:  useRepoLevel,
+		UseOrgLevelConfig:   useOrgLevel,
 	}
 
 	// Handle excluded repos: Save their current configs before applying org-level config
@@ -950,6 +1029,25 @@ func (r *policyDrivenPRResource) Update(ctx context.Context, req resource.Update
 		}
 	}
 
+	var selectedReposFilterForAllRepos stepsecurityapi.ApplyIssuePRConfigForAllReposFilter
+	if !plan.SelectedReposFilter.IsNull() {
+		var selectedReposFilter selectedReposFilterModel
+		diags := plan.SelectedReposFilter.As(ctx, &selectedReposFilter, basetypes.ObjectAsOptions{})
+		resp.Diagnostics.Append(diags...)
+		if resp.Diagnostics.HasError() {
+			return
+		}
+		var reposTopics []string
+		if !selectedReposFilter.IncludeReposOnlyWithTopics.IsNull() && !selectedReposFilter.IncludeReposOnlyWithTopics.IsUnknown() {
+			elements := selectedReposFilter.IncludeReposOnlyWithTopics.Elements()
+			reposTopics = make([]string, len(elements))
+			for i, elem := range elements {
+				reposTopics[i] = elem.(types.String).ValueString()
+			}
+		}
+		selectedReposFilterForAllRepos.ReposTopics = reposTopics
+	}
+
 	var stateExcludedRepos []string
 	if !state.ExcludedRepos.IsNull() {
 		elements := state.ExcludedRepos.Elements()
@@ -1088,9 +1186,10 @@ func (r *policyDrivenPRResource) Update(ctx context.Context, req resource.Update
 			AddWorkflows:                            planOptions.AddWorkflows.ValueString(),
 			ActionCommitMap:                         actionCommitMapPlan,
 		},
-		SelectedRepos:      planRepos,
-		UseRepoLevelConfig: useRepoLevel,
-		UseOrgLevelConfig:  useOrgLevel,
+		SelectedRepos:       planRepos,
+		SelectedReposFilter: selectedReposFilterForAllRepos,
+		UseRepoLevelConfig:  useRepoLevel,
+		UseOrgLevelConfig:   useOrgLevel,
 	}
 
 	// Handle excluded repos: Save their current configs before updating org-level config
