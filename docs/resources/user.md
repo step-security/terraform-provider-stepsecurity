@@ -88,6 +88,7 @@ import {
 - `email` (String) The email of the user. This is required for adding users with auth_type = SSO/Local
 - `email_suffix` (String) The email suffix of the user. It is used for providing access to all users with a specific email suffix.
 - `policies` (Attributes List) (see [below for nested schema](#nestedatt--policies))
+- `sso_group` (String) SSO Group name through which users get access to. This is typically group name defined in SSO providers like Okta, Google Workspace, Auth0, etc.
 - `user_name` (String) The GitHub username of the user. This is required for adding users with auth_type = GitHub
 
 ### Read-Only
