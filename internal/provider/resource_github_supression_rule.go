@@ -152,61 +152,66 @@ func (r *githubSupressionRuleResource) ValidateConfig(ctx context.Context, req r
 
 	switch rule.Type.ValueString() {
 	case "source_code_overwritten":
-		if rule.File.IsNull() || rule.File.IsUnknown() || rule.FilePath.IsNull() || rule.FilePath.IsUnknown() {
+		if (!rule.File.IsUnknown() && rule.File.IsNull()) || (!rule.FilePath.IsUnknown() && rule.FilePath.IsNull()) {
 			resp.Diagnostics.AddError(
 				"File is required",
 				"File is required when type is source_code_overwritten",
 			)
 		}
-		if !rule.Process.IsNull() {
+		if !rule.Process.IsUnknown() && !rule.Process.IsNull() {
 			resp.Diagnostics.AddError(
 				"Process is not allowed",
 				"Process is not allowed when type is source_code_overwritten",
 			)
 		}
-		if !rule.Destination.IsNull() {
+		if !rule.Destination.IsUnknown() && !rule.Destination.IsNull() {
 			resp.Diagnostics.AddError(
 				"Destination is not allowed",
 				"Destination is not allowed when type is source_code_overwritten",
 			)
 		}
 	case "anomalous_outbound_network_call":
-		if !rule.File.IsNull() || !rule.FilePath.IsNull() {
+		if (!rule.File.IsUnknown() && !rule.File.IsNull()) || (!rule.FilePath.IsUnknown() && !rule.FilePath.IsNull()) {
 			resp.Diagnostics.AddError(
 				"File, File Path parameters are not allowed",
 				"File, File Path parameters are not allowed when type is anomalous_outbound_network_call",
 			)
 		}
-		if rule.Process.IsNull() || rule.Process.IsUnknown() {
+		if !rule.Process.IsUnknown() && rule.Process.IsNull() {
 			resp.Diagnostics.AddError(
 				"Process is required",
 				"Process is required when type is anomalous_outbound_network_call",
 			)
 		}
-		if rule.Destination.IsNull() || rule.Destination.IsUnknown() {
+		if !rule.Destination.IsUnknown() && rule.Destination.IsNull() {
 			resp.Diagnostics.AddError(
 				"Destination is required",
 				"Destination is required when type is anomalous_outbound_network_call",
 			)
 		}
-		var destination destinationModel
-		diags := rule.Destination.As(ctx, &destination, basetypes.ObjectAsOptions{})
-		resp.Diagnostics.Append(diags...)
-		if resp.Diagnostics.HasError() {
-			return
-		}
-		isIpEmpty := destination.IP.IsNull() || destination.IP.IsUnknown()
-		isDomainEmpty := destination.Domain.IsNull() || destination.Domain.IsUnknown()
-		if isIpEmpty && isDomainEmpty {
-			resp.Diagnostics.AddError(
-				"Destination is required",
-				"Destination is required when type is anomalous_outbound_network_call. please provide either ip or domain.",
-			)
-		} else if !isIpEmpty && !isDomainEmpty {
-			resp.Diagnostics.AddError(
-				"Cannot provide both ip and domain in destination",
-				"Destination can only have either ip or domain",
-			)
+		if !rule.Destination.IsUnknown() {
+			var destination destinationModel
+			diags := rule.Destination.As(ctx, &destination, basetypes.ObjectAsOptions{})
+			resp.Diagnostics.Append(diags...)
+			if resp.Diagnostics.HasError() {
+				return
+			}
+			// Skip validation if either field is unknown (from variables during plan)
+			if !destination.IP.IsUnknown() && !destination.Domain.IsUnknown() {
+				isIpEmpty := destination.IP.IsNull()
+				isDomainEmpty := destination.Domain.IsNull()
+				if isIpEmpty && isDomainEmpty {
+					resp.Diagnostics.AddError(
+						"Destination is required",
+						"Destination is required when type is anomalous_outbound_network_call. please provide either ip or domain.",
+					)
+				} else if !isIpEmpty && !isDomainEmpty {
+					resp.Diagnostics.AddError(
+						"Cannot provide both ip and domain in destination",
+						"Destination can only have either ip or domain",
+					)
+				}
+			}
 		}
 	}
 }
