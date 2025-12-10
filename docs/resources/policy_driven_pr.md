@@ -106,6 +106,28 @@ resource "stepsecurity_policy_driven_pr" "org_level_with_exclusions" {
 }
 
 # ============================================================================
+# Scenario 4: Org-level config with filter
+# ============================================================================
+# Applies org-level config to all repos that match the filter
+resource "stepsecurity_policy_driven_pr" "org_level_with_exclusions" {
+  owner          = "test-organization"
+  selected_repos = ["*"]
+  selected_repos_filter = {
+    include_repos_only_with_topics = ["topic1", "topic2"]
+  }
+  auto_remediation_options = {
+    create_pr                             = true
+    create_issue                          = false
+    create_github_advanced_security_alert = false
+    harden_github_hosted_runner           = true
+    pin_actions_to_sha                    = true
+    restrict_github_token_permissions     = false
+    secure_docker_file                    = false
+  }
+}
+
+
+# ============================================================================
 # For importing existing policy driven pr config to terraform state
 # ============================================================================
 # This will be helpful to manage existing policy driven pr config using terraform
@@ -128,6 +150,7 @@ import {
 ### Optional
 
 - `excluded_repos` (List of String) List of repositories to exclude when selected_repos is ['*']. It restores their original configs (preserving configs from other Terraform resources) or deletes configs for repos that had none.
+- `selected_repos_filter` (Attributes) (see [below for nested schema](#nestedatt--selected_repos_filter))
 
 ### Read-Only
 
@@ -159,6 +182,15 @@ Required:
 
 - `interval` (String) Update interval (e.g., 'daily', 'weekly', 'monthly').
 - `package` (String) Package ecosystem (e.g., 'npm', 'pip', 'docker').
+
+
+
+<a id="nestedatt--selected_repos_filter"></a>
+### Nested Schema for `selected_repos_filter`
+
+Optional:
+
+- `include_repos_only_with_topics` (Set of String) Topics that repos should have when selected_repos is ['*'].
 
 ## Import
 
