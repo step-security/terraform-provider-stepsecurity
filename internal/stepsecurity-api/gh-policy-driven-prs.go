@@ -4,7 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
+	"time"
 
+	"github.com/hashicorp/go-uuid"
 	"github.com/hashicorp/terraform-plugin-log/tflog"
 )
 
@@ -215,10 +218,68 @@ func (c *APIClient) CreatePolicyDrivenPRPolicy(ctx context.Context, createReques
 
 func (c *APIClient) updateConfigForRepo(ctx context.Context, owner string, repo string, config policyDrivenPRConfigOptions) error {
 	URI := fmt.Sprintf("%s/v1/github/%s/%s/policy-driven-pr/configs", c.BaseURL, owner, repo)
-	if _, err := c.post(ctx, URI, config); err != nil {
+
+	uuid, err := uuid.GenerateUUID()
+	if err != nil {
+		return fmt.Errorf("error getting async event id: %w", err)
+	}
+	httpHeaders := map[string]string{
+		"x-async-event-id": uuid,
+	}
+
+	// First attempt
+	_, err = c.post(ctx, URI, config, WithHttpHeaders(httpHeaders))
+	if err == nil {
+		return nil
+	}
+
+	// If it's not a 503, fail immediately
+	if !strings.Contains(err.Error(), "status: 503") {
 		return fmt.Errorf("failed to update config for repo: %w", err)
 	}
-	return nil
+
+	// when status = 503 retry same request until it is completed or retry count is exhausted
+	timeoutTimer := time.NewTimer(3 * time.Minute)
+	periodicTicker := time.NewTicker(10 * time.Second) // poll for every 10 seconds
+	defer func() {
+		timeoutTimer.Stop()
+		periodicTicker.Stop()
+	}()
+
+	type retryResp struct {
+		Status int    `json:"status"`
+		State  string `json:"state"` // in_progress, completed
+		Data   any    `json:"data"`
+	}
+
+	for {
+		select {
+		case <-ctx.Done():
+			return fmt.Errorf("context cancelled while retrying update config for repo: %w", ctx.Err())
+		case <-timeoutTimer.C:
+			return fmt.Errorf("timeout exceeded while updating config for repo")
+		case <-periodicTicker.C:
+			response, err1 := c.post(ctx, URI, config, WithHttpHeaders(httpHeaders))
+			if err1 != nil {
+				return fmt.Errorf("failed to update config for repo: %w", err)
+			}
+
+			var resp retryResp
+			err2 := json.Unmarshal(response, &resp)
+			if err2 != nil {
+				return fmt.Errorf("failed to update config for repo: %w", err)
+			}
+
+			if resp.State == "completed" {
+				// check if status code is not 200 and return original error
+				if resp.Status != 200 {
+					return fmt.Errorf("failed to update config for repo: %w", err)
+				}
+				return nil
+			}
+		}
+	}
+
 }
 
 func (c *APIClient) GetPolicyDrivenPRPolicy(ctx context.Context, owner string, repos []string) (*PolicyDrivenPRPolicy, error) {
