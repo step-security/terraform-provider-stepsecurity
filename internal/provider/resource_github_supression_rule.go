@@ -77,9 +77,20 @@ func (r *githubSupressionRuleResource) Schema(_ context.Context, _ resource.Sche
 			},
 			"type": schema.StringAttribute{
 				Required:    true,
-				Description: "The type of the rule. Can be one of 'source_code_overwritten' or 'anomalous_outbound_network_call'",
+				Description: "The type of the rule.",
 				Validators: []validator.String{
-					stringvalidator.OneOf("source_code_overwritten", "anomalous_outbound_network_call"),
+					stringvalidator.OneOf(
+						"source_code_overwritten",
+						"anomalous_outbound_network_call",
+						"secret_in_build_log",
+						"secret_in_artifact",
+						"suspicious_network_call",
+						"https_outbound_network_call",
+						"action_uses_imposter_commit",
+						"runner_worker_memory_read",
+						"privileged_container",
+						"reverse_shell",
+					),
 				},
 			},
 			"action": schema.StringAttribute{
@@ -137,6 +148,22 @@ func (r *githubSupressionRuleResource) Schema(_ context.Context, _ resource.Sche
 				Computed:    true,
 				Description: "GitHub job name on which the rule will be applied.",
 				Default:     stringdefault.StaticString("*"),
+			},
+			"secret_type": schema.StringAttribute{
+				Optional:    true,
+				Description: "The secret type when the type is 'secret_in_build_log' or 'secret_in_artifact'.",
+			},
+			"artifact_name": schema.StringAttribute{
+				Optional:    true,
+				Description: "The artifact name when the type is 'secret_in_artifact'.",
+			},
+			"endpoint": schema.StringAttribute{
+				Optional:    true,
+				Description: "The endpoint when the type is 'suspicious_network_call'.",
+			},
+			"host": schema.StringAttribute{
+				Optional:    true,
+				Description: "The host when the type is 'https_outbound_network_call'.",
 			},
 		},
 	}
@@ -206,6 +233,53 @@ func (r *githubSupressionRuleResource) ValidateConfig(ctx context.Context, req r
 			resp.Diagnostics.AddError(
 				"Cannot provide both ip and domain in destination",
 				"Destination can only have either ip or domain",
+			)
+		}
+	case "runner_worker_memory_read", "privileged_container", "reverse_shell":
+		if rule.Process.IsNull() || rule.Process.IsUnknown() {
+			resp.Diagnostics.AddError(
+				"Process is required",
+				fmt.Sprintf("Process is required when type is %s", rule.Type.ValueString()),
+			)
+		}
+	case "secret_in_build_log":
+		if rule.SecretType.IsNull() || rule.SecretType.IsUnknown() {
+			resp.Diagnostics.AddError(
+				"Secret type is required",
+				"Secret type is required when type is secret_in_build_log",
+			)
+		}
+	case "secret_in_artifact":
+		if rule.SecretType.IsNull() || rule.SecretType.IsUnknown() {
+			resp.Diagnostics.AddError(
+				"Secret type is required",
+				"Secret type is required when type is secret_in_artifact",
+			)
+		}
+		if rule.ArtifactName.IsNull() || rule.ArtifactName.IsUnknown() {
+			resp.Diagnostics.AddError(
+				"Artifact name is required",
+				"Artifact name is required when type is secret_in_artifact",
+			)
+		}
+	case "suspicious_network_call":
+		if rule.Endpoint.IsNull() || rule.Endpoint.IsUnknown() {
+			resp.Diagnostics.AddError(
+				"Endpoint is required",
+				"Endpoint is required when type is suspicious_network_call",
+			)
+		}
+	case "https_outbound_network_call":
+		if rule.Host.IsNull() || rule.Host.IsUnknown() {
+			resp.Diagnostics.AddError(
+				"Host is required",
+				"Host is required when type is https_outbound_network_call",
+			)
+		}
+		if rule.FilePath.IsNull() || rule.FilePath.IsUnknown() {
+			resp.Diagnostics.AddError(
+				"File path is required",
+				"File path is required when type is https_outbound_network_call",
 			)
 		}
 	}
@@ -406,37 +480,37 @@ func (r *githubSupressionRuleResource) getSuppressionRuleFromTfModel(ctx context
 			conditions["endpoint"] = destination.Domain.ValueString()
 		}
 
-	case "secret-in-build-log":
+	case "secret_in_build_log":
 		id = stepsecurityapi.SecretInBuildLog
 		conditions["secret_type"] = config.SecretType.ValueString()
 
-	case "secret-in-artifact":
+	case "secret_in_artifact":
 		id = stepsecurityapi.SecretInArtifact
 		conditions["secret_type"] = config.SecretType.ValueString()
 		conditions["file"] = config.ArtifactName.ValueString()
 
-	case "suspicious-network-call":
+	case "suspicious_network_call":
 		id = stepsecurityapi.SuspiciousNetworkCall
 		conditions["endpoint"] = config.Endpoint.ValueString()
 
-	case "https-outbound-network-call":
+	case "https_outbound_network_call":
 		id = stepsecurityapi.HttpsOutboundNetworkCall
 		conditions["host"] = config.Host.ValueString()
 		conditions["file_path"] = config.FilePath.ValueString()
 
-	case "action-uses-imposter-commit":
+	case "action_uses_imposter_commit":
 		id = stepsecurityapi.ActionUsesImpostedCommit
 		conditions["action"] = config.Action.ValueString()
 
-	case "runner-worker-memory-read":
+	case "runner_worker_memory_read":
 		id = stepsecurityapi.RunnerWorkerMemoryRead
 		conditions["current_exe"] = config.Process.ValueString()
 
-	case "privileged-container":
+	case "privileged_container":
 		id = stepsecurityapi.DetectionPrivilegedContainer
 		conditions["current_exe"] = config.Process.ValueString()
 
-	case "reverse-shell":
+	case "reverse_shell":
 		id = stepsecurityapi.DetectionReverseShell
 		conditions["current_exe"] = config.Process.ValueString()
 
