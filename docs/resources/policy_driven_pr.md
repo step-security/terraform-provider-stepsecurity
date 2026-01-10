@@ -169,6 +169,7 @@ Optional:
 - `create_issue` (Boolean) Create an issue when a finding is detected.
 - `create_pr` (Boolean) Create a PR when a finding is detected.
 - `harden_github_hosted_runner` (Boolean) When enabled, this creates a PR/issue to install security agent on the GitHub-hosted runner to prevent exfiltration of credentials, monitor the build process, and detect compromised dependencies.
+- `images_to_exempt_while_pinning` (List of String) List of Docker images to exempt while pinning images to SHA. When exempted, the image will not be pinned to SHA.
 - `package_ecosystem` (Attributes List) List of package ecosystems to enable for dependency updates. (see [below for nested schema](#nestedatt--auto_remediation_options--package_ecosystem))
 - `pin_actions_to_sha` (Boolean) When enabled, this creates a PR/issue to pin actions to SHA. GitHub's Security Hardening guide recommends pinning actions to full length commit for third party actions.
 - `restrict_github_token_permissions` (Boolean) When enabled, this creates a PR/issue to restrict GitHub token permissions. GitHub's Security Hardening guide recommends restricting permissions to the minimum required

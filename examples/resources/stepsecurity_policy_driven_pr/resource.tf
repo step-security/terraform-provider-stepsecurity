@@ -98,9 +98,6 @@ resource "stepsecurity_policy_driven_pr" "org_level_with_exclusions" {
 resource "stepsecurity_policy_driven_pr" "org_level_with_exclusions" {
   owner          = "test-organization"
   selected_repos = ["*"]
-  selected_repos_filter = {
-    include_repos_only_with_topics = ["topic1", "topic2"]
-  }
   auto_remediation_options = {
     create_pr                             = true
     create_issue                          = false
