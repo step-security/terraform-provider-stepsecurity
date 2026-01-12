@@ -444,7 +444,7 @@ type autoRemdiationOptionsModel struct {
 	CreateIssue                             types.Bool   `tfsdk:"create_issue"`
 	CreateGitHubAdvancedSecurityAlert       types.Bool   `tfsdk:"create_github_advanced_security_alert"`
 	PinActionsToSHA                         types.Bool   `tfsdk:"pin_actions_to_sha"`
-	HardenGitHubHostedRunner                types.Bool   `tfsdk:"harden_github_hosted_security_runner"`
+	HardenGitHubHostedRunner                types.Bool   `tfsdk:"harden_github_hosted_runner"`
 	RestrictGitHubTokenPermissions          types.Bool   `tfsdk:"restrict_github_token_permissions"`
 	SecureDockerFile                        types.Bool   `tfsdk:"secure_docker_file"`
 	ActionsToExemptWhilePinning             types.List   `tfsdk:"actions_to_exempt_while_pinning"`
