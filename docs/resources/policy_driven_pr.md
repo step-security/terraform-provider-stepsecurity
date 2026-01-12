@@ -42,6 +42,7 @@ resource "stepsecurity_policy_driven_pr" "org_level_all" {
     restrict_github_token_permissions     = false
     secure_docker_file                    = false
     actions_to_exempt_while_pinning       = ["actions/checkout", "actions/setup-node"]
+    images_to_exempt_while_pinning        = ["amazon*"]
   }
 }
 
@@ -63,6 +64,8 @@ resource "stepsecurity_policy_driven_pr" "repo_level_config" {
     secure_docker_file                            = true
     actions_to_exempt_while_pinning               = ["actions/checkout", "actions/setup-node"]
     actions_to_replace_with_step_security_actions = ["EnricoMi/publish-unit-test-result-action"]
+    images_to_exempt_while_pinning                = ["amazon*"]
+
     # v2-only features (requires policy-driven PR v2 to be enabled)
     update_precommit_file = ["eslint"]
     package_ecosystem = [
