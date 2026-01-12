@@ -138,6 +138,18 @@ func (r *policyDrivenPRResource) Schema(_ context.Context, _ resource.SchemaRequ
 							),
 						),
 					},
+					"images_to_exempt_while_pinning": schema.ListAttribute{
+						ElementType: types.StringType,
+						Optional:    true,
+						Computed:    true,
+						Description: "List of Docker images to exempt while pinning images to SHA. When exempted, the image will not be pinned to SHA.",
+						Default: listdefault.StaticValue(
+							types.ListValueMust(
+								types.StringType,
+								[]attr.Value{},
+							),
+						),
+					},
 					"actions_to_replace_with_step_security_actions": schema.ListAttribute{
 						ElementType: types.StringType,
 						Optional:    true,
@@ -194,6 +206,16 @@ func (r *policyDrivenPRResource) Schema(_ context.Context, _ resource.SchemaRequ
 				Required:    true,
 				Description: "List of repositories to apply the policy-driven PR to. Use ['*'] to apply to all repositories.",
 			},
+			"selected_repos_filter": schema.SingleNestedAttribute{
+				Optional: true,
+				Attributes: map[string]schema.Attribute{
+					"include_repos_only_with_topics": schema.SetAttribute{
+						ElementType: types.StringType,
+						Optional:    true,
+						Description: "Topics that repos should have when selected_repos is ['*'].",
+					},
+				},
+			},
 			"excluded_repos": schema.ListAttribute{
 				ElementType: types.StringType,
 				Optional:    true,
@@ -249,12 +271,42 @@ func (r *policyDrivenPRResource) ImportState(ctx context.Context, req resource.I
 	// Set excluded_repos (empty by default for import)
 	state.ExcludedRepos = types.ListValueMust(types.StringType, []attr.Value{})
 
+	// Set selected_repos_filter
+	if len(policy.SelectedReposFilter.ReposTopics) > 0 {
+		topicsElements := make([]attr.Value, len(policy.SelectedReposFilter.ReposTopics))
+		for i, topic := range policy.SelectedReposFilter.ReposTopics {
+			topicsElements[i] = types.StringValue(topic)
+		}
+		topicsSet, _ := types.SetValue(types.StringType, topicsElements)
+
+		filterObj, _ := types.ObjectValue(
+			map[string]attr.Type{
+				"include_repos_only_with_topics": types.SetType{ElemType: types.StringType},
+			},
+			map[string]attr.Value{
+				"include_repos_only_with_topics": topicsSet,
+			},
+		)
+		state.SelectedReposFilter = filterObj
+	} else {
+		// Set to null if no filter is present
+		state.SelectedReposFilter = types.ObjectNull(map[string]attr.Type{
+			"include_repos_only_with_topics": types.SetType{ElemType: types.StringType},
+		})
+	}
+
 	// Set auto_remediation_options
 	exemptElements := make([]types.String, len(policy.AutoRemdiationOptions.ActionsToExemptWhilePinning))
 	for i, action := range policy.AutoRemdiationOptions.ActionsToExemptWhilePinning {
 		exemptElements[i] = types.StringValue(action)
 	}
 	exemptList, _ := types.ListValueFrom(ctx, types.StringType, exemptElements)
+
+	exemptImagesElements := make([]types.String, len(policy.AutoRemdiationOptions.ImagesToExemptWhilePinning))
+	for i, image := range policy.AutoRemdiationOptions.ImagesToExemptWhilePinning {
+		exemptImagesElements[i] = types.StringValue(image)
+	}
+	exemptImagesList, _ := types.ListValueFrom(ctx, types.StringType, exemptImagesElements)
 
 	replaceElements := make([]types.String, len(policy.AutoRemdiationOptions.ActionsToReplaceWithStepSecurityActions))
 	for i, action := range policy.AutoRemdiationOptions.ActionsToReplaceWithStepSecurityActions {
@@ -336,6 +388,7 @@ func (r *policyDrivenPRResource) ImportState(ctx context.Context, req resource.I
 			"restrict_github_token_permissions":             types.BoolType,
 			"secure_docker_file":                            types.BoolType,
 			"actions_to_exempt_while_pinning":               types.ListType{ElemType: types.StringType},
+			"images_to_exempt_while_pinning":                types.ListType{ElemType: types.StringType},
 			"actions_to_replace_with_step_security_actions": types.ListType{ElemType: types.StringType},
 			"update_precommit_file":                         types.ListType{ElemType: types.StringType},
 			"package_ecosystem": types.ListType{
@@ -358,6 +411,7 @@ func (r *policyDrivenPRResource) ImportState(ctx context.Context, req resource.I
 			"restrict_github_token_permissions":             types.BoolValue(policy.AutoRemdiationOptions.RestrictGitHubTokenPermissions),
 			"secure_docker_file":                            types.BoolValue(policy.AutoRemdiationOptions.SecureDockerFile),
 			"actions_to_exempt_while_pinning":               exemptList,
+			"images_to_exempt_while_pinning":                exemptImagesList,
 			"actions_to_replace_with_step_security_actions": replaceList,
 			"update_precommit_file":                         updatePrecommitFileList,
 			"package_ecosystem":                             packageEcosystemList,
@@ -377,7 +431,12 @@ type policyDrivenPRModel struct {
 	Owner                 types.String `tfsdk:"owner"`
 	AutoRemdiationOptions types.Object `tfsdk:"auto_remediation_options"`
 	SelectedRepos         types.List   `tfsdk:"selected_repos"`
+	SelectedReposFilter   types.Object `tfsdk:"selected_repos_filter"`
 	ExcludedRepos         types.List   `tfsdk:"excluded_repos"`
+}
+
+type selectedReposFilterModel struct {
+	IncludeReposOnlyWithTopics types.Set `tfsdk:"include_repos_only_with_topics"`
 }
 
 type autoRemdiationOptionsModel struct {
@@ -389,6 +448,7 @@ type autoRemdiationOptionsModel struct {
 	RestrictGitHubTokenPermissions          types.Bool   `tfsdk:"restrict_github_token_permissions"`
 	SecureDockerFile                        types.Bool   `tfsdk:"secure_docker_file"`
 	ActionsToExemptWhilePinning             types.List   `tfsdk:"actions_to_exempt_while_pinning"`
+	ImagesToExemptWhilePinning              types.List   `tfsdk:"images_to_exempt_while_pinning"`
 	ActionsToReplaceWithStepSecurityActions types.List   `tfsdk:"actions_to_replace_with_step_security_actions"`
 	UpdatePrecommitFile                     types.List   `tfsdk:"update_precommit_file"`
 	PackageEcosystem                        types.List   `tfsdk:"package_ecosystem"`
@@ -439,6 +499,26 @@ func (r *policyDrivenPRResource) ValidateConfig(ctx context.Context, req resourc
 				"Invalid Configuration",
 				"excluded_repos can only be used when selected_repos is ['*'] (wildcard for all repos)",
 			)
+		}
+	}
+
+	// Validate selected_repos_filter only makes sense with wildcard
+	hasSelectedReposFilter := !config.SelectedReposFilter.IsNull() && !config.SelectedReposFilter.IsUnknown()
+	if hasSelectedReposFilter {
+		var selectedReposFilter selectedReposFilterModel
+		diags = config.SelectedReposFilter.As(ctx, &selectedReposFilter, basetypes.ObjectAsOptions{})
+		resp.Diagnostics.Append(diags...)
+		if resp.Diagnostics.HasError() {
+			return
+		}
+		hasTopicsFilter := !selectedReposFilter.IncludeReposOnlyWithTopics.IsNull() && !selectedReposFilter.IncludeReposOnlyWithTopics.IsUnknown()
+		if !hasWildcard && hasTopicsFilter {
+			if !hasWildcard {
+				resp.Diagnostics.AddError(
+					"Invalid Configuration",
+					"topics under selected_repos_filter can only be used when selected_repos is ['*'] (wildcard for all repos)",
+				)
+			}
 		}
 	}
 
@@ -587,6 +667,25 @@ func (r *policyDrivenPRResource) Create(ctx context.Context, req resource.Create
 		}
 	}
 
+	var selectedReposFilterForAllRepos stepsecurityapi.ApplyIssuePRConfigForAllReposFilter
+	if !plan.SelectedReposFilter.IsNull() {
+		var selectedReposFilter selectedReposFilterModel
+		diags := plan.SelectedReposFilter.As(ctx, &selectedReposFilter, basetypes.ObjectAsOptions{})
+		resp.Diagnostics.Append(diags...)
+		if resp.Diagnostics.HasError() {
+			return
+		}
+		var reposTopics []string
+		if !selectedReposFilter.IncludeReposOnlyWithTopics.IsNull() && !selectedReposFilter.IncludeReposOnlyWithTopics.IsUnknown() {
+			elements := selectedReposFilter.IncludeReposOnlyWithTopics.Elements()
+			reposTopics = make([]string, len(elements))
+			for i, elem := range elements {
+				reposTopics[i] = elem.(types.String).ValueString()
+			}
+		}
+		selectedReposFilterForAllRepos.ReposTopics = reposTopics
+	}
+
 	var excludedRepos []string
 	if !plan.ExcludedRepos.IsNull() {
 		elements := plan.ExcludedRepos.Elements()
@@ -602,6 +701,15 @@ func (r *policyDrivenPRResource) Create(ctx context.Context, req resource.Create
 		actionsToExempt = make([]string, len(elements))
 		for i, elem := range elements {
 			actionsToExempt[i] = elem.(types.String).ValueString()
+		}
+	}
+
+	var imagesToExempt []string
+	if !options.ImagesToExemptWhilePinning.IsNull() {
+		elements := options.ImagesToExemptWhilePinning.Elements()
+		imagesToExempt = make([]string, len(elements))
+		for i, elem := range elements {
+			imagesToExempt[i] = elem.(types.String).ValueString()
 		}
 	}
 
@@ -666,15 +774,17 @@ func (r *policyDrivenPRResource) Create(ctx context.Context, req resource.Create
 			RestrictGitHubTokenPermissions:          options.RestrictGitHubTokenPermissions.ValueBool(),
 			SecureDockerFile:                        options.SecureDockerFile.ValueBool(),
 			ActionsToExemptWhilePinning:             actionsToExempt,
+			ImagesToExemptWhilePinning:              imagesToExempt,
 			ActionsToReplaceWithStepSecurityActions: actionsToReplace,
 			UpdatePrecommitFile:                     updatePrecommitFile,
 			PackageEcosystem:                        packageEcosystem,
 			AddWorkflows:                            options.AddWorkflows.ValueString(),
 			ActionCommitMap:                         actionCommitMap,
 		},
-		SelectedRepos:      selectedRepos,
-		UseRepoLevelConfig: useRepoLevel,
-		UseOrgLevelConfig:  useOrgLevel,
+		SelectedRepos:       selectedRepos,
+		SelectedReposFilter: selectedReposFilterForAllRepos,
+		UseRepoLevelConfig:  useRepoLevel,
+		UseOrgLevelConfig:   useOrgLevel,
 	}
 
 	// Handle excluded repos: Save their current configs before applying org-level config
@@ -892,6 +1002,19 @@ func (r *policyDrivenPRResource) Read(ctx context.Context, req resource.ReadRequ
 		tflog.Info(ctx, "Preserving actions_to_exempt_while_pinning from state")
 	}
 
+	if len(stepSecurityPolicy.AutoRemdiationOptions.ImagesToExemptWhilePinning) == 0 &&
+		!currentStateOptions.ImagesToExemptWhilePinning.IsNull() &&
+		len(currentStateOptions.ImagesToExemptWhilePinning.Elements()) > 0 {
+		elements := currentStateOptions.ImagesToExemptWhilePinning.Elements()
+		for _, elem := range elements {
+			stepSecurityPolicy.AutoRemdiationOptions.ImagesToExemptWhilePinning = append(
+				stepSecurityPolicy.AutoRemdiationOptions.ImagesToExemptWhilePinning,
+				elem.(types.String).ValueString(),
+			)
+		}
+		tflog.Info(ctx, "Preserving images_to_exempt_while_pinning from state")
+	}
+
 	if len(stepSecurityPolicy.AutoRemdiationOptions.ActionsToReplaceWithStepSecurityActions) == 0 &&
 		!currentStateOptions.ActionsToReplaceWithStepSecurityActions.IsNull() &&
 		len(currentStateOptions.ActionsToReplaceWithStepSecurityActions.Elements()) > 0 {
@@ -950,6 +1073,25 @@ func (r *policyDrivenPRResource) Update(ctx context.Context, req resource.Update
 		for i, elem := range elements {
 			stateRepos[i] = elem.(types.String).ValueString()
 		}
+	}
+
+	var selectedReposFilterForAllRepos stepsecurityapi.ApplyIssuePRConfigForAllReposFilter
+	if !plan.SelectedReposFilter.IsNull() {
+		var selectedReposFilter selectedReposFilterModel
+		diags := plan.SelectedReposFilter.As(ctx, &selectedReposFilter, basetypes.ObjectAsOptions{})
+		resp.Diagnostics.Append(diags...)
+		if resp.Diagnostics.HasError() {
+			return
+		}
+		var reposTopics []string
+		if !selectedReposFilter.IncludeReposOnlyWithTopics.IsNull() && !selectedReposFilter.IncludeReposOnlyWithTopics.IsUnknown() {
+			elements := selectedReposFilter.IncludeReposOnlyWithTopics.Elements()
+			reposTopics = make([]string, len(elements))
+			for i, elem := range elements {
+				reposTopics[i] = elem.(types.String).ValueString()
+			}
+		}
+		selectedReposFilterForAllRepos.ReposTopics = reposTopics
 	}
 
 	var stateExcludedRepos []string
@@ -1022,6 +1164,15 @@ func (r *policyDrivenPRResource) Update(ctx context.Context, req resource.Update
 		}
 	}
 
+	var imagesToExempt []string
+	if !planOptions.ImagesToExemptWhilePinning.IsNull() {
+		elements := planOptions.ImagesToExemptWhilePinning.Elements()
+		imagesToExempt = make([]string, len(elements))
+		for i, elem := range elements {
+			imagesToExempt[i] = elem.(types.String).ValueString()
+		}
+	}
+
 	var actionsToReplace []string
 	if !planOptions.ActionsToReplaceWithStepSecurityActions.IsNull() {
 		elements := planOptions.ActionsToReplaceWithStepSecurityActions.Elements()
@@ -1084,15 +1235,17 @@ func (r *policyDrivenPRResource) Update(ctx context.Context, req resource.Update
 			RestrictGitHubTokenPermissions:          planOptions.RestrictGitHubTokenPermissions.ValueBool(),
 			SecureDockerFile:                        planOptions.SecureDockerFile.ValueBool(),
 			ActionsToExemptWhilePinning:             actionsToExempt,
+			ImagesToExemptWhilePinning:              imagesToExempt,
 			ActionsToReplaceWithStepSecurityActions: actionsToReplace,
 			UpdatePrecommitFile:                     updatePrecommitFilePlan,
 			PackageEcosystem:                        packageEcosystemPlan,
 			AddWorkflows:                            planOptions.AddWorkflows.ValueString(),
 			ActionCommitMap:                         actionCommitMapPlan,
 		},
-		SelectedRepos:      planRepos,
-		UseRepoLevelConfig: useRepoLevel,
-		UseOrgLevelConfig:  useOrgLevel,
+		SelectedRepos:       planRepos,
+		SelectedReposFilter: selectedReposFilterForAllRepos,
+		UseRepoLevelConfig:  useRepoLevel,
+		UseOrgLevelConfig:   useOrgLevel,
 	}
 
 	// Handle excluded repos: Save their current configs before updating org-level config
@@ -1216,6 +1369,12 @@ func (r *policyDrivenPRResource) updatePolicyDrivenPRState(ctx context.Context, 
 	}
 	exemptList, _ := types.ListValueFrom(ctx, types.StringType, exemptElements)
 
+	exemptImagesElements := make([]types.String, len(stepSecurityPolicy.AutoRemdiationOptions.ImagesToExemptWhilePinning))
+	for i, image := range stepSecurityPolicy.AutoRemdiationOptions.ImagesToExemptWhilePinning {
+		exemptImagesElements[i] = types.StringValue(image)
+	}
+	exemptImagesList, _ := types.ListValueFrom(ctx, types.StringType, exemptImagesElements)
+
 	replaceElements := make([]types.String, len(stepSecurityPolicy.AutoRemdiationOptions.ActionsToReplaceWithStepSecurityActions))
 	for i, action := range stepSecurityPolicy.AutoRemdiationOptions.ActionsToReplaceWithStepSecurityActions {
 		replaceElements[i] = types.StringValue(action)
@@ -1297,6 +1456,7 @@ func (r *policyDrivenPRResource) updatePolicyDrivenPRState(ctx context.Context, 
 			"restrict_github_token_permissions":             types.BoolType,
 			"secure_docker_file":                            types.BoolType,
 			"actions_to_exempt_while_pinning":               types.ListType{ElemType: types.StringType},
+			"images_to_exempt_while_pinning":                types.ListType{ElemType: types.StringType},
 			"actions_to_replace_with_step_security_actions": types.ListType{ElemType: types.StringType},
 			"update_precommit_file":                         types.ListType{ElemType: types.StringType},
 			"package_ecosystem": types.ListType{
@@ -1319,6 +1479,7 @@ func (r *policyDrivenPRResource) updatePolicyDrivenPRState(ctx context.Context, 
 			"restrict_github_token_permissions":             types.BoolValue(stepSecurityPolicy.AutoRemdiationOptions.RestrictGitHubTokenPermissions),
 			"secure_docker_file":                            types.BoolValue(stepSecurityPolicy.AutoRemdiationOptions.SecureDockerFile),
 			"actions_to_exempt_while_pinning":               exemptList,
+			"images_to_exempt_while_pinning":                exemptImagesList,
 			"actions_to_replace_with_step_security_actions": replaceList,
 			"update_precommit_file":                         updatePrecommitFileList,
 			"package_ecosystem":                             packageEcosystemList,
