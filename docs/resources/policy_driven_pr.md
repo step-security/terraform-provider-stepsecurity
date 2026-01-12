@@ -42,6 +42,7 @@ resource "stepsecurity_policy_driven_pr" "org_level_all" {
     restrict_github_token_permissions     = false
     secure_docker_file                    = false
     actions_to_exempt_while_pinning       = ["actions/checkout", "actions/setup-node"]
+    images_to_exempt_while_pinning        = ["amazon*"]
   }
 }
 
@@ -63,6 +64,8 @@ resource "stepsecurity_policy_driven_pr" "repo_level_config" {
     secure_docker_file                            = true
     actions_to_exempt_while_pinning               = ["actions/checkout", "actions/setup-node"]
     actions_to_replace_with_step_security_actions = ["EnricoMi/publish-unit-test-result-action"]
+    images_to_exempt_while_pinning                = ["amazon*"]
+
     # v2-only features (requires policy-driven PR v2 to be enabled)
     update_precommit_file = ["eslint"]
     package_ecosystem = [
@@ -106,6 +109,28 @@ resource "stepsecurity_policy_driven_pr" "org_level_with_exclusions" {
 }
 
 # ============================================================================
+# Scenario 4: Org-level config with filter
+# ============================================================================
+# Applies org-level config to all repos that match the filter
+resource "stepsecurity_policy_driven_pr" "org_level_with_exclusions" {
+  owner          = "test-organization"
+  selected_repos = ["*"]
+  selected_repos_filter = {
+    include_repos_only_with_topics = ["topic1", "topic2"]
+  }
+  auto_remediation_options = {
+    create_pr                             = true
+    create_issue                          = false
+    create_github_advanced_security_alert = false
+    harden_github_hosted_runner           = true
+    pin_actions_to_sha                    = true
+    restrict_github_token_permissions     = false
+    secure_docker_file                    = false
+  }
+}
+
+
+# ============================================================================
 # For importing existing policy driven pr config to terraform state
 # ============================================================================
 # This will be helpful to manage existing policy driven pr config using terraform
@@ -128,6 +153,7 @@ import {
 ### Optional
 
 - `excluded_repos` (List of String) List of repositories to exclude when selected_repos is ['*']. It restores their original configs (preserving configs from other Terraform resources) or deletes configs for repos that had none.
+- `selected_repos_filter` (Attributes) (see [below for nested schema](#nestedatt--selected_repos_filter))
 
 ### Read-Only
 
@@ -146,6 +172,7 @@ Optional:
 - `create_issue` (Boolean) Create an issue when a finding is detected.
 - `create_pr` (Boolean) Create a PR when a finding is detected.
 - `harden_github_hosted_runner` (Boolean) When enabled, this creates a PR/issue to install security agent on the GitHub-hosted runner to prevent exfiltration of credentials, monitor the build process, and detect compromised dependencies.
+- `images_to_exempt_while_pinning` (List of String) List of Docker images to exempt while pinning images to SHA. When exempted, the image will not be pinned to SHA.
 - `package_ecosystem` (Attributes List) List of package ecosystems to enable for dependency updates. (see [below for nested schema](#nestedatt--auto_remediation_options--package_ecosystem))
 - `pin_actions_to_sha` (Boolean) When enabled, this creates a PR/issue to pin actions to SHA. GitHub's Security Hardening guide recommends pinning actions to full length commit for third party actions.
 - `restrict_github_token_permissions` (Boolean) When enabled, this creates a PR/issue to restrict GitHub token permissions. GitHub's Security Hardening guide recommends restricting permissions to the minimum required
@@ -159,6 +186,15 @@ Required:
 
 - `interval` (String) Update interval (e.g., 'daily', 'weekly', 'monthly').
 - `package` (String) Package ecosystem (e.g., 'npm', 'pip', 'docker').
+
+
+
+<a id="nestedatt--selected_repos_filter"></a>
+### Nested Schema for `selected_repos_filter`
+
+Optional:
+
+- `include_repos_only_with_topics` (Set of String) Topics that repos should have when selected_repos is ['*'].
 
 ## Import
 
