@@ -474,7 +474,7 @@ func (r *policyDrivenPRResource) ValidateConfig(ctx context.Context, req resourc
 		return
 	}
 
-	if config.SelectedRepos.IsNull() || len(config.SelectedRepos.Elements()) == 0 {
+	if !config.SelectedRepos.IsUnknown() && (config.SelectedRepos.IsNull() || len(config.SelectedRepos.Elements()) == 0) {
 		resp.Diagnostics.AddError(
 			"Selected Repos is required",
 			"At least one repo is required in selected_repos",
@@ -484,14 +484,16 @@ func (r *policyDrivenPRResource) ValidateConfig(ctx context.Context, req resourc
 
 	// Get selected repos
 	var selectedRepos []string
-	elements := config.SelectedRepos.Elements()
-	for _, elem := range elements {
-		selectedRepos = append(selectedRepos, elem.(types.String).ValueString())
+	if !config.SelectedRepos.IsUnknown() {
+		elements := config.SelectedRepos.Elements()
+		for _, elem := range elements {
+			selectedRepos = append(selectedRepos, elem.(types.String).ValueString())
+		}
 	}
 
 	// Validate excluded_repos only makes sense with wildcard
 	hasWildcard := len(selectedRepos) == 1 && selectedRepos[0] == "*"
-	if !config.ExcludedRepos.IsNull() && len(config.ExcludedRepos.Elements()) > 0 {
+	if !config.ExcludedRepos.IsUnknown() && !config.ExcludedRepos.IsNull() && len(config.ExcludedRepos.Elements()) > 0 {
 		if !hasWildcard {
 			resp.Diagnostics.AddError(
 				"Invalid Configuration",
