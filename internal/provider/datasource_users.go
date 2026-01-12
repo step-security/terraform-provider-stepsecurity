@@ -160,8 +160,10 @@ type UserPolicyModel struct {
 	Scope        types.String `tfsdk:"scope"`
 	Organization types.String `tfsdk:"organization"`
 	Repos        types.List   `tfsdk:"repos"`
-	Group        types.String `tfsdk:"group"`
-	Projects     types.List   `tfsdk:"projects"`
+	// NOTE that this points to server field in api...as there was change in internal implementation
+	// Tf schema still points to 'Group' field to ensure backward compatibility. In future, this field will be deprecated and will be replaces with 'server'.
+	Group    types.String `tfsdk:"group"`
+	Projects types.List   `tfsdk:"projects"`
 }
 
 // Read refreshes the Terraform state with the latest data.
@@ -221,7 +223,7 @@ func (d *usersDataSource) Read(ctx context.Context, req datasource.ReadRequest, 
 				Scope:        types.StringValue(policy.Scope),
 				Organization: types.StringValue(policy.Organization),
 				Repos:        reposList,
-				Group:        types.StringValue(policy.Group),
+				Group:        types.StringValue(policy.Server), // map to 'server' field in api
 				Projects:     projectsList,
 			})
 		}

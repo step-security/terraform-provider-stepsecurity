@@ -516,9 +516,8 @@ func (r *githubRunPolicyResource) ImportState(ctx context.Context, req resource.
 // updateModelFromAPI updates the Terraform model with data from the API response.
 func (r *githubRunPolicyResource) updateModelFromAPI(_ context.Context, model *githubRunPolicyResourceModel, policy *stepsecurityapi.RunPolicy, diags *diag.Diagnostics) {
 
-	if strings.Contains(policy.Owner, "#[all]") {
-		model.Owner = types.StringValue(policy.Owner[:strings.Index(policy.Owner, "#")])
-	} else {
+	// when applied across org..preserve owner set in state/plan
+	if !strings.Contains(policy.Owner, "#[all]") {
 		model.Owner = types.StringValue(policy.Owner)
 	}
 	model.Name = types.StringValue(policy.Name)
