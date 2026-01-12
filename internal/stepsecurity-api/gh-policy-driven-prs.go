@@ -13,11 +13,12 @@ import (
 
 // PolicyDrivenPRPolicy represents the Terraform resource model
 type PolicyDrivenPRPolicy struct {
-	Owner                 string                `json:"owner"`
-	AutoRemdiationOptions AutoRemdiationOptions `json:"auto_remediation_options"`
-	SelectedRepos         []string              `json:"selected_repos"`
-	UseRepoLevelConfig    bool                  `json:"use_repo_level_config"`
-	UseOrgLevelConfig     bool                  `json:"use_org_level_config"`
+	Owner                 string                              `json:"owner"`
+	AutoRemdiationOptions AutoRemdiationOptions               `json:"auto_remediation_options"`
+	SelectedRepos         []string                            `json:"selected_repos"`
+	SelectedReposFilter   ApplyIssuePRConfigForAllReposFilter `json:"selected_repos_filter"`
+	UseRepoLevelConfig    bool                                `json:"use_repo_level_config"`
+	UseOrgLevelConfig     bool                                `json:"use_org_level_config"`
 }
 
 type AutoRemdiationOptions struct {
@@ -29,6 +30,7 @@ type AutoRemdiationOptions struct {
 	RestrictGitHubTokenPermissions          bool               `json:"restrict_github_token_permissions"`
 	SecureDockerFile                        bool               `json:"secure_docker_file"`
 	ActionsToExemptWhilePinning             []string           `json:"actions_to_exempt_while_pinning"`
+	ImagesToExemptWhilePinning              []string           `json:"images_to_exempt_while_pinning"`
 	ActionsToReplaceWithStepSecurityActions []string           `json:"actions_to_replace_with_step_security_actions"`
 	UpdatePrecommitFile                     []string           `json:"update_precommit_file,omitempty"`
 	PackageEcosystem                        []DependabotConfig `json:"package_ecosystem,omitempty"`
@@ -54,13 +56,19 @@ type issuePRConfig struct {
 }
 
 type controlSettings struct {
-	ExemptedActions               []string           `json:"exempted_actions,omitempty"`
-	ActionsToReplace              map[string]string  `json:"actions_to_replace,omitempty"`
-	UpdatePrecommitFile           map[string]bool    `json:"update_precommit_file,omitempty"`
-	PackageEcosystem              []DependabotConfig `json:"package_ecosystem,omitempty"`
-	AddWorkflows                  string             `json:"add_workflows,omitempty"`
-	ApplyIssuePRConfigForAllRepos *bool              `json:"apply_issue_pr_config_for_all_repos,omitempty"`
-	ActionCommitMap               map[string]string  `json:"action_commit_map"`
+	ExemptedActions                     []string                             `json:"exempted_actions,omitempty"`
+	ActionsToReplace                    map[string]string                    `json:"actions_to_replace,omitempty"`
+	UpdatePrecommitFile                 map[string]bool                      `json:"update_precommit_file,omitempty"`
+	PackageEcosystem                    []DependabotConfig                   `json:"package_ecosystem,omitempty"`
+	AddWorkflows                        string                               `json:"add_workflows,omitempty"`
+	ApplyIssuePRConfigForAllRepos       *bool                                `json:"apply_issue_pr_config_for_all_repos,omitempty"`
+	ApplyIssuePRConfigForAllReposFilter *ApplyIssuePRConfigForAllReposFilter `json:"apply_issue_pr_config_for_all_repos_filter,omitempty"`
+	ActionCommitMap                     map[string]string                    `json:"action_commit_map"`
+	ExemptedImages                      []string                             `json:"exempted_images,omitempty"`
+}
+
+type ApplyIssuePRConfigForAllReposFilter struct {
+	ReposTopics []string `json:"repos_topics,omitempty"`
 }
 
 type DependabotConfig struct {
@@ -169,13 +177,15 @@ func (c *APIClient) CreatePolicyDrivenPRPolicy(ctx context.Context, createReques
 	hasWildcard := len(createRequest.SelectedRepos) == 1 && createRequest.SelectedRepos[0] == "*"
 	applyToAllRepos := createRequest.UseOrgLevelConfig && hasWildcard
 	cs := &controlSettings{
-		ExemptedActions:               createRequest.AutoRemdiationOptions.ActionsToExemptWhilePinning,
-		ActionsToReplace:              actionsToReplace,
-		UpdatePrecommitFile:           updatePrecommitFileMap,
-		PackageEcosystem:              createRequest.AutoRemdiationOptions.PackageEcosystem,
-		AddWorkflows:                  createRequest.AutoRemdiationOptions.AddWorkflows,
-		ActionCommitMap:               createRequest.AutoRemdiationOptions.ActionCommitMap,
-		ApplyIssuePRConfigForAllRepos: &applyToAllRepos,
+		ExemptedActions:                     createRequest.AutoRemdiationOptions.ActionsToExemptWhilePinning,
+		ActionsToReplace:                    actionsToReplace,
+		UpdatePrecommitFile:                 updatePrecommitFileMap,
+		PackageEcosystem:                    createRequest.AutoRemdiationOptions.PackageEcosystem,
+		AddWorkflows:                        createRequest.AutoRemdiationOptions.AddWorkflows,
+		ActionCommitMap:                     createRequest.AutoRemdiationOptions.ActionCommitMap,
+		ExemptedImages:                      createRequest.AutoRemdiationOptions.ImagesToExemptWhilePinning,
+		ApplyIssuePRConfigForAllRepos:       &applyToAllRepos,
+		ApplyIssuePRConfigForAllReposFilter: &createRequest.SelectedReposFilter,
 	}
 
 	useRepoLevel := createRequest.UseRepoLevelConfig
@@ -370,16 +380,22 @@ func (c *APIClient) GetPolicyDrivenPRPolicy(ctx context.Context, owner string, r
 		RestrictGitHubTokenPermissions:          enabledTokenPermissions,
 		SecureDockerFile:                        enabledSecureDocker,
 		ActionsToExemptWhilePinning:             selectedConfig.ControlSettings.ExemptedActions,
+		ImagesToExemptWhilePinning:              selectedConfig.ControlSettings.ExemptedImages,
 		ActionsToReplaceWithStepSecurityActions: actionsToReplace,
 		UpdatePrecommitFile:                     updatePrecommitFiles,
 		PackageEcosystem:                        selectedConfig.ControlSettings.PackageEcosystem,
 		AddWorkflows:                            selectedConfig.ControlSettings.AddWorkflows,
 	}
 
+	// Populate SelectedReposFilter from API response
+	if selectedConfig.ControlSettings.ApplyIssuePRConfigForAllReposFilter != nil {
+		policy.SelectedReposFilter = *selectedConfig.ControlSettings.ApplyIssuePRConfigForAllReposFilter
+	}
+
 	return policy, nil
 }
 
-// getConfigForRepo queries a single repo's config
+// getConfigForRepo queries repo's config
 func (c *APIClient) getConfigForRepo(ctx context.Context, owner string, repo string) (*policyDrivenPRInternal, error) {
 	URI := fmt.Sprintf("%s/v1/github/%s/%s/policy-driven-pr/configs", c.BaseURL, owner, repo)
 	respBody, err := c.get(ctx, URI)
@@ -396,8 +412,18 @@ func (c *APIClient) getConfigForRepo(ctx context.Context, owner string, repo str
 		return nil, nil
 	}
 
+	// when repos is "[all]", we may have multiple configs
+	// we need to find the config for the specific repo and return it
+	var selectedConfig *policyDrivenPRInternal
+	for _, config := range configs {
+		if config.FullRepoName == fmt.Sprintf("%s/%s", owner, repo) {
+			selectedConfig = &config.PolicyDrivenPRConfiguration
+			break
+		}
+	}
+
 	// Return the first config (should only be one for a specific repo)
-	return &configs[0].PolicyDrivenPRConfiguration, nil
+	return selectedConfig, nil
 }
 
 // DiscoverPolicyDrivenPRConfig queries [all] to discover if org-level or repo-level config exists
@@ -498,10 +524,16 @@ func (c *APIClient) DiscoverPolicyDrivenPRConfig(ctx context.Context, owner stri
 		RestrictGitHubTokenPermissions:          enabledTokenPermissions,
 		SecureDockerFile:                        enabledSecureDocker,
 		ActionsToExemptWhilePinning:             selectedConfig.ControlSettings.ExemptedActions,
+		ImagesToExemptWhilePinning:              selectedConfig.ControlSettings.ExemptedImages,
 		ActionsToReplaceWithStepSecurityActions: actionsToReplace,
 		UpdatePrecommitFile:                     updatePrecommitFiles,
 		PackageEcosystem:                        selectedConfig.ControlSettings.PackageEcosystem,
 		AddWorkflows:                            selectedConfig.ControlSettings.AddWorkflows,
+	}
+
+	// Populate SelectedReposFilter from API response
+	if selectedConfig.ControlSettings.ApplyIssuePRConfigForAllReposFilter != nil {
+		policy.SelectedReposFilter = *selectedConfig.ControlSettings.ApplyIssuePRConfigForAllReposFilter
 	}
 
 	return policy, nil
