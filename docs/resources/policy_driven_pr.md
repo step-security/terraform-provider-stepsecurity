@@ -42,6 +42,7 @@ resource "stepsecurity_policy_driven_pr" "org_level_all" {
     restrict_github_token_permissions     = false
     secure_docker_file                    = false
     actions_to_exempt_while_pinning       = ["actions/checkout", "actions/setup-node"]
+    images_to_exempt_while_pinning        = ["amazon*"]
   }
 }
 
@@ -63,6 +64,8 @@ resource "stepsecurity_policy_driven_pr" "repo_level_config" {
     secure_docker_file                            = true
     actions_to_exempt_while_pinning               = ["actions/checkout", "actions/setup-node"]
     actions_to_replace_with_step_security_actions = ["EnricoMi/publish-unit-test-result-action"]
+    images_to_exempt_while_pinning                = ["amazon*"]
+
     # v2-only features (requires policy-driven PR v2 to be enabled)
     update_precommit_file = ["eslint"]
     package_ecosystem = [
@@ -169,6 +172,7 @@ Optional:
 - `create_issue` (Boolean) Create an issue when a finding is detected.
 - `create_pr` (Boolean) Create a PR when a finding is detected.
 - `harden_github_hosted_runner` (Boolean) When enabled, this creates a PR/issue to install security agent on the GitHub-hosted runner to prevent exfiltration of credentials, monitor the build process, and detect compromised dependencies.
+- `images_to_exempt_while_pinning` (List of String) List of Docker images to exempt while pinning images to SHA. When exempted, the image will not be pinned to SHA.
 - `package_ecosystem` (Attributes List) List of package ecosystems to enable for dependency updates. (see [below for nested schema](#nestedatt--auto_remediation_options--package_ecosystem))
 - `pin_actions_to_sha` (Boolean) When enabled, this creates a PR/issue to pin actions to SHA. GitHub's Security Hardening guide recommends pinning actions to full length commit for third party actions.
 - `restrict_github_token_permissions` (Boolean) When enabled, this creates a PR/issue to restrict GitHub token permissions. GitHub's Security Hardening guide recommends restricting permissions to the minimum required

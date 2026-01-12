@@ -30,6 +30,7 @@ type AutoRemdiationOptions struct {
 	RestrictGitHubTokenPermissions          bool               `json:"restrict_github_token_permissions"`
 	SecureDockerFile                        bool               `json:"secure_docker_file"`
 	ActionsToExemptWhilePinning             []string           `json:"actions_to_exempt_while_pinning"`
+	ImagesToExemptWhilePinning              []string           `json:"images_to_exempt_while_pinning"`
 	ActionsToReplaceWithStepSecurityActions []string           `json:"actions_to_replace_with_step_security_actions"`
 	UpdatePrecommitFile                     []string           `json:"update_precommit_file,omitempty"`
 	PackageEcosystem                        []DependabotConfig `json:"package_ecosystem,omitempty"`
@@ -63,6 +64,7 @@ type controlSettings struct {
 	ApplyIssuePRConfigForAllRepos       *bool                                `json:"apply_issue_pr_config_for_all_repos,omitempty"`
 	ApplyIssuePRConfigForAllReposFilter *ApplyIssuePRConfigForAllReposFilter `json:"apply_issue_pr_config_for_all_repos_filter,omitempty"`
 	ActionCommitMap                     map[string]string                    `json:"action_commit_map"`
+	ExemptedImages                      []string                             `json:"exempted_images,omitempty"`
 }
 
 type ApplyIssuePRConfigForAllReposFilter struct {
@@ -181,6 +183,7 @@ func (c *APIClient) CreatePolicyDrivenPRPolicy(ctx context.Context, createReques
 		PackageEcosystem:                    createRequest.AutoRemdiationOptions.PackageEcosystem,
 		AddWorkflows:                        createRequest.AutoRemdiationOptions.AddWorkflows,
 		ActionCommitMap:                     createRequest.AutoRemdiationOptions.ActionCommitMap,
+		ExemptedImages:                      createRequest.AutoRemdiationOptions.ImagesToExemptWhilePinning,
 		ApplyIssuePRConfigForAllRepos:       &applyToAllRepos,
 		ApplyIssuePRConfigForAllReposFilter: &createRequest.SelectedReposFilter,
 	}
@@ -377,6 +380,7 @@ func (c *APIClient) GetPolicyDrivenPRPolicy(ctx context.Context, owner string, r
 		RestrictGitHubTokenPermissions:          enabledTokenPermissions,
 		SecureDockerFile:                        enabledSecureDocker,
 		ActionsToExemptWhilePinning:             selectedConfig.ControlSettings.ExemptedActions,
+		ImagesToExemptWhilePinning:              selectedConfig.ControlSettings.ExemptedImages,
 		ActionsToReplaceWithStepSecurityActions: actionsToReplace,
 		UpdatePrecommitFile:                     updatePrecommitFiles,
 		PackageEcosystem:                        selectedConfig.ControlSettings.PackageEcosystem,
@@ -520,6 +524,7 @@ func (c *APIClient) DiscoverPolicyDrivenPRConfig(ctx context.Context, owner stri
 		RestrictGitHubTokenPermissions:          enabledTokenPermissions,
 		SecureDockerFile:                        enabledSecureDocker,
 		ActionsToExemptWhilePinning:             selectedConfig.ControlSettings.ExemptedActions,
+		ImagesToExemptWhilePinning:              selectedConfig.ControlSettings.ExemptedImages,
 		ActionsToReplaceWithStepSecurityActions: actionsToReplace,
 		UpdatePrecommitFile:                     updatePrecommitFiles,
 		PackageEcosystem:                        selectedConfig.ControlSettings.PackageEcosystem,

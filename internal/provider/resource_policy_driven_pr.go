@@ -138,6 +138,18 @@ func (r *policyDrivenPRResource) Schema(_ context.Context, _ resource.SchemaRequ
 							),
 						),
 					},
+					"images_to_exempt_while_pinning": schema.ListAttribute{
+						ElementType: types.StringType,
+						Optional:    true,
+						Computed:    true,
+						Description: "List of Docker images to exempt while pinning images to SHA. When exempted, the image will not be pinned to SHA.",
+						Default: listdefault.StaticValue(
+							types.ListValueMust(
+								types.StringType,
+								[]attr.Value{},
+							),
+						),
+					},
 					"actions_to_replace_with_step_security_actions": schema.ListAttribute{
 						ElementType: types.StringType,
 						Optional:    true,
@@ -290,6 +302,12 @@ func (r *policyDrivenPRResource) ImportState(ctx context.Context, req resource.I
 	}
 	exemptList, _ := types.ListValueFrom(ctx, types.StringType, exemptElements)
 
+	exemptImagesElements := make([]types.String, len(policy.AutoRemdiationOptions.ImagesToExemptWhilePinning))
+	for i, image := range policy.AutoRemdiationOptions.ImagesToExemptWhilePinning {
+		exemptImagesElements[i] = types.StringValue(image)
+	}
+	exemptImagesList, _ := types.ListValueFrom(ctx, types.StringType, exemptImagesElements)
+
 	replaceElements := make([]types.String, len(policy.AutoRemdiationOptions.ActionsToReplaceWithStepSecurityActions))
 	for i, action := range policy.AutoRemdiationOptions.ActionsToReplaceWithStepSecurityActions {
 		replaceElements[i] = types.StringValue(action)
@@ -370,6 +388,7 @@ func (r *policyDrivenPRResource) ImportState(ctx context.Context, req resource.I
 			"restrict_github_token_permissions":             types.BoolType,
 			"secure_docker_file":                            types.BoolType,
 			"actions_to_exempt_while_pinning":               types.ListType{ElemType: types.StringType},
+			"images_to_exempt_while_pinning":                types.ListType{ElemType: types.StringType},
 			"actions_to_replace_with_step_security_actions": types.ListType{ElemType: types.StringType},
 			"update_precommit_file":                         types.ListType{ElemType: types.StringType},
 			"package_ecosystem": types.ListType{
@@ -392,6 +411,7 @@ func (r *policyDrivenPRResource) ImportState(ctx context.Context, req resource.I
 			"restrict_github_token_permissions":             types.BoolValue(policy.AutoRemdiationOptions.RestrictGitHubTokenPermissions),
 			"secure_docker_file":                            types.BoolValue(policy.AutoRemdiationOptions.SecureDockerFile),
 			"actions_to_exempt_while_pinning":               exemptList,
+			"images_to_exempt_while_pinning":                exemptImagesList,
 			"actions_to_replace_with_step_security_actions": replaceList,
 			"update_precommit_file":                         updatePrecommitFileList,
 			"package_ecosystem":                             packageEcosystemList,
@@ -428,6 +448,7 @@ type autoRemdiationOptionsModel struct {
 	RestrictGitHubTokenPermissions          types.Bool   `tfsdk:"restrict_github_token_permissions"`
 	SecureDockerFile                        types.Bool   `tfsdk:"secure_docker_file"`
 	ActionsToExemptWhilePinning             types.List   `tfsdk:"actions_to_exempt_while_pinning"`
+	ImagesToExemptWhilePinning              types.List   `tfsdk:"images_to_exempt_while_pinning"`
 	ActionsToReplaceWithStepSecurityActions types.List   `tfsdk:"actions_to_replace_with_step_security_actions"`
 	UpdatePrecommitFile                     types.List   `tfsdk:"update_precommit_file"`
 	PackageEcosystem                        types.List   `tfsdk:"package_ecosystem"`
@@ -683,6 +704,15 @@ func (r *policyDrivenPRResource) Create(ctx context.Context, req resource.Create
 		}
 	}
 
+	var imagesToExempt []string
+	if !options.ImagesToExemptWhilePinning.IsNull() {
+		elements := options.ImagesToExemptWhilePinning.Elements()
+		imagesToExempt = make([]string, len(elements))
+		for i, elem := range elements {
+			imagesToExempt[i] = elem.(types.String).ValueString()
+		}
+	}
+
 	var actionsToReplace []string
 	if !options.ActionsToReplaceWithStepSecurityActions.IsNull() {
 		elements := options.ActionsToReplaceWithStepSecurityActions.Elements()
@@ -744,6 +774,7 @@ func (r *policyDrivenPRResource) Create(ctx context.Context, req resource.Create
 			RestrictGitHubTokenPermissions:          options.RestrictGitHubTokenPermissions.ValueBool(),
 			SecureDockerFile:                        options.SecureDockerFile.ValueBool(),
 			ActionsToExemptWhilePinning:             actionsToExempt,
+			ImagesToExemptWhilePinning:              imagesToExempt,
 			ActionsToReplaceWithStepSecurityActions: actionsToReplace,
 			UpdatePrecommitFile:                     updatePrecommitFile,
 			PackageEcosystem:                        packageEcosystem,
@@ -971,6 +1002,19 @@ func (r *policyDrivenPRResource) Read(ctx context.Context, req resource.ReadRequ
 		tflog.Info(ctx, "Preserving actions_to_exempt_while_pinning from state")
 	}
 
+	if len(stepSecurityPolicy.AutoRemdiationOptions.ImagesToExemptWhilePinning) == 0 &&
+		!currentStateOptions.ImagesToExemptWhilePinning.IsNull() &&
+		len(currentStateOptions.ImagesToExemptWhilePinning.Elements()) > 0 {
+		elements := currentStateOptions.ImagesToExemptWhilePinning.Elements()
+		for _, elem := range elements {
+			stepSecurityPolicy.AutoRemdiationOptions.ImagesToExemptWhilePinning = append(
+				stepSecurityPolicy.AutoRemdiationOptions.ImagesToExemptWhilePinning,
+				elem.(types.String).ValueString(),
+			)
+		}
+		tflog.Info(ctx, "Preserving images_to_exempt_while_pinning from state")
+	}
+
 	if len(stepSecurityPolicy.AutoRemdiationOptions.ActionsToReplaceWithStepSecurityActions) == 0 &&
 		!currentStateOptions.ActionsToReplaceWithStepSecurityActions.IsNull() &&
 		len(currentStateOptions.ActionsToReplaceWithStepSecurityActions.Elements()) > 0 {
@@ -1120,6 +1164,15 @@ func (r *policyDrivenPRResource) Update(ctx context.Context, req resource.Update
 		}
 	}
 
+	var imagesToExempt []string
+	if !planOptions.ImagesToExemptWhilePinning.IsNull() {
+		elements := planOptions.ImagesToExemptWhilePinning.Elements()
+		imagesToExempt = make([]string, len(elements))
+		for i, elem := range elements {
+			imagesToExempt[i] = elem.(types.String).ValueString()
+		}
+	}
+
 	var actionsToReplace []string
 	if !planOptions.ActionsToReplaceWithStepSecurityActions.IsNull() {
 		elements := planOptions.ActionsToReplaceWithStepSecurityActions.Elements()
@@ -1182,6 +1235,7 @@ func (r *policyDrivenPRResource) Update(ctx context.Context, req resource.Update
 			RestrictGitHubTokenPermissions:          planOptions.RestrictGitHubTokenPermissions.ValueBool(),
 			SecureDockerFile:                        planOptions.SecureDockerFile.ValueBool(),
 			ActionsToExemptWhilePinning:             actionsToExempt,
+			ImagesToExemptWhilePinning:              imagesToExempt,
 			ActionsToReplaceWithStepSecurityActions: actionsToReplace,
 			UpdatePrecommitFile:                     updatePrecommitFilePlan,
 			PackageEcosystem:                        packageEcosystemPlan,
@@ -1315,6 +1369,12 @@ func (r *policyDrivenPRResource) updatePolicyDrivenPRState(ctx context.Context, 
 	}
 	exemptList, _ := types.ListValueFrom(ctx, types.StringType, exemptElements)
 
+	exemptImagesElements := make([]types.String, len(stepSecurityPolicy.AutoRemdiationOptions.ImagesToExemptWhilePinning))
+	for i, image := range stepSecurityPolicy.AutoRemdiationOptions.ImagesToExemptWhilePinning {
+		exemptImagesElements[i] = types.StringValue(image)
+	}
+	exemptImagesList, _ := types.ListValueFrom(ctx, types.StringType, exemptImagesElements)
+
 	replaceElements := make([]types.String, len(stepSecurityPolicy.AutoRemdiationOptions.ActionsToReplaceWithStepSecurityActions))
 	for i, action := range stepSecurityPolicy.AutoRemdiationOptions.ActionsToReplaceWithStepSecurityActions {
 		replaceElements[i] = types.StringValue(action)
@@ -1396,6 +1456,7 @@ func (r *policyDrivenPRResource) updatePolicyDrivenPRState(ctx context.Context, 
 			"restrict_github_token_permissions":             types.BoolType,
 			"secure_docker_file":                            types.BoolType,
 			"actions_to_exempt_while_pinning":               types.ListType{ElemType: types.StringType},
+			"images_to_exempt_while_pinning":                types.ListType{ElemType: types.StringType},
 			"actions_to_replace_with_step_security_actions": types.ListType{ElemType: types.StringType},
 			"update_precommit_file":                         types.ListType{ElemType: types.StringType},
 			"package_ecosystem": types.ListType{
@@ -1418,6 +1479,7 @@ func (r *policyDrivenPRResource) updatePolicyDrivenPRState(ctx context.Context, 
 			"restrict_github_token_permissions":             types.BoolValue(stepSecurityPolicy.AutoRemdiationOptions.RestrictGitHubTokenPermissions),
 			"secure_docker_file":                            types.BoolValue(stepSecurityPolicy.AutoRemdiationOptions.SecureDockerFile),
 			"actions_to_exempt_while_pinning":               exemptList,
+			"images_to_exempt_while_pinning":                exemptImagesList,
 			"actions_to_replace_with_step_security_actions": replaceList,
 			"update_precommit_file":                         updatePrecommitFileList,
 			"package_ecosystem":                             packageEcosystemList,
