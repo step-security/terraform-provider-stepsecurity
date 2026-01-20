@@ -36,6 +36,9 @@ resource "stepsecurity_github_org_notification_settings" "test-organization" {
     harden_runner_config_changes_detected = true
     non_compliant_artifact_detected       = false
     run_blocked_by_policy                 = false
+    baseline_check_failures               = false
+    required_check_failures               = false
+    optional_check_failures               = false
   }
 }
 

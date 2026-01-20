@@ -165,6 +165,24 @@ func (r *GithubRepoNotificationSettingsResource) Schema(_ context.Context, _ res
 						Description: "Notify when a run policy is blocked",
 						Default:     booldefault.StaticBool(false),
 					},
+					"baseline_check_failures": schema.BoolAttribute{
+						Optional:    true,
+						Computed:    true,
+						Description: "Notify when baseline PR checks fail",
+						Default:     booldefault.StaticBool(false),
+					},
+					"required_check_failures": schema.BoolAttribute{
+						Optional:    true,
+						Computed:    true,
+						Description: "Notify when required PR checks fail",
+						Default:     booldefault.StaticBool(false),
+					},
+					"optional_check_failures": schema.BoolAttribute{
+						Optional:    true,
+						Computed:    true,
+						Description: "Notify when optional PR checks fail",
+						Default:     booldefault.StaticBool(false),
+					},
 				},
 				Required: true,
 			},
@@ -245,6 +263,9 @@ type githubNotificationEventsModel struct {
 	HardenRunnerConfigChangesDetected types.Bool `tfsdk:"harden_runner_config_changes_detected"`
 	NonCompliantArtifactDetected      types.Bool `tfsdk:"non_compliant_artifact_detected"`
 	RunBlockedByPolicy                types.Bool `tfsdk:"run_blocked_by_policy"`
+	BaselineCheckFailures             types.Bool `tfsdk:"baseline_check_failures"`
+	RequiredCheckFailures             types.Bool `tfsdk:"required_check_failures"`
+	OptionalCheckFailures             types.Bool `tfsdk:"optional_check_failures"`
 }
 
 // Create creates the resource and sets the initial Terraform state.
@@ -292,6 +313,9 @@ func (r *GithubRepoNotificationSettingsResource) Create(ctx context.Context, req
 			NotifyForHardenRunnerConfigChange: utilities.ConvertBoolToString(events.HardenRunnerConfigChangesDetected.ValueBool()),
 			NotifyForNonCompliantArtifacts:    utilities.ConvertBoolToString(events.NonCompliantArtifactDetected.ValueBool()),
 			NotifyForBlockedRunPolicy:         utilities.ConvertBoolToString(events.RunBlockedByPolicy.ValueBool()),
+			NotifyForBaselineCheckFailures:    utilities.ConvertBoolToString(events.BaselineCheckFailures.ValueBool()),
+			NotifyForRequiredCheckFailures:    utilities.ConvertBoolToString(events.RequiredCheckFailures.ValueBool()),
+			NotifyForOptionalCheckFailures:    utilities.ConvertBoolToString(events.OptionalCheckFailures.ValueBool()),
 		},
 	}
 
@@ -373,6 +397,9 @@ func (r *GithubRepoNotificationSettingsResource) Read(ctx context.Context, req r
 			"harden_runner_config_changes_detected": types.BoolType,
 			"non_compliant_artifact_detected":       types.BoolType,
 			"run_blocked_by_policy":                 types.BoolType,
+			"baseline_check_failures":               types.BoolType,
+			"required_check_failures":               types.BoolType,
+			"optional_check_failures":               types.BoolType,
 		},
 		map[string]attr.Value{
 			"domain_blocked":                        types.BoolValue(utilities.ConvertStringToBool(settings.NotifyWhenDomainBlocked)),
@@ -387,6 +414,9 @@ func (r *GithubRepoNotificationSettingsResource) Read(ctx context.Context, req r
 			"harden_runner_config_changes_detected": types.BoolValue(utilities.ConvertStringToBool(settings.NotifyForHardenRunnerConfigChange)),
 			"non_compliant_artifact_detected":       types.BoolValue(utilities.ConvertStringToBool(settings.NotifyForNonCompliantArtifacts)),
 			"run_blocked_by_policy":                 types.BoolValue(utilities.ConvertStringToBool(settings.NotifyForBlockedRunPolicy)),
+			"baseline_check_failures":               types.BoolValue(utilities.ConvertStringToBool(settings.NotifyForBaselineCheckFailures)),
+			"required_check_failures":               types.BoolValue(utilities.ConvertStringToBool(settings.NotifyForRequiredCheckFailures)),
+			"optional_check_failures":               types.BoolValue(utilities.ConvertStringToBool(settings.NotifyForOptionalCheckFailures)),
 		},
 	)
 	state.NotificationEvents = eventsObj
@@ -444,6 +474,9 @@ func (r *GithubRepoNotificationSettingsResource) Update(ctx context.Context, req
 			NotifyForHardenRunnerConfigChange: utilities.ConvertBoolToString(events.HardenRunnerConfigChangesDetected.ValueBool()),
 			NotifyForNonCompliantArtifacts:    utilities.ConvertBoolToString(events.NonCompliantArtifactDetected.ValueBool()),
 			NotifyForBlockedRunPolicy:         utilities.ConvertBoolToString(events.RunBlockedByPolicy.ValueBool()),
+			NotifyForBaselineCheckFailures:    utilities.ConvertBoolToString(events.BaselineCheckFailures.ValueBool()),
+			NotifyForRequiredCheckFailures:    utilities.ConvertBoolToString(events.RequiredCheckFailures.ValueBool()),
+			NotifyForOptionalCheckFailures:    utilities.ConvertBoolToString(events.OptionalCheckFailures.ValueBool()),
 		},
 	}
 

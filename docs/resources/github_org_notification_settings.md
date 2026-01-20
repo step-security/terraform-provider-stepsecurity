@@ -50,6 +50,9 @@ resource "stepsecurity_github_org_notification_settings" "test-organization" {
     harden_runner_config_changes_detected = true
     non_compliant_artifact_detected       = false
     run_blocked_by_policy                 = false
+    baseline_check_failures               = false
+    required_check_failures               = false
+    optional_check_failures               = false
   }
 }
 
@@ -94,6 +97,7 @@ Optional:
 Optional:
 
 - `artifacts_secrets_detected` (Boolean) Notify when secrets are detected in the build artifacts
+- `baseline_check_failures` (Boolean) Notify when baseline PR checks fail
 - `domain_blocked` (Boolean) Notify when outbound traffic to a domain is blocked.
 - `file_overwrite` (Boolean) Notify when source code file is overwritten
 - `harden_runner_config_changes_detected` (Boolean) Notify when harden runner config changes are detected
@@ -101,6 +105,8 @@ Optional:
 - `imposter_commits_detected` (Boolean) Notify when imposter commits are detected
 - `new_endpoint_discovered` (Boolean) Notify when anomalous outbound call is discovered
 - `non_compliant_artifact_detected` (Boolean) Notify when non-compliant artifacts are detected
+- `optional_check_failures` (Boolean) Notify when optional PR checks fail
+- `required_check_failures` (Boolean) Notify when required PR checks fail
 - `run_blocked_by_policy` (Boolean) Notify when a run policy is blocked
 - `secrets_detected` (Boolean) Notify when secrets are detected in the build log
 - `suspicious_network_call_detected` (Boolean) Notify when suspicious network calls are detected
