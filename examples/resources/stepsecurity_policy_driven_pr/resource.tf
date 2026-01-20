@@ -41,13 +41,17 @@ resource "stepsecurity_policy_driven_pr" "repo_level_config" {
   owner          = "test-organization"
   selected_repos = ["test-repo-1", "test-repo-2"]
   auto_remediation_options = {
-    create_pr                                     = true
-    create_issue                                  = false
-    create_github_advanced_security_alert         = false
-    harden_github_hosted_runner                   = true
-    pin_actions_to_sha                            = true
-    restrict_github_token_permissions             = true
-    secure_docker_file                            = true
+    create_pr                             = true
+    create_issue                          = false
+    create_github_advanced_security_alert = false
+    harden_github_hosted_runner           = true
+    pin_actions_to_sha                    = true
+    restrict_github_token_permissions     = true
+    secure_docker_file                    = true
+    labels_to_replace = {
+      "ubuntu-latest-8-cores" = "ubuntu-latest"
+      "windows-latest-large"  = "windows-latest"
+    }
     actions_to_exempt_while_pinning               = ["actions/checkout", "actions/setup-node"]
     actions_to_replace_with_step_security_actions = ["EnricoMi/publish-unit-test-result-action"]
     images_to_exempt_while_pinning                = ["amazon*"]
