@@ -29,6 +29,7 @@ type AutoRemdiationOptions struct {
 	PinActionsToSHA                         bool               `json:"pin_actions_to_sha"`
 	RestrictGitHubTokenPermissions          bool               `json:"restrict_github_token_permissions"`
 	SecureDockerFile                        bool               `json:"secure_docker_file"`
+	LabelsToReplace                         map[string]string  `json:"labels_to_replace,omitempty"`
 	ActionsToExemptWhilePinning             []string           `json:"actions_to_exempt_while_pinning"`
 	ImagesToExemptWhilePinning              []string           `json:"images_to_exempt_while_pinning"`
 	ActionsToReplaceWithStepSecurityActions []string           `json:"actions_to_replace_with_step_security_actions"`
@@ -58,6 +59,7 @@ type issuePRConfig struct {
 type controlSettings struct {
 	ExemptedActions                     []string                             `json:"exempted_actions,omitempty"`
 	ActionsToReplace                    map[string]string                    `json:"actions_to_replace,omitempty"`
+	LabelsToReplace                     map[string]string                    `json:"labels_to_replace,omitempty"`
 	UpdatePrecommitFile                 map[string]bool                      `json:"update_precommit_file,omitempty"`
 	PackageEcosystem                    []DependabotConfig                   `json:"package_ecosystem,omitempty"`
 	AddWorkflows                        string                               `json:"add_workflows,omitempty"`
@@ -143,6 +145,13 @@ func (c *APIClient) CreatePolicyDrivenPRPolicy(ctx context.Context, createReques
 		}
 	}
 
+	if len(createRequest.AutoRemdiationOptions.LabelsToReplace) > 0 {
+		controlChecksConfig["ReplaceRunnerLabels"] = issuePRConfig{
+			TriggerGithubIssue: createIssue,
+			TriggerGithubPr:    createPR,
+		}
+	}
+
 	if len(createRequest.AutoRemdiationOptions.ActionsToReplaceWithStepSecurityActions) > 0 {
 		controlChecksConfig["MaintainedGitHubActionsShouldBeUsed"] = issuePRConfig{
 			TriggerGithubIssue: createIssue,
@@ -179,6 +188,7 @@ func (c *APIClient) CreatePolicyDrivenPRPolicy(ctx context.Context, createReques
 	cs := &controlSettings{
 		ExemptedActions:                     createRequest.AutoRemdiationOptions.ActionsToExemptWhilePinning,
 		ActionsToReplace:                    actionsToReplace,
+		LabelsToReplace:                     createRequest.AutoRemdiationOptions.LabelsToReplace,
 		UpdatePrecommitFile:                 updatePrecommitFileMap,
 		PackageEcosystem:                    createRequest.AutoRemdiationOptions.PackageEcosystem,
 		AddWorkflows:                        createRequest.AutoRemdiationOptions.AddWorkflows,
@@ -379,6 +389,7 @@ func (c *APIClient) GetPolicyDrivenPRPolicy(ctx context.Context, owner string, r
 		PinActionsToSHA:                         enabledPinning,
 		RestrictGitHubTokenPermissions:          enabledTokenPermissions,
 		SecureDockerFile:                        enabledSecureDocker,
+		LabelsToReplace:                         selectedConfig.ControlSettings.LabelsToReplace,
 		ActionsToExemptWhilePinning:             selectedConfig.ControlSettings.ExemptedActions,
 		ImagesToExemptWhilePinning:              selectedConfig.ControlSettings.ExemptedImages,
 		ActionsToReplaceWithStepSecurityActions: actionsToReplace,
@@ -523,6 +534,7 @@ func (c *APIClient) DiscoverPolicyDrivenPRConfig(ctx context.Context, owner stri
 		PinActionsToSHA:                         enabledPinning,
 		RestrictGitHubTokenPermissions:          enabledTokenPermissions,
 		SecureDockerFile:                        enabledSecureDocker,
+		LabelsToReplace:                         selectedConfig.ControlSettings.LabelsToReplace,
 		ActionsToExemptWhilePinning:             selectedConfig.ControlSettings.ExemptedActions,
 		ImagesToExemptWhilePinning:              selectedConfig.ControlSettings.ExemptedImages,
 		ActionsToReplaceWithStepSecurityActions: actionsToReplace,
