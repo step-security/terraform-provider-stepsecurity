@@ -4,6 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
+	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -88,6 +91,11 @@ type policyDrivenPRInternal struct {
 	TriggerGithubAlert      bool                       `json:"trigger_github_alert"`
 	TriggerPRInsteadOfIssue bool                       `json:"trigger_pr_instead_of_issue"`
 	ControlSettings         controlSettings            `json:"control_settings,omitempty"`
+}
+
+// pagedConfigResponse is the v2 envelope returned when chunk_response=true.
+type pagedConfigResponse struct {
+	Repos []featureConfigResponse `json:"repos"`
 }
 
 func (c *APIClient) CreatePolicyDrivenPRPolicy(ctx context.Context, createRequest PolicyDrivenPRPolicy) error {
@@ -307,7 +315,7 @@ func (c *APIClient) GetPolicyDrivenPRPolicy(ctx context.Context, owner string, r
 
 	if isOrgLevel {
 		// Query org-level config
-		config, err := c.getConfigForRepo(ctx, owner, "[all]")
+		config, err := c.getConfigForRepoV2(ctx, owner, "[all]")
 		if err != nil {
 			return policy, fmt.Errorf("failed to get org-level config: %w", err)
 		}
@@ -320,7 +328,7 @@ func (c *APIClient) GetPolicyDrivenPRPolicy(ctx context.Context, owner string, r
 		// Query each repo individually for repo-level config
 		// Use first repo's config as the template (all should be the same)
 		for _, repo := range repos {
-			config, err := c.getConfigForRepo(ctx, owner, repo)
+			config, err := c.getConfigForRepoV2(ctx, owner, repo)
 			if err != nil {
 				tflog.Warn(ctx, "Failed to get config for repo", map[string]interface{}{
 					"repo":  repo,
@@ -396,6 +404,7 @@ func (c *APIClient) GetPolicyDrivenPRPolicy(ctx context.Context, owner string, r
 }
 
 // getConfigForRepo queries repo's config
+// NOTE: please don't use this function, use getConfigForRepoV2 instead
 func (c *APIClient) getConfigForRepo(ctx context.Context, owner string, repo string) (*policyDrivenPRInternal, error) {
 	URI := fmt.Sprintf("%s/v1/github/%s/%s/policy-driven-pr/configs", c.BaseURL, owner, repo)
 	respBody, err := c.get(ctx, URI)
@@ -426,6 +435,81 @@ func (c *APIClient) getConfigForRepo(ctx context.Context, owner string, repo str
 	return selectedConfig, nil
 }
 
+// getConfigForRepoV2 queries repo's config using the v2 chunked response model.
+// It sends X-Version: v2 and chunk_response=true, then follows X-Page-Token
+// pagination headers to collect all pages before searching for the target repo.
+func (c *APIClient) getConfigForRepoV2(ctx context.Context, owner string, repo string) (*policyDrivenPRInternal, error) {
+
+	configs, err := c.getConfigsV2Util(ctx, owner, repo)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get configs for repo %s: %w", repo, err)
+	}
+
+	for _, config := range configs {
+		if config.FullRepoName == fmt.Sprintf("%s/%s", owner, repo) {
+			return &config.PolicyDrivenPRConfiguration, nil
+		}
+	}
+
+	return nil, nil
+}
+
+func (c *APIClient) getConfigsV2Util(ctx context.Context, owner, repo string) ([]featureConfigResponse, error) {
+	var allConfigs []featureConfigResponse
+	pageToken := ""
+	totalPages := 1
+
+	for page := 1; page <= totalPages; page++ {
+		var uri string
+		if pageToken != "" {
+			uri = fmt.Sprintf("%s/v1/github/%s/%s/policy-driven-pr/configs?page_token=%s&chunk_page=%d",
+				c.BaseURL, owner, repo, pageToken, page)
+		} else {
+			uri = fmt.Sprintf("%s/v1/github/%s/%s/policy-driven-pr/configs?chunk_response=true", c.BaseURL, owner, repo)
+		}
+
+		req, err := http.NewRequestWithContext(ctx, "GET", uri, nil)
+		if err != nil {
+			return nil, fmt.Errorf("failed to create request: %w", err)
+		}
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("Authorization", "Bearer "+c.APIKey)
+		req.Header.Set("X-Api-Version", "v2")
+
+		res, err := c.HTTPClient.Do(req)
+		if err != nil {
+			return nil, fmt.Errorf("failed to get config for repo %s (page %d): %w", repo, page, err)
+		}
+		body, err := io.ReadAll(res.Body)
+		res.Body.Close() //nolint:errcheck
+		if err != nil {
+			return nil, fmt.Errorf("failed to read response body (page %d): %w", page, err)
+		}
+		if res.StatusCode != http.StatusOK {
+			return nil, fmt.Errorf("unexpected status %d (page %d): %s", res.StatusCode, page, body)
+		}
+
+		// On the first page, read pagination headers to know how many pages to fetch.
+		if page == 1 && res.Header.Get("X-Response-Chunked") == "true" {
+			pageToken = res.Header.Get("X-Page-Token")
+			if tp, err := strconv.Atoi(res.Header.Get("X-Total-Pages")); err == nil && tp > 1 {
+				totalPages = tp
+			}
+		}
+		tflog.Info(ctx, "Response", map[string]interface{}{
+			"page": page,
+			"body": string(body),
+		})
+
+		var pr pagedConfigResponse
+		if err := json.Unmarshal(body, &pr); err != nil {
+			return nil, fmt.Errorf("failed to unmarshal configs (page %d): %w", page, err)
+		}
+		allConfigs = append(allConfigs, pr.Repos...)
+	}
+	return allConfigs, nil
+}
+
 // DiscoverPolicyDrivenPRConfig queries [all] to discover if org-level or repo-level config exists
 // Used during import to determine the configuration type
 func (c *APIClient) DiscoverPolicyDrivenPRConfig(ctx context.Context, owner string) (*PolicyDrivenPRPolicy, error) {
@@ -433,16 +517,9 @@ func (c *APIClient) DiscoverPolicyDrivenPRConfig(ctx context.Context, owner stri
 		Owner: owner,
 	}
 
-	// Query [all] to get all configs
-	URI := fmt.Sprintf("%s/v1/github/%s/%s/policy-driven-pr/configs", c.BaseURL, owner, "[all]")
-	respBody, err := c.get(ctx, URI)
+	configs, err := c.getConfigsV2Util(ctx, owner, "[all]")
 	if err != nil {
 		return policy, fmt.Errorf("failed to discover policy configs: %w", err)
-	}
-
-	var configs []featureConfigResponse
-	if err := json.Unmarshal(respBody, &configs); err != nil {
-		return policy, fmt.Errorf("failed to unmarshal configs: %w", err)
 	}
 
 	if len(configs) == 0 {
@@ -480,7 +557,7 @@ func (c *APIClient) DiscoverPolicyDrivenPRConfig(ctx context.Context, owner stri
 		// Repo-level configs exist
 		useOrgLevel = false
 		// Use first repo config as template
-		config, _ := c.getConfigForRepo(ctx, owner, repoConfigs[0])
+		config, _ := c.getConfigForRepoV2(ctx, owner, repoConfigs[0])
 		if config != nil {
 			selectedConfig = *config
 			selectedRepos = repoConfigs
