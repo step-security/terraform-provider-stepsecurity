@@ -174,18 +174,38 @@ func (r *policyDrivenPRResource) Schema(_ context.Context, _ resource.SchemaRequ
 							),
 						),
 					},
-					"package_ecosystem": schema.ListNestedAttribute{
+					"dependabot": schema.SingleNestedAttribute{
 						Optional:    true,
-						Description: "List of package ecosystems to enable for dependency updates.",
-						NestedObject: schema.NestedAttributeObject{
-							Attributes: map[string]schema.Attribute{
-								"package": schema.StringAttribute{
-									Required:    true,
-									Description: "Package ecosystem (e.g., 'npm', 'pip', 'docker').",
-								},
-								"interval": schema.StringAttribute{
-									Required:    true,
-									Description: "Update interval (e.g., 'daily', 'weekly', 'monthly').",
+						Description: "Dependabot configuration for dependency updates.",
+						Attributes: map[string]schema.Attribute{
+							"subtractive": schema.BoolAttribute{
+								Optional:    true,
+								Computed:    true,
+								Description: "When true, only the specified ecosystems will be configured (removes others). When false, adds to existing configuration.",
+								Default:     booldefault.StaticBool(false),
+							},
+							"package_ecosystem": schema.ListNestedAttribute{
+								Optional:    true,
+								Description: "List of package ecosystems to enable for dependency updates.",
+								NestedObject: schema.NestedAttributeObject{
+									Attributes: map[string]schema.Attribute{
+										"package": schema.StringAttribute{
+											Required:    true,
+											Description: "Package ecosystem (e.g., 'npm', 'pip', 'docker').",
+										},
+										"interval": schema.StringAttribute{
+											Required:    true,
+											Description: "Update interval (e.g., 'daily', 'weekly', 'monthly').",
+										},
+										"cooldown_yaml": schema.StringAttribute{
+											Optional:    true,
+											Description: "YAML configuration for cooldown settings.",
+										},
+										"groups_yaml": schema.StringAttribute{
+											Optional:    true,
+											Description: "YAML configuration for dependency groups.",
+										},
+									},
 								},
 							},
 						},
@@ -314,39 +334,7 @@ func (r *policyDrivenPRResource) ImportState(ctx context.Context, req resource.I
 	}
 	replaceList, _ := types.ListValueFrom(ctx, types.StringType, replaceElements)
 
-	var packageEcosystemList types.List
-	if len(policy.AutoRemdiationOptions.PackageEcosystem) > 0 {
-		var ecosystemObjects []attr.Value
-		for _, ecosystem := range policy.AutoRemdiationOptions.PackageEcosystem {
-			obj, _ := types.ObjectValue(
-				map[string]attr.Type{
-					"package":  types.StringType,
-					"interval": types.StringType,
-				},
-				map[string]attr.Value{
-					"package":  types.StringValue(ecosystem.Package),
-					"interval": types.StringValue(ecosystem.Interval),
-				},
-			)
-			ecosystemObjects = append(ecosystemObjects, obj)
-		}
-		packageEcosystemList, _ = types.ListValue(
-			types.ObjectType{
-				AttrTypes: map[string]attr.Type{
-					"package":  types.StringType,
-					"interval": types.StringType,
-				},
-			},
-			ecosystemObjects,
-		)
-	} else {
-		packageEcosystemList = types.ListNull(types.ObjectType{
-			AttrTypes: map[string]attr.Type{
-				"package":  types.StringType,
-				"interval": types.StringType,
-			},
-		})
-	}
+	dependabotValue := dependabotToObject(policy.AutoRemdiationOptions.Dependabot)
 
 	var updatePrecommitFileList types.List
 	if len(policy.AutoRemdiationOptions.UpdatePrecommitFile) > 0 {
@@ -391,16 +379,9 @@ func (r *policyDrivenPRResource) ImportState(ctx context.Context, req resource.I
 			"images_to_exempt_while_pinning":                types.ListType{ElemType: types.StringType},
 			"actions_to_replace_with_step_security_actions": types.ListType{ElemType: types.StringType},
 			"update_precommit_file":                         types.ListType{ElemType: types.StringType},
-			"package_ecosystem": types.ListType{
-				ElemType: types.ObjectType{
-					AttrTypes: map[string]attr.Type{
-						"package":  types.StringType,
-						"interval": types.StringType,
-					},
-				},
-			},
-			"add_workflows":     types.StringType,
-			"action_commit_map": types.MapType{ElemType: types.StringType},
+			"dependabot":                                    types.ObjectType{AttrTypes: dependabotObjAttrTypes()},
+			"add_workflows":                                 types.StringType,
+			"action_commit_map":                             types.MapType{ElemType: types.StringType},
 		},
 		map[string]attr.Value{
 			"create_pr":                                     types.BoolValue(policy.AutoRemdiationOptions.CreatePR),
@@ -414,7 +395,7 @@ func (r *policyDrivenPRResource) ImportState(ctx context.Context, req resource.I
 			"images_to_exempt_while_pinning":                exemptImagesList,
 			"actions_to_replace_with_step_security_actions": replaceList,
 			"update_precommit_file":                         updatePrecommitFileList,
-			"package_ecosystem":                             packageEcosystemList,
+			"dependabot":                                    dependabotValue,
 			"add_workflows":                                 addWorkflowsValue,
 			"action_commit_map":                             actionCommitMapValue,
 		},
@@ -451,14 +432,21 @@ type autoRemdiationOptionsModel struct {
 	ImagesToExemptWhilePinning              types.List   `tfsdk:"images_to_exempt_while_pinning"`
 	ActionsToReplaceWithStepSecurityActions types.List   `tfsdk:"actions_to_replace_with_step_security_actions"`
 	UpdatePrecommitFile                     types.List   `tfsdk:"update_precommit_file"`
-	PackageEcosystem                        types.List   `tfsdk:"package_ecosystem"`
+	Dependabot                               types.Object `tfsdk:"dependabot"`
 	AddWorkflows                            types.String `tfsdk:"add_workflows"`
 	ActionCommitMap                         types.Map    `tfsdk:"action_commit_map"`
 }
 
 type packageEcosystemModel struct {
-	Package  types.String `tfsdk:"package"`
-	Interval types.String `tfsdk:"interval"`
+	Package      types.String `tfsdk:"package"`
+	Interval     types.String `tfsdk:"interval"`
+	CoolDownYAML types.String `tfsdk:"cooldown_yaml"`
+	GroupsYAML   types.String `tfsdk:"groups_yaml"`
+}
+
+type dependabotModel struct {
+	Subtractive      types.Bool `tfsdk:"subtractive"`
+	PackageEcosystem types.List `tfsdk:"package_ecosystem"`
 }
 
 type ActionsToReplaceModel struct {
@@ -580,9 +568,9 @@ func (r *policyDrivenPRResource) ModifyPlan(ctx context.Context, req resource.Mo
 
 	// Check v2 features during plan phase
 	hasUpdatePrecommit := !options.UpdatePrecommitFile.IsNull() && !options.UpdatePrecommitFile.IsUnknown() && len(options.UpdatePrecommitFile.Elements()) > 0
-	hasPackageEcosystem := !options.PackageEcosystem.IsNull() && !options.PackageEcosystem.IsUnknown() && len(options.PackageEcosystem.Elements()) > 0
+	hasDependabot := !options.Dependabot.IsNull() && !options.Dependabot.IsUnknown()
 	hasAddWorkflows := !options.AddWorkflows.IsNull() && !options.AddWorkflows.IsUnknown() && options.AddWorkflows.ValueString() != ""
-	hasV2Features := hasUpdatePrecommit || hasPackageEcosystem || hasAddWorkflows
+	hasV2Features := hasUpdatePrecommit || hasDependabot || hasAddWorkflows
 
 	if !hasV2Features {
 		return
@@ -625,8 +613,8 @@ func (r *policyDrivenPRResource) ModifyPlan(ctx context.Context, req resource.Mo
 		if hasUpdatePrecommit {
 			warningMessage += "- update_precommit_file\n"
 		}
-		if hasPackageEcosystem {
-			warningMessage += "- package_ecosystem\n"
+		if hasDependabot {
+			warningMessage += "- dependabot\n"
 		}
 		if hasAddWorkflows {
 			warningMessage += "- add_workflows\n"
@@ -723,17 +711,31 @@ func (r *policyDrivenPRResource) Create(ctx context.Context, req resource.Create
 	}
 
 	// Extract new optional fields
-	var packageEcosystem []stepsecurityapi.DependabotConfig
-	if !options.PackageEcosystem.IsNull() {
-		var ecosystemModels []packageEcosystemModel
-		diags := options.PackageEcosystem.ElementsAs(ctx, &ecosystemModels, false)
+	var dependabot *stepsecurityapi.DependabotSettings
+	if !options.Dependabot.IsNull() && !options.Dependabot.IsUnknown() {
+		var depModel dependabotModel
+		diags := options.Dependabot.As(ctx, &depModel, basetypes.ObjectAsOptions{})
 		resp.Diagnostics.Append(diags...)
 		if !resp.Diagnostics.HasError() {
-			for _, model := range ecosystemModels {
-				packageEcosystem = append(packageEcosystem, stepsecurityapi.DependabotConfig{
-					Package:  model.Package.ValueString(),
-					Interval: model.Interval.ValueString(),
-				})
+			var ecosystems []stepsecurityapi.DependabotConfig
+			if !depModel.PackageEcosystem.IsNull() {
+				var ecosystemModels []packageEcosystemModel
+				diags2 := depModel.PackageEcosystem.ElementsAs(ctx, &ecosystemModels, false)
+				resp.Diagnostics.Append(diags2...)
+				if !resp.Diagnostics.HasError() {
+					for _, model := range ecosystemModels {
+						ecosystems = append(ecosystems, stepsecurityapi.DependabotConfig{
+							Package:      model.Package.ValueString(),
+							Interval:     model.Interval.ValueString(),
+							CoolDownYAML: model.CoolDownYAML.ValueString(),
+							GroupsYAML:   model.GroupsYAML.ValueString(),
+						})
+					}
+				}
+			}
+			dependabot = &stepsecurityapi.DependabotSettings{
+				Subtractive:      depModel.Subtractive.ValueBool(),
+				PackageEcosystem: ecosystems,
 			}
 		}
 	}
@@ -777,7 +779,7 @@ func (r *policyDrivenPRResource) Create(ctx context.Context, req resource.Create
 			ImagesToExemptWhilePinning:              imagesToExempt,
 			ActionsToReplaceWithStepSecurityActions: actionsToReplace,
 			UpdatePrecommitFile:                     updatePrecommitFile,
-			PackageEcosystem:                        packageEcosystem,
+			Dependabot:                              dependabot,
 			AddWorkflows:                            options.AddWorkflows.ValueString(),
 			ActionCommitMap:                         actionCommitMap,
 		},
@@ -926,9 +928,9 @@ func (r *policyDrivenPRResource) Read(ctx context.Context, req resource.ReadRequ
 		} else {
 			// Check if state has v2 features
 			hasUpdatePrecommit := !currentStateOptions.UpdatePrecommitFile.IsNull() && len(currentStateOptions.UpdatePrecommitFile.Elements()) > 0
-			hasPackageEcosystem := !currentStateOptions.PackageEcosystem.IsNull() && len(currentStateOptions.PackageEcosystem.Elements()) > 0
+			hasDependabot := !currentStateOptions.Dependabot.IsNull() && !currentStateOptions.Dependabot.IsUnknown()
 			hasAddWorkflows := !currentStateOptions.AddWorkflows.IsNull() && currentStateOptions.AddWorkflows.ValueString() != ""
-			hasV2FeaturesInState = hasUpdatePrecommit || hasPackageEcosystem || hasAddWorkflows
+			hasV2FeaturesInState = hasUpdatePrecommit || hasDependabot || hasAddWorkflows
 		}
 	}
 
@@ -966,18 +968,27 @@ func (r *policyDrivenPRResource) Read(ctx context.Context, req resource.ReadRequ
 			}
 		}
 
-		stepSecurityPolicy.AutoRemdiationOptions.PackageEcosystem = []stepsecurityapi.DependabotConfig{}
-		if !currentStateOptions.PackageEcosystem.IsNull() {
-			var ecosystemModels []packageEcosystemModel
-			currentStateOptions.PackageEcosystem.ElementsAs(ctx, &ecosystemModels, false)
-			for _, model := range ecosystemModels {
-				stepSecurityPolicy.AutoRemdiationOptions.PackageEcosystem = append(
-					stepSecurityPolicy.AutoRemdiationOptions.PackageEcosystem,
-					stepsecurityapi.DependabotConfig{
-						Package:  model.Package.ValueString(),
-						Interval: model.Interval.ValueString(),
-					},
-				)
+		stepSecurityPolicy.AutoRemdiationOptions.Dependabot = nil
+		if !currentStateOptions.Dependabot.IsNull() && !currentStateOptions.Dependabot.IsUnknown() {
+			var depModel dependabotModel
+			if diags2 := currentStateOptions.Dependabot.As(ctx, &depModel, basetypes.ObjectAsOptions{}); !diags2.HasError() {
+				var ecosystems []stepsecurityapi.DependabotConfig
+				if !depModel.PackageEcosystem.IsNull() {
+					var ecosystemModels []packageEcosystemModel
+					depModel.PackageEcosystem.ElementsAs(ctx, &ecosystemModels, false) //nolint:errcheck
+					for _, model := range ecosystemModels {
+						ecosystems = append(ecosystems, stepsecurityapi.DependabotConfig{
+							Package:      model.Package.ValueString(),
+							Interval:     model.Interval.ValueString(),
+							CoolDownYAML: model.CoolDownYAML.ValueString(),
+							GroupsYAML:   model.GroupsYAML.ValueString(),
+						})
+					}
+				}
+				stepSecurityPolicy.AutoRemdiationOptions.Dependabot = &stepsecurityapi.DependabotSettings{
+					Subtractive:      depModel.Subtractive.ValueBool(),
+					PackageEcosystem: ecosystems,
+				}
 			}
 		}
 
@@ -1183,17 +1194,31 @@ func (r *policyDrivenPRResource) Update(ctx context.Context, req resource.Update
 	}
 
 	// Extract new optional fields for update
-	var packageEcosystemPlan []stepsecurityapi.DependabotConfig
-	if !planOptions.PackageEcosystem.IsNull() {
-		var ecosystemModels []packageEcosystemModel
-		diags := planOptions.PackageEcosystem.ElementsAs(ctx, &ecosystemModels, false)
+	var dependabotPlan *stepsecurityapi.DependabotSettings
+	if !planOptions.Dependabot.IsNull() && !planOptions.Dependabot.IsUnknown() {
+		var depModel dependabotModel
+		diags := planOptions.Dependabot.As(ctx, &depModel, basetypes.ObjectAsOptions{})
 		resp.Diagnostics.Append(diags...)
 		if !resp.Diagnostics.HasError() {
-			for _, model := range ecosystemModels {
-				packageEcosystemPlan = append(packageEcosystemPlan, stepsecurityapi.DependabotConfig{
-					Package:  model.Package.ValueString(),
-					Interval: model.Interval.ValueString(),
-				})
+			var ecosystems []stepsecurityapi.DependabotConfig
+			if !depModel.PackageEcosystem.IsNull() {
+				var ecosystemModels []packageEcosystemModel
+				diags2 := depModel.PackageEcosystem.ElementsAs(ctx, &ecosystemModels, false)
+				resp.Diagnostics.Append(diags2...)
+				if !resp.Diagnostics.HasError() {
+					for _, model := range ecosystemModels {
+						ecosystems = append(ecosystems, stepsecurityapi.DependabotConfig{
+							Package:      model.Package.ValueString(),
+							Interval:     model.Interval.ValueString(),
+							CoolDownYAML: model.CoolDownYAML.ValueString(),
+							GroupsYAML:   model.GroupsYAML.ValueString(),
+						})
+					}
+				}
+			}
+			dependabotPlan = &stepsecurityapi.DependabotSettings{
+				Subtractive:      depModel.Subtractive.ValueBool(),
+				PackageEcosystem: ecosystems,
 			}
 		}
 	}
@@ -1238,7 +1263,7 @@ func (r *policyDrivenPRResource) Update(ctx context.Context, req resource.Update
 			ImagesToExemptWhilePinning:              imagesToExempt,
 			ActionsToReplaceWithStepSecurityActions: actionsToReplace,
 			UpdatePrecommitFile:                     updatePrecommitFilePlan,
-			PackageEcosystem:                        packageEcosystemPlan,
+			Dependabot:                              dependabotPlan,
 			AddWorkflows:                            planOptions.AddWorkflows.ValueString(),
 			ActionCommitMap:                         actionCommitMapPlan,
 		},
@@ -1381,40 +1406,7 @@ func (r *policyDrivenPRResource) updatePolicyDrivenPRState(ctx context.Context, 
 	}
 	replaceList, _ := types.ListValueFrom(ctx, types.StringType, replaceElements)
 
-	// Handle new optional fields
-	var packageEcosystemList types.List
-	if len(stepSecurityPolicy.AutoRemdiationOptions.PackageEcosystem) > 0 {
-		var ecosystemObjects []attr.Value
-		for _, ecosystem := range stepSecurityPolicy.AutoRemdiationOptions.PackageEcosystem {
-			obj, _ := types.ObjectValue(
-				map[string]attr.Type{
-					"package":  types.StringType,
-					"interval": types.StringType,
-				},
-				map[string]attr.Value{
-					"package":  types.StringValue(ecosystem.Package),
-					"interval": types.StringValue(ecosystem.Interval),
-				},
-			)
-			ecosystemObjects = append(ecosystemObjects, obj)
-		}
-		packageEcosystemList, _ = types.ListValue(
-			types.ObjectType{
-				AttrTypes: map[string]attr.Type{
-					"package":  types.StringType,
-					"interval": types.StringType,
-				},
-			},
-			ecosystemObjects,
-		)
-	} else {
-		packageEcosystemList = types.ListNull(types.ObjectType{
-			AttrTypes: map[string]attr.Type{
-				"package":  types.StringType,
-				"interval": types.StringType,
-			},
-		})
-	}
+	dependabotValue := dependabotToObject(stepSecurityPolicy.AutoRemdiationOptions.Dependabot)
 
 	var updatePrecommitFileList types.List
 	if len(stepSecurityPolicy.AutoRemdiationOptions.UpdatePrecommitFile) > 0 {
@@ -1459,16 +1451,9 @@ func (r *policyDrivenPRResource) updatePolicyDrivenPRState(ctx context.Context, 
 			"images_to_exempt_while_pinning":                types.ListType{ElemType: types.StringType},
 			"actions_to_replace_with_step_security_actions": types.ListType{ElemType: types.StringType},
 			"update_precommit_file":                         types.ListType{ElemType: types.StringType},
-			"package_ecosystem": types.ListType{
-				ElemType: types.ObjectType{
-					AttrTypes: map[string]attr.Type{
-						"package":  types.StringType,
-						"interval": types.StringType,
-					},
-				},
-			},
-			"add_workflows":     types.StringType,
-			"action_commit_map": types.MapType{ElemType: types.StringType},
+			"dependabot":                                    types.ObjectType{AttrTypes: dependabotObjAttrTypes()},
+			"add_workflows":                                 types.StringType,
+			"action_commit_map":                             types.MapType{ElemType: types.StringType},
 		},
 		map[string]attr.Value{
 			"create_pr":                                     types.BoolValue(stepSecurityPolicy.AutoRemdiationOptions.CreatePR),
@@ -1482,7 +1467,7 @@ func (r *policyDrivenPRResource) updatePolicyDrivenPRState(ctx context.Context, 
 			"images_to_exempt_while_pinning":                exemptImagesList,
 			"actions_to_replace_with_step_security_actions": replaceList,
 			"update_precommit_file":                         updatePrecommitFileList,
-			"package_ecosystem":                             packageEcosystemList,
+			"dependabot":                                    dependabotValue,
 			"add_workflows":                                 addWorkflowsValue,
 			"action_commit_map":                             actionCommitMapValue,
 		},
@@ -1514,4 +1499,49 @@ func (r *policyDrivenPRResource) updatePolicyDrivenPRState(ctx context.Context, 
 		excludedList, _ := types.ListValueFrom(ctx, types.StringType, excludedElements)
 		state.ExcludedRepos = excludedList
 	}
+}
+
+func ecosystemAttrTypes() map[string]attr.Type {
+	return map[string]attr.Type{
+		"package":       types.StringType,
+		"interval":      types.StringType,
+		"cooldown_yaml": types.StringType,
+		"groups_yaml":   types.StringType,
+	}
+}
+
+func dependabotObjAttrTypes() map[string]attr.Type {
+	return map[string]attr.Type{
+		"subtractive": types.BoolType,
+		"package_ecosystem": types.ListType{
+			ElemType: types.ObjectType{AttrTypes: ecosystemAttrTypes()},
+		},
+	}
+}
+
+func dependabotToObject(dep *stepsecurityapi.DependabotSettings) types.Object {
+	if dep == nil {
+		return types.ObjectNull(dependabotObjAttrTypes())
+	}
+	var ecosystemList types.List
+	if len(dep.PackageEcosystem) > 0 {
+		var objs []attr.Value
+		for _, e := range dep.PackageEcosystem {
+			obj, _ := types.ObjectValue(ecosystemAttrTypes(), map[string]attr.Value{
+				"package":       types.StringValue(e.Package),
+				"interval":      types.StringValue(e.Interval),
+				"cooldown_yaml": types.StringValue(e.CoolDownYAML),
+				"groups_yaml":   types.StringValue(e.GroupsYAML),
+			})
+			objs = append(objs, obj)
+		}
+		ecosystemList, _ = types.ListValue(types.ObjectType{AttrTypes: ecosystemAttrTypes()}, objs)
+	} else {
+		ecosystemList = types.ListNull(types.ObjectType{AttrTypes: ecosystemAttrTypes()})
+	}
+	obj, _ := types.ObjectValue(dependabotObjAttrTypes(), map[string]attr.Value{
+		"subtractive":       types.BoolValue(dep.Subtractive),
+		"package_ecosystem": ecosystemList,
+	})
+	return obj
 }
