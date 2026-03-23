@@ -54,16 +54,21 @@ resource "stepsecurity_policy_driven_pr" "repo_level_config" {
 
     # v2-only features (requires policy-driven PR v2 to be enabled)
     update_precommit_file = ["eslint"]
-    package_ecosystem = [
-      {
-        package  = "npm"
-        interval = "daily"
-      },
-      {
-        package  = "pip"
-        interval = "weekly"
-      }
-    ]
+    dependabot = {
+      subtractive = false
+      package_ecosystem = [
+        {
+          package  = "npm"
+          interval = "daily"
+        },
+        {
+          package       = "pip"
+          interval      = "weekly"
+          cooldown_yaml = ""
+          groups_yaml   = ""
+        }
+      ]
+    }
     add_workflows = "https://github.com/[owner]/[repo]"
     action_commit_map = {
       "codecov/codecov-action@v5" : "cf3f51a67d2820f7a7cefa0831889fbbef41ca57",

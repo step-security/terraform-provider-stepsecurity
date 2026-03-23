@@ -68,16 +68,21 @@ resource "stepsecurity_policy_driven_pr" "repo_level_config" {
 
     # v2-only features (requires policy-driven PR v2 to be enabled)
     update_precommit_file = ["eslint"]
-    package_ecosystem = [
-      {
-        package  = "npm"
-        interval = "daily"
-      },
-      {
-        package  = "pip"
-        interval = "weekly"
-      }
-    ]
+    dependabot = {
+      subtractive = false
+      package_ecosystem = [
+        {
+          package  = "npm"
+          interval = "daily"
+        },
+        {
+          package       = "pip"
+          interval      = "weekly"
+          cooldown_yaml = ""
+          groups_yaml   = ""
+        }
+      ]
+    }
     add_workflows = "https://github.com/[owner]/[repo]"
     action_commit_map = {
       "codecov/codecov-action@v5" : "cf3f51a67d2820f7a7cefa0831889fbbef41ca57",
@@ -171,21 +176,35 @@ Optional:
 - `create_github_advanced_security_alert` (Boolean) Create a GitHub Advanced Security alert when a finding is detected. Note that this triggers only when issue creation is enabled.
 - `create_issue` (Boolean) Create an issue when a finding is detected.
 - `create_pr` (Boolean) Create a PR when a finding is detected.
+- `dependabot` (Attributes) Dependabot configuration for dependency updates. (see [below for nested schema](#nestedatt--auto_remediation_options--dependabot))
 - `harden_github_hosted_runner` (Boolean) When enabled, this creates a PR/issue to install security agent on the GitHub-hosted runner to prevent exfiltration of credentials, monitor the build process, and detect compromised dependencies.
 - `images_to_exempt_while_pinning` (List of String) List of Docker images to exempt while pinning images to SHA. When exempted, the image will not be pinned to SHA.
-- `package_ecosystem` (Attributes List) List of package ecosystems to enable for dependency updates. (see [below for nested schema](#nestedatt--auto_remediation_options--package_ecosystem))
 - `pin_actions_to_sha` (Boolean) When enabled, this creates a PR/issue to pin actions to SHA. GitHub's Security Hardening guide recommends pinning actions to full length commit for third party actions.
 - `restrict_github_token_permissions` (Boolean) When enabled, this creates a PR/issue to restrict GitHub token permissions. GitHub's Security Hardening guide recommends restricting permissions to the minimum required
 - `secure_docker_file` (Boolean) When enabled, this creates a PR/issue to secure Dockerfile by pinning base images to SHA.
 - `update_precommit_file` (List of String) List of pre-commit file paths to update (e.g., ['.pre-commit-config.yaml']).
 
-<a id="nestedatt--auto_remediation_options--package_ecosystem"></a>
-### Nested Schema for `auto_remediation_options.package_ecosystem`
+<a id="nestedatt--auto_remediation_options--dependabot"></a>
+### Nested Schema for `auto_remediation_options.dependabot`
+
+Optional:
+
+- `package_ecosystem` (Attributes List) List of package ecosystems to enable for dependency updates. (see [below for nested schema](#nestedatt--auto_remediation_options--dependabot--package_ecosystem))
+- `subtractive` (Boolean) When true, only the specified ecosystems will be configured (removes others). When false, adds to existing configuration.
+
+<a id="nestedatt--auto_remediation_options--dependabot--package_ecosystem"></a>
+### Nested Schema for `auto_remediation_options.dependabot.package_ecosystem`
 
 Required:
 
 - `interval` (String) Update interval (e.g., 'daily', 'weekly', 'monthly').
 - `package` (String) Package ecosystem (e.g., 'npm', 'pip', 'docker').
+
+Optional:
+
+- `cooldown_yaml` (String) YAML configuration for cooldown settings.
+- `groups_yaml` (String) YAML configuration for dependency groups.
+
 
 
 
