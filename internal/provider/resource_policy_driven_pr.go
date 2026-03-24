@@ -187,8 +187,22 @@ func (r *policyDrivenPRResource) Schema(_ context.Context, _ resource.SchemaRequ
 									Required:    true,
 									Description: "Update interval (e.g., 'daily', 'weekly', 'monthly').",
 								},
+								"cooldown_yaml": schema.StringAttribute{
+									Optional:    true,
+									Description: "YAML string configuring cooldown periods for dependency updates.",
+								},
+								"groups_yaml": schema.StringAttribute{
+									Optional:    true,
+									Description: "YAML string configuring dependency update groups.",
+								},
 							},
 						},
+					},
+					"subtractive": schema.BoolAttribute{
+						Optional:    true,
+						Computed:    true,
+						Description: "When enabled, dependabot will remove existing entries that are not in the package_ecosystem config.",
+						Default:     booldefault.StaticBool(false),
 					},
 					"add_workflows": schema.StringAttribute{
 						Optional:    true,
@@ -324,8 +338,10 @@ func (r *policyDrivenPRResource) ImportState(ctx context.Context, req resource.I
 					"interval": types.StringType,
 				},
 				map[string]attr.Value{
-					"package":  types.StringValue(ecosystem.Package),
-					"interval": types.StringValue(ecosystem.Interval),
+					"package":       types.StringValue(ecosystem.Package),
+					"interval":      types.StringValue(ecosystem.Interval),
+					"cooldown_yaml": types.StringValue(ecosystem.CoolDownYAML),
+					"groups_yaml":   types.StringValue(ecosystem.GroupsYAML),
 				},
 			)
 			ecosystemObjects = append(ecosystemObjects, obj)
@@ -333,8 +349,10 @@ func (r *policyDrivenPRResource) ImportState(ctx context.Context, req resource.I
 		packageEcosystemList, _ = types.ListValue(
 			types.ObjectType{
 				AttrTypes: map[string]attr.Type{
-					"package":  types.StringType,
-					"interval": types.StringType,
+					"package":       types.StringType,
+					"interval":      types.StringType,
+					"cooldown_yaml": types.StringType,
+					"groups_yaml":   types.StringType,
 				},
 			},
 			ecosystemObjects,
@@ -342,8 +360,10 @@ func (r *policyDrivenPRResource) ImportState(ctx context.Context, req resource.I
 	} else {
 		packageEcosystemList = types.ListNull(types.ObjectType{
 			AttrTypes: map[string]attr.Type{
-				"package":  types.StringType,
-				"interval": types.StringType,
+				"package":       types.StringType,
+				"interval":      types.StringType,
+				"cooldown_yaml": types.StringType,
+				"groups_yaml":   types.StringType,
 			},
 		})
 	}
@@ -394,11 +414,14 @@ func (r *policyDrivenPRResource) ImportState(ctx context.Context, req resource.I
 			"package_ecosystem": types.ListType{
 				ElemType: types.ObjectType{
 					AttrTypes: map[string]attr.Type{
-						"package":  types.StringType,
-						"interval": types.StringType,
+						"package":       types.StringType,
+						"interval":      types.StringType,
+						"cooldown_yaml": types.StringType,
+						"groups_yaml":   types.StringType,
 					},
 				},
 			},
+			"subtractive":       types.BoolType,
 			"add_workflows":     types.StringType,
 			"action_commit_map": types.MapType{ElemType: types.StringType},
 		},
@@ -415,6 +438,12 @@ func (r *policyDrivenPRResource) ImportState(ctx context.Context, req resource.I
 			"actions_to_replace_with_step_security_actions": replaceList,
 			"update_precommit_file":                         updatePrecommitFileList,
 			"package_ecosystem":                             packageEcosystemList,
+			"subtractive":                                   types.BoolValue(func() bool {
+				if policy.AutoRemdiationOptions.Subtractive != nil {
+					return *policy.AutoRemdiationOptions.Subtractive
+				}
+				return false
+			}()),
 			"add_workflows":                                 addWorkflowsValue,
 			"action_commit_map":                             actionCommitMapValue,
 		},
@@ -452,13 +481,16 @@ type autoRemdiationOptionsModel struct {
 	ActionsToReplaceWithStepSecurityActions types.List   `tfsdk:"actions_to_replace_with_step_security_actions"`
 	UpdatePrecommitFile                     types.List   `tfsdk:"update_precommit_file"`
 	PackageEcosystem                        types.List   `tfsdk:"package_ecosystem"`
+	Subtractive                             types.Bool   `tfsdk:"subtractive"`
 	AddWorkflows                            types.String `tfsdk:"add_workflows"`
 	ActionCommitMap                         types.Map    `tfsdk:"action_commit_map"`
 }
 
 type packageEcosystemModel struct {
-	Package  types.String `tfsdk:"package"`
-	Interval types.String `tfsdk:"interval"`
+	Package      types.String `tfsdk:"package"`
+	Interval     types.String `tfsdk:"interval"`
+	CoolDownYAML types.String `tfsdk:"cooldown_yaml"`
+	GroupsYAML   types.String `tfsdk:"groups_yaml"`
 }
 
 type ActionsToReplaceModel struct {
@@ -731,8 +763,10 @@ func (r *policyDrivenPRResource) Create(ctx context.Context, req resource.Create
 		if !resp.Diagnostics.HasError() {
 			for _, model := range ecosystemModels {
 				packageEcosystem = append(packageEcosystem, stepsecurityapi.DependabotConfig{
-					Package:  model.Package.ValueString(),
-					Interval: model.Interval.ValueString(),
+					Package:      model.Package.ValueString(),
+					Interval:     model.Interval.ValueString(),
+					CoolDownYAML: model.CoolDownYAML.ValueString(),
+					GroupsYAML:   model.GroupsYAML.ValueString(),
 				})
 			}
 		}
@@ -762,6 +796,12 @@ func (r *policyDrivenPRResource) Create(ctx context.Context, req resource.Create
 	useOrgLevel := hasWildcard
 	useRepoLevel := !hasWildcard
 
+	var subtractive *bool
+	if !options.Subtractive.IsNull() && !options.Subtractive.IsUnknown() {
+		v := options.Subtractive.ValueBool()
+		subtractive = &v
+	}
+
 	// convert to stepsecurityapi.PolicyDrivenPRPolicy
 	stepSecurityPolicy := stepsecurityapi.PolicyDrivenPRPolicy{
 		Owner: plan.Owner.ValueString(),
@@ -778,6 +818,7 @@ func (r *policyDrivenPRResource) Create(ctx context.Context, req resource.Create
 			ActionsToReplaceWithStepSecurityActions: actionsToReplace,
 			UpdatePrecommitFile:                     updatePrecommitFile,
 			PackageEcosystem:                        packageEcosystem,
+			Subtractive:                             subtractive,
 			AddWorkflows:                            options.AddWorkflows.ValueString(),
 			ActionCommitMap:                         actionCommitMap,
 		},
@@ -974,8 +1015,10 @@ func (r *policyDrivenPRResource) Read(ctx context.Context, req resource.ReadRequ
 				stepSecurityPolicy.AutoRemdiationOptions.PackageEcosystem = append(
 					stepSecurityPolicy.AutoRemdiationOptions.PackageEcosystem,
 					stepsecurityapi.DependabotConfig{
-						Package:  model.Package.ValueString(),
-						Interval: model.Interval.ValueString(),
+						Package:      model.Package.ValueString(),
+						Interval:     model.Interval.ValueString(),
+						CoolDownYAML: model.CoolDownYAML.ValueString(),
+						GroupsYAML:   model.GroupsYAML.ValueString(),
 					},
 				)
 			}
@@ -983,6 +1026,11 @@ func (r *policyDrivenPRResource) Read(ctx context.Context, req resource.ReadRequ
 
 		if !currentStateOptions.AddWorkflows.IsNull() {
 			stepSecurityPolicy.AutoRemdiationOptions.AddWorkflows = currentStateOptions.AddWorkflows.ValueString()
+		}
+
+		if !currentStateOptions.Subtractive.IsNull() {
+			v := currentStateOptions.Subtractive.ValueBool()
+			stepSecurityPolicy.AutoRemdiationOptions.Subtractive = &v
 		}
 
 		tflog.Info(ctx, "Preserving v2 features in state as v2 is not enabled")
@@ -1191,8 +1239,10 @@ func (r *policyDrivenPRResource) Update(ctx context.Context, req resource.Update
 		if !resp.Diagnostics.HasError() {
 			for _, model := range ecosystemModels {
 				packageEcosystemPlan = append(packageEcosystemPlan, stepsecurityapi.DependabotConfig{
-					Package:  model.Package.ValueString(),
-					Interval: model.Interval.ValueString(),
+					Package:      model.Package.ValueString(),
+					Interval:     model.Interval.ValueString(),
+					CoolDownYAML: model.CoolDownYAML.ValueString(),
+					GroupsYAML:   model.GroupsYAML.ValueString(),
 				})
 			}
 		}
@@ -1224,6 +1274,12 @@ func (r *policyDrivenPRResource) Update(ctx context.Context, req resource.Update
 	useOrgLevel := planHasWildcard
 	useRepoLevel := !planHasWildcard
 
+	var subtractiveUpdate *bool
+	if !planOptions.Subtractive.IsNull() && !planOptions.Subtractive.IsUnknown() {
+		v := planOptions.Subtractive.ValueBool()
+		subtractiveUpdate = &v
+	}
+
 	policy := stepsecurityapi.PolicyDrivenPRPolicy{
 		Owner: plan.Owner.ValueString(),
 		AutoRemdiationOptions: stepsecurityapi.AutoRemdiationOptions{
@@ -1239,6 +1295,7 @@ func (r *policyDrivenPRResource) Update(ctx context.Context, req resource.Update
 			ActionsToReplaceWithStepSecurityActions: actionsToReplace,
 			UpdatePrecommitFile:                     updatePrecommitFilePlan,
 			PackageEcosystem:                        packageEcosystemPlan,
+			Subtractive:                             subtractiveUpdate,
 			AddWorkflows:                            planOptions.AddWorkflows.ValueString(),
 			ActionCommitMap:                         actionCommitMapPlan,
 		},
@@ -1392,8 +1449,10 @@ func (r *policyDrivenPRResource) updatePolicyDrivenPRState(ctx context.Context, 
 					"interval": types.StringType,
 				},
 				map[string]attr.Value{
-					"package":  types.StringValue(ecosystem.Package),
-					"interval": types.StringValue(ecosystem.Interval),
+					"package":       types.StringValue(ecosystem.Package),
+					"interval":      types.StringValue(ecosystem.Interval),
+					"cooldown_yaml": types.StringValue(ecosystem.CoolDownYAML),
+					"groups_yaml":   types.StringValue(ecosystem.GroupsYAML),
 				},
 			)
 			ecosystemObjects = append(ecosystemObjects, obj)
@@ -1401,8 +1460,10 @@ func (r *policyDrivenPRResource) updatePolicyDrivenPRState(ctx context.Context, 
 		packageEcosystemList, _ = types.ListValue(
 			types.ObjectType{
 				AttrTypes: map[string]attr.Type{
-					"package":  types.StringType,
-					"interval": types.StringType,
+					"package":       types.StringType,
+					"interval":      types.StringType,
+					"cooldown_yaml": types.StringType,
+					"groups_yaml":   types.StringType,
 				},
 			},
 			ecosystemObjects,
@@ -1410,8 +1471,10 @@ func (r *policyDrivenPRResource) updatePolicyDrivenPRState(ctx context.Context, 
 	} else {
 		packageEcosystemList = types.ListNull(types.ObjectType{
 			AttrTypes: map[string]attr.Type{
-				"package":  types.StringType,
-				"interval": types.StringType,
+				"package":       types.StringType,
+				"interval":      types.StringType,
+				"cooldown_yaml": types.StringType,
+				"groups_yaml":   types.StringType,
 			},
 		})
 	}
@@ -1462,11 +1525,14 @@ func (r *policyDrivenPRResource) updatePolicyDrivenPRState(ctx context.Context, 
 			"package_ecosystem": types.ListType{
 				ElemType: types.ObjectType{
 					AttrTypes: map[string]attr.Type{
-						"package":  types.StringType,
-						"interval": types.StringType,
+						"package":       types.StringType,
+						"interval":      types.StringType,
+						"cooldown_yaml": types.StringType,
+						"groups_yaml":   types.StringType,
 					},
 				},
 			},
+			"subtractive":       types.BoolType,
 			"add_workflows":     types.StringType,
 			"action_commit_map": types.MapType{ElemType: types.StringType},
 		},
@@ -1483,6 +1549,12 @@ func (r *policyDrivenPRResource) updatePolicyDrivenPRState(ctx context.Context, 
 			"actions_to_replace_with_step_security_actions": replaceList,
 			"update_precommit_file":                         updatePrecommitFileList,
 			"package_ecosystem":                             packageEcosystemList,
+			"subtractive":                                   types.BoolValue(func() bool {
+				if stepSecurityPolicy.AutoRemdiationOptions.Subtractive != nil {
+					return *stepSecurityPolicy.AutoRemdiationOptions.Subtractive
+				}
+				return false
+			}()),
 			"add_workflows":                                 addWorkflowsValue,
 			"action_commit_map":                             actionCommitMapValue,
 		},

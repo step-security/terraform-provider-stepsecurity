@@ -54,10 +54,13 @@ resource "stepsecurity_policy_driven_pr" "repo_level_config" {
 
     # v2-only features (requires policy-driven PR v2 to be enabled)
     update_precommit_file = ["eslint"]
+    subtractive           = true # remove dependabot entries not listed below
     package_ecosystem = [
       {
-        package  = "npm"
-        interval = "daily"
+        package       = "npm"
+        interval      = "daily"
+        cooldown_yaml = "default-days: 7\npackage-rules:\n  - match-package-patterns:\n      - \"*\"\n    days: 3\n"
+        groups_yaml   = "production-dependencies:\n  patterns:\n    - \"*\"\n  exclude-patterns:\n    - \"@types/*\"\n"
       },
       {
         package  = "pip"
