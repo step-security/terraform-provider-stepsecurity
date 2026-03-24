@@ -68,10 +68,13 @@ resource "stepsecurity_policy_driven_pr" "repo_level_config" {
 
     # v2-only features (requires policy-driven PR v2 to be enabled)
     update_precommit_file = ["eslint"]
+    subtractive           = true # remove dependabot entries not listed below
     package_ecosystem = [
       {
-        package  = "npm"
-        interval = "daily"
+        package       = "npm"
+        interval      = "daily"
+        cooldown_yaml = "default-days: 7\npackage-rules:\n  - match-package-patterns:\n      - \"*\"\n    days: 3\n"
+        groups_yaml   = "production-dependencies:\n  patterns:\n    - \"*\"\n  exclude-patterns:\n    - \"@types/*\"\n"
       },
       {
         package  = "pip"
@@ -177,6 +180,7 @@ Optional:
 - `pin_actions_to_sha` (Boolean) When enabled, this creates a PR/issue to pin actions to SHA. GitHub's Security Hardening guide recommends pinning actions to full length commit for third party actions.
 - `restrict_github_token_permissions` (Boolean) When enabled, this creates a PR/issue to restrict GitHub token permissions. GitHub's Security Hardening guide recommends restricting permissions to the minimum required
 - `secure_docker_file` (Boolean) When enabled, this creates a PR/issue to secure Dockerfile by pinning base images to SHA.
+- `subtractive` (Boolean) When enabled, dependabot will remove existing entries that are not in the package_ecosystem config.
 - `update_precommit_file` (List of String) List of pre-commit file paths to update (e.g., ['.pre-commit-config.yaml']).
 
 <a id="nestedatt--auto_remediation_options--package_ecosystem"></a>
@@ -186,6 +190,11 @@ Required:
 
 - `interval` (String) Update interval (e.g., 'daily', 'weekly', 'monthly').
 - `package` (String) Package ecosystem (e.g., 'npm', 'pip', 'docker').
+
+Optional:
+
+- `cooldown_yaml` (String) YAML string configuring cooldown periods for dependency updates.
+- `groups_yaml` (String) YAML string configuring dependency update groups.
 
 
 
