@@ -126,6 +126,11 @@ func (r *policyDrivenPRResource) Schema(_ context.Context, _ resource.SchemaRequ
 						Description: "When enabled, this creates a PR/issue to secure Dockerfile by pinning base images to SHA.",
 						Default:     booldefault.StaticBool(false),
 					},
+					"labels_to_replace": schema.MapAttribute{
+						ElementType: types.StringType,
+						Optional:    true,
+						Description: "Map of runner labels to replace with their alternatives (e.g., {\"disallowed-label\": \"allowed-label\"}). When specified, this creates a PR/issue to replace disallowed runner labels.",
+					},
 					"actions_to_exempt_while_pinning": schema.ListAttribute{
 						ElementType: types.StringType,
 						Optional:    true,
@@ -378,6 +383,17 @@ func (r *policyDrivenPRResource) ImportState(ctx context.Context, req resource.I
 		actionCommitMapValue = types.MapNull(types.StringType)
 	}
 
+	var labelsToReplaceValue types.Map
+	if len(policy.AutoRemdiationOptions.LabelsToReplace) > 0 {
+		mapElements := make(map[string]attr.Value)
+		for key, value := range policy.AutoRemdiationOptions.LabelsToReplace {
+			mapElements[key] = types.StringValue(value)
+		}
+		labelsToReplaceValue, _ = types.MapValue(types.StringType, mapElements)
+	} else {
+		labelsToReplaceValue = types.MapNull(types.StringType)
+	}
+
 	optionsObj, _ := types.ObjectValue(
 		map[string]attr.Type{
 			"create_pr":                                     types.BoolType,
@@ -387,6 +403,7 @@ func (r *policyDrivenPRResource) ImportState(ctx context.Context, req resource.I
 			"pin_actions_to_sha":                            types.BoolType,
 			"restrict_github_token_permissions":             types.BoolType,
 			"secure_docker_file":                            types.BoolType,
+			"labels_to_replace":                             types.MapType{ElemType: types.StringType},
 			"actions_to_exempt_while_pinning":               types.ListType{ElemType: types.StringType},
 			"images_to_exempt_while_pinning":                types.ListType{ElemType: types.StringType},
 			"actions_to_replace_with_step_security_actions": types.ListType{ElemType: types.StringType},
@@ -410,6 +427,7 @@ func (r *policyDrivenPRResource) ImportState(ctx context.Context, req resource.I
 			"pin_actions_to_sha":                            types.BoolValue(policy.AutoRemdiationOptions.PinActionsToSHA),
 			"restrict_github_token_permissions":             types.BoolValue(policy.AutoRemdiationOptions.RestrictGitHubTokenPermissions),
 			"secure_docker_file":                            types.BoolValue(policy.AutoRemdiationOptions.SecureDockerFile),
+			"labels_to_replace":                             labelsToReplaceValue,
 			"actions_to_exempt_while_pinning":               exemptList,
 			"images_to_exempt_while_pinning":                exemptImagesList,
 			"actions_to_replace_with_step_security_actions": replaceList,
@@ -447,6 +465,7 @@ type autoRemdiationOptionsModel struct {
 	HardenGitHubHostedRunner                types.Bool   `tfsdk:"harden_github_hosted_runner"`
 	RestrictGitHubTokenPermissions          types.Bool   `tfsdk:"restrict_github_token_permissions"`
 	SecureDockerFile                        types.Bool   `tfsdk:"secure_docker_file"`
+	LabelsToReplace                         types.Map    `tfsdk:"labels_to_replace"`
 	ActionsToExemptWhilePinning             types.List   `tfsdk:"actions_to_exempt_while_pinning"`
 	ImagesToExemptWhilePinning              types.List   `tfsdk:"images_to_exempt_while_pinning"`
 	ActionsToReplaceWithStepSecurityActions types.List   `tfsdk:"actions_to_replace_with_step_security_actions"`
@@ -755,6 +774,14 @@ func (r *policyDrivenPRResource) Create(ctx context.Context, req resource.Create
 		}
 	}
 
+	var labelsToReplace map[string]string
+	if !options.LabelsToReplace.IsNull() {
+		labelsToReplace = make(map[string]string)
+		for key, value := range options.LabelsToReplace.Elements() {
+			labelsToReplace[key] = value.(types.String).ValueString()
+		}
+	}
+
 	// Automatically compute config levels based on selected_repos
 	// If selected_repos = ["*"], use org-level config
 	// Otherwise, use repo-level config
@@ -773,6 +800,7 @@ func (r *policyDrivenPRResource) Create(ctx context.Context, req resource.Create
 			HardenGitHubHostedRunner:                options.HardenGitHubHostedRunner.ValueBool(),
 			RestrictGitHubTokenPermissions:          options.RestrictGitHubTokenPermissions.ValueBool(),
 			SecureDockerFile:                        options.SecureDockerFile.ValueBool(),
+			LabelsToReplace:                         labelsToReplace,
 			ActionsToExemptWhilePinning:             actionsToExempt,
 			ImagesToExemptWhilePinning:              imagesToExempt,
 			ActionsToReplaceWithStepSecurityActions: actionsToReplace,
@@ -1217,6 +1245,14 @@ func (r *policyDrivenPRResource) Update(ctx context.Context, req resource.Update
 		actionCommitMapPlan = map[string]string{}
 	}
 
+	var labelsToReplacePlan map[string]string
+	if !planOptions.LabelsToReplace.IsNull() {
+		labelsToReplacePlan = make(map[string]string)
+		for key, value := range planOptions.LabelsToReplace.Elements() {
+			labelsToReplacePlan[key] = value.(types.String).ValueString()
+		}
+	}
+
 	// Automatically compute config levels based on planRepos
 	// If planRepos = ["*"], use org-level config
 	// Otherwise, use repo-level config
@@ -1234,6 +1270,7 @@ func (r *policyDrivenPRResource) Update(ctx context.Context, req resource.Update
 			HardenGitHubHostedRunner:                planOptions.HardenGitHubHostedRunner.ValueBool(),
 			RestrictGitHubTokenPermissions:          planOptions.RestrictGitHubTokenPermissions.ValueBool(),
 			SecureDockerFile:                        planOptions.SecureDockerFile.ValueBool(),
+			LabelsToReplace:                         labelsToReplacePlan,
 			ActionsToExemptWhilePinning:             actionsToExempt,
 			ImagesToExemptWhilePinning:              imagesToExempt,
 			ActionsToReplaceWithStepSecurityActions: actionsToReplace,
@@ -1446,6 +1483,17 @@ func (r *policyDrivenPRResource) updatePolicyDrivenPRState(ctx context.Context, 
 		actionCommitMapValue = types.MapNull(types.StringType)
 	}
 
+	var labelsToReplaceValue types.Map
+	if len(stepSecurityPolicy.AutoRemdiationOptions.LabelsToReplace) > 0 {
+		mapElements := make(map[string]attr.Value)
+		for key, value := range stepSecurityPolicy.AutoRemdiationOptions.LabelsToReplace {
+			mapElements[key] = types.StringValue(value)
+		}
+		labelsToReplaceValue, _ = types.MapValue(types.StringType, mapElements)
+	} else {
+		labelsToReplaceValue = types.MapNull(types.StringType)
+	}
+
 	optionsObj, _ := types.ObjectValue(
 		map[string]attr.Type{
 			"create_pr":                                     types.BoolType,
@@ -1455,6 +1503,7 @@ func (r *policyDrivenPRResource) updatePolicyDrivenPRState(ctx context.Context, 
 			"pin_actions_to_sha":                            types.BoolType,
 			"restrict_github_token_permissions":             types.BoolType,
 			"secure_docker_file":                            types.BoolType,
+			"labels_to_replace":                             types.MapType{ElemType: types.StringType},
 			"actions_to_exempt_while_pinning":               types.ListType{ElemType: types.StringType},
 			"images_to_exempt_while_pinning":                types.ListType{ElemType: types.StringType},
 			"actions_to_replace_with_step_security_actions": types.ListType{ElemType: types.StringType},
@@ -1478,6 +1527,7 @@ func (r *policyDrivenPRResource) updatePolicyDrivenPRState(ctx context.Context, 
 			"pin_actions_to_sha":                            types.BoolValue(stepSecurityPolicy.AutoRemdiationOptions.PinActionsToSHA),
 			"restrict_github_token_permissions":             types.BoolValue(stepSecurityPolicy.AutoRemdiationOptions.RestrictGitHubTokenPermissions),
 			"secure_docker_file":                            types.BoolValue(stepSecurityPolicy.AutoRemdiationOptions.SecureDockerFile),
+			"labels_to_replace":                             labelsToReplaceValue,
 			"actions_to_exempt_while_pinning":               exemptList,
 			"images_to_exempt_while_pinning":                exemptImagesList,
 			"actions_to_replace_with_step_security_actions": replaceList,
