@@ -334,8 +334,10 @@ func (r *policyDrivenPRResource) ImportState(ctx context.Context, req resource.I
 		for _, ecosystem := range policy.AutoRemdiationOptions.PackageEcosystem {
 			obj, _ := types.ObjectValue(
 				map[string]attr.Type{
-					"package":  types.StringType,
-					"interval": types.StringType,
+					"package":       types.StringType,
+					"interval":      types.StringType,
+					"cooldown_yaml": types.StringType,
+					"groups_yaml":   types.StringType,
 				},
 				map[string]attr.Value{
 					"package":       types.StringValue(ecosystem.Package),
@@ -438,14 +440,14 @@ func (r *policyDrivenPRResource) ImportState(ctx context.Context, req resource.I
 			"actions_to_replace_with_step_security_actions": replaceList,
 			"update_precommit_file":                         updatePrecommitFileList,
 			"package_ecosystem":                             packageEcosystemList,
-			"subtractive":                                   types.BoolValue(func() bool {
+			"subtractive": types.BoolValue(func() bool {
 				if policy.AutoRemdiationOptions.Subtractive != nil {
 					return *policy.AutoRemdiationOptions.Subtractive
 				}
 				return false
 			}()),
-			"add_workflows":                                 addWorkflowsValue,
-			"action_commit_map":                             actionCommitMapValue,
+			"add_workflows":     addWorkflowsValue,
+			"action_commit_map": actionCommitMapValue,
 		},
 	)
 	state.AutoRemdiationOptions = optionsObj
@@ -1445,8 +1447,10 @@ func (r *policyDrivenPRResource) updatePolicyDrivenPRState(ctx context.Context, 
 		for _, ecosystem := range stepSecurityPolicy.AutoRemdiationOptions.PackageEcosystem {
 			obj, _ := types.ObjectValue(
 				map[string]attr.Type{
-					"package":  types.StringType,
-					"interval": types.StringType,
+					"package":       types.StringType,
+					"interval":      types.StringType,
+					"cooldown_yaml": types.StringType,
+					"groups_yaml":   types.StringType,
 				},
 				map[string]attr.Value{
 					"package":       types.StringValue(ecosystem.Package),
@@ -1549,14 +1553,14 @@ func (r *policyDrivenPRResource) updatePolicyDrivenPRState(ctx context.Context, 
 			"actions_to_replace_with_step_security_actions": replaceList,
 			"update_precommit_file":                         updatePrecommitFileList,
 			"package_ecosystem":                             packageEcosystemList,
-			"subtractive":                                   types.BoolValue(func() bool {
+			"subtractive": types.BoolValue(func() bool {
 				if stepSecurityPolicy.AutoRemdiationOptions.Subtractive != nil {
 					return *stepSecurityPolicy.AutoRemdiationOptions.Subtractive
 				}
 				return false
 			}()),
-			"add_workflows":                                 addWorkflowsValue,
-			"action_commit_map":                             actionCommitMapValue,
+			"add_workflows":     addWorkflowsValue,
+			"action_commit_map": actionCommitMapValue,
 		},
 	)
 	state.AutoRemdiationOptions = optionsObj
