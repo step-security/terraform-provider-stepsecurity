@@ -799,7 +799,6 @@ func (r *policyDrivenPRResource) Create(ctx context.Context, req resource.Create
 	useRepoLevel := !hasWildcard
 
 	var subtractive *bool
-	tflog.Info(ctx, fmt.Sprintf("Preserving subtractive from state: %v", options.UpdateExistingConfiguration.ValueBool()))
 	if !options.UpdateExistingConfiguration.IsNull() && !options.UpdateExistingConfiguration.IsUnknown() {
 		v := options.UpdateExistingConfiguration.ValueBool()
 		subtractive = &v
