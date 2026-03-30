@@ -198,7 +198,7 @@ func (r *policyDrivenPRResource) Schema(_ context.Context, _ resource.SchemaRequ
 							},
 						},
 					},
-					"subtractive": schema.BoolAttribute{
+					"update_existing_configuration": schema.BoolAttribute{
 						Optional:    true,
 						Computed:    true,
 						Description: "When enabled, dependabot will remove existing entries that are not in the package_ecosystem config.",
@@ -423,9 +423,9 @@ func (r *policyDrivenPRResource) ImportState(ctx context.Context, req resource.I
 					},
 				},
 			},
-			"subtractive":       types.BoolType,
-			"add_workflows":     types.StringType,
-			"action_commit_map": types.MapType{ElemType: types.StringType},
+			"update_existing_configuration": types.BoolType,
+			"add_workflows":                 types.StringType,
+			"action_commit_map":             types.MapType{ElemType: types.StringType},
 		},
 		map[string]attr.Value{
 			"create_pr":                                     types.BoolValue(policy.AutoRemdiationOptions.CreatePR),
@@ -440,7 +440,7 @@ func (r *policyDrivenPRResource) ImportState(ctx context.Context, req resource.I
 			"actions_to_replace_with_step_security_actions": replaceList,
 			"update_precommit_file":                         updatePrecommitFileList,
 			"package_ecosystem":                             packageEcosystemList,
-			"subtractive": types.BoolValue(func() bool {
+			"update_existing_configuration": types.BoolValue(func() bool {
 				if policy.AutoRemdiationOptions.Subtractive != nil {
 					return *policy.AutoRemdiationOptions.Subtractive
 				}
@@ -483,7 +483,7 @@ type autoRemdiationOptionsModel struct {
 	ActionsToReplaceWithStepSecurityActions types.List   `tfsdk:"actions_to_replace_with_step_security_actions"`
 	UpdatePrecommitFile                     types.List   `tfsdk:"update_precommit_file"`
 	PackageEcosystem                        types.List   `tfsdk:"package_ecosystem"`
-	Subtractive                             types.Bool   `tfsdk:"subtractive"`
+	UpdateExistingConfiguration             types.Bool   `tfsdk:"update_existing_configuration"`
 	AddWorkflows                            types.String `tfsdk:"add_workflows"`
 	ActionCommitMap                         types.Map    `tfsdk:"action_commit_map"`
 }
@@ -799,8 +799,9 @@ func (r *policyDrivenPRResource) Create(ctx context.Context, req resource.Create
 	useRepoLevel := !hasWildcard
 
 	var subtractive *bool
-	if !options.Subtractive.IsNull() && !options.Subtractive.IsUnknown() {
-		v := options.Subtractive.ValueBool()
+	tflog.Info(ctx, fmt.Sprintf("Preserving subtractive from state: %v", options.UpdateExistingConfiguration.ValueBool()))
+	if !options.UpdateExistingConfiguration.IsNull() && !options.UpdateExistingConfiguration.IsUnknown() {
+		v := options.UpdateExistingConfiguration.ValueBool()
 		subtractive = &v
 	}
 
@@ -971,7 +972,8 @@ func (r *policyDrivenPRResource) Read(ctx context.Context, req resource.ReadRequ
 			hasUpdatePrecommit := !currentStateOptions.UpdatePrecommitFile.IsNull() && len(currentStateOptions.UpdatePrecommitFile.Elements()) > 0
 			hasPackageEcosystem := !currentStateOptions.PackageEcosystem.IsNull() && len(currentStateOptions.PackageEcosystem.Elements()) > 0
 			hasAddWorkflows := !currentStateOptions.AddWorkflows.IsNull() && currentStateOptions.AddWorkflows.ValueString() != ""
-			hasV2FeaturesInState = hasUpdatePrecommit || hasPackageEcosystem || hasAddWorkflows
+			hasUpdateExistingConfig := !currentStateOptions.UpdateExistingConfiguration.IsNull() && currentStateOptions.UpdateExistingConfiguration.ValueBool()
+			hasV2FeaturesInState = hasUpdatePrecommit || hasPackageEcosystem || hasAddWorkflows || hasUpdateExistingConfig
 		}
 	}
 
@@ -1030,8 +1032,8 @@ func (r *policyDrivenPRResource) Read(ctx context.Context, req resource.ReadRequ
 			stepSecurityPolicy.AutoRemdiationOptions.AddWorkflows = currentStateOptions.AddWorkflows.ValueString()
 		}
 
-		if !currentStateOptions.Subtractive.IsNull() {
-			v := currentStateOptions.Subtractive.ValueBool()
+		if !currentStateOptions.UpdateExistingConfiguration.IsNull() {
+			v := currentStateOptions.UpdateExistingConfiguration.ValueBool()
 			stepSecurityPolicy.AutoRemdiationOptions.Subtractive = &v
 		}
 
@@ -1086,6 +1088,13 @@ func (r *policyDrivenPRResource) Read(ctx context.Context, req resource.ReadRequ
 		tflog.Info(ctx, "Preserving action_commit_map from state")
 	} else if len(stepSecurityPolicy.AutoRemdiationOptions.ActionCommitMap) == 0 {
 		stepSecurityPolicy.AutoRemdiationOptions.ActionCommitMap = map[string]string{}
+	}
+
+	// Preserve update_existing_configuration from state: the API may not correctly
+	// persist or return this field, so we always trust the state value to prevent drift.
+	if !currentStateOptions.UpdateExistingConfiguration.IsNull() {
+		v := currentStateOptions.UpdateExistingConfiguration.ValueBool()
+		stepSecurityPolicy.AutoRemdiationOptions.Subtractive = &v
 	}
 
 	// Update state with API response, preserving selected_repos and excluded_repos from state
@@ -1277,8 +1286,8 @@ func (r *policyDrivenPRResource) Update(ctx context.Context, req resource.Update
 	useRepoLevel := !planHasWildcard
 
 	var subtractiveUpdate *bool
-	if !planOptions.Subtractive.IsNull() && !planOptions.Subtractive.IsUnknown() {
-		v := planOptions.Subtractive.ValueBool()
+	if !planOptions.UpdateExistingConfiguration.IsNull() && !planOptions.UpdateExistingConfiguration.IsUnknown() {
+		v := planOptions.UpdateExistingConfiguration.ValueBool()
 		subtractiveUpdate = &v
 	}
 
@@ -1536,9 +1545,9 @@ func (r *policyDrivenPRResource) updatePolicyDrivenPRState(ctx context.Context, 
 					},
 				},
 			},
-			"subtractive":       types.BoolType,
-			"add_workflows":     types.StringType,
-			"action_commit_map": types.MapType{ElemType: types.StringType},
+			"update_existing_configuration": types.BoolType,
+			"add_workflows":                 types.StringType,
+			"action_commit_map":             types.MapType{ElemType: types.StringType},
 		},
 		map[string]attr.Value{
 			"create_pr":                                     types.BoolValue(stepSecurityPolicy.AutoRemdiationOptions.CreatePR),
@@ -1553,7 +1562,7 @@ func (r *policyDrivenPRResource) updatePolicyDrivenPRState(ctx context.Context, 
 			"actions_to_replace_with_step_security_actions": replaceList,
 			"update_precommit_file":                         updatePrecommitFileList,
 			"package_ecosystem":                             packageEcosystemList,
-			"subtractive": types.BoolValue(func() bool {
+			"update_existing_configuration": types.BoolValue(func() bool {
 				if stepSecurityPolicy.AutoRemdiationOptions.Subtractive != nil {
 					return *stepSecurityPolicy.AutoRemdiationOptions.Subtractive
 				}
