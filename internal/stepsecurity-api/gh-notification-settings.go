@@ -29,6 +29,11 @@ type NotificationSettings struct {
 	NotifyForHardenRunnerConfigChange string `json:"notifyForHardenRunnerConfigChanged"`
 	NotifyForNonCompliantArtifacts    string `json:"notifyForNonCompliantArtifacts"`
 	NotifyForBlockedRunPolicy         string `json:"notifyForBlockedRunPolicy"`
+	NotifyForBaselineCheckFailures    string `json:"notifyForBaselineCheckFailures"` // PR Check failure notifications
+	NotifyForRequiredCheckFailures    string `json:"notifyForRequiredCheckFailures"` // PR Check failure notifications
+	NotifyForOptionalCheckFailures    string `json:"notifyForOptionalCheckFailures"` // PR Check failure notifications
+	SlackNotificationMethod           string `json:"slackNotificationMethod"`        // "webhook" (default) or "oauth"
+	SlackChannelID                    string `json:"slackChannelID,omitempty"`       // For OAuth: channel to post to
 }
 
 func (c *APIClient) CreateNotificationSettings(ctx context.Context, notificationSettingsReq GitHubNotificationSettingsRequest) error {
@@ -98,6 +103,11 @@ func (c *APIClient) DeleteNotificationSettings(ctx context.Context, owner string
 			NotifyForHardenRunnerConfigChange: "false",
 			NotifyForNonCompliantArtifacts:    "false",
 			NotifyForBlockedRunPolicy:         "false",
+			NotifyForBaselineCheckFailures:    "false",
+			NotifyForRequiredCheckFailures:    "false",
+			NotifyForOptionalCheckFailures:    "false",
+			SlackNotificationMethod:           " ",
+			SlackChannelID:                    " ",
 		},
 	}
 
