@@ -37,6 +37,7 @@ type AutoRemdiationOptions struct {
 	ActionsToReplaceWithStepSecurityActions []string           `json:"actions_to_replace_with_step_security_actions"`
 	UpdatePrecommitFile                     []string           `json:"update_precommit_file,omitempty"`
 	PackageEcosystem                        []DependabotConfig `json:"package_ecosystem,omitempty"`
+	Subtractive                             *bool              `json:"subtractive,omitempty"`
 	AddWorkflows                            string             `json:"add_workflows,omitempty"`
 	ActionCommitMap                         map[string]string  `json:"action_commit_map"`
 }
@@ -63,6 +64,7 @@ type controlSettings struct {
 	ActionsToReplace                    map[string]string                    `json:"actions_to_replace,omitempty"`
 	UpdatePrecommitFile                 map[string]bool                      `json:"update_precommit_file,omitempty"`
 	PackageEcosystem                    []DependabotConfig                   `json:"package_ecosystem,omitempty"`
+	Subtractive                         *bool                                `json:"subtractive,omitempty"`
 	AddWorkflows                        string                               `json:"add_workflows,omitempty"`
 	ApplyIssuePRConfigForAllRepos       *bool                                `json:"apply_issue_pr_config_for_all_repos,omitempty"`
 	ApplyIssuePRConfigForAllReposFilter *ApplyIssuePRConfigForAllReposFilter `json:"apply_issue_pr_config_for_all_repos_filter,omitempty"`
@@ -75,8 +77,10 @@ type ApplyIssuePRConfigForAllReposFilter struct {
 }
 
 type DependabotConfig struct {
-	Package  string `json:"package"`
-	Interval string `json:"interval"`
+	Package      string `json:"package"`
+	Interval     string `json:"interval"`
+	CoolDownYAML string `json:"cooldown_yaml,omitempty"`
+	GroupsYAML   string `json:"groups_yaml,omitempty"`
 }
 
 type featureConfigResponse struct {
@@ -189,6 +193,7 @@ func (c *APIClient) CreatePolicyDrivenPRPolicy(ctx context.Context, createReques
 		ActionsToReplace:                    actionsToReplace,
 		UpdatePrecommitFile:                 updatePrecommitFileMap,
 		PackageEcosystem:                    createRequest.AutoRemdiationOptions.PackageEcosystem,
+		Subtractive:                         createRequest.AutoRemdiationOptions.Subtractive,
 		AddWorkflows:                        createRequest.AutoRemdiationOptions.AddWorkflows,
 		ActionCommitMap:                     createRequest.AutoRemdiationOptions.ActionCommitMap,
 		ExemptedImages:                      createRequest.AutoRemdiationOptions.ImagesToExemptWhilePinning,
@@ -392,6 +397,7 @@ func (c *APIClient) GetPolicyDrivenPRPolicy(ctx context.Context, owner string, r
 		ActionsToReplaceWithStepSecurityActions: actionsToReplace,
 		UpdatePrecommitFile:                     updatePrecommitFiles,
 		PackageEcosystem:                        selectedConfig.ControlSettings.PackageEcosystem,
+		Subtractive:                             selectedConfig.ControlSettings.Subtractive,
 		AddWorkflows:                            selectedConfig.ControlSettings.AddWorkflows,
 	}
 
@@ -605,6 +611,7 @@ func (c *APIClient) DiscoverPolicyDrivenPRConfig(ctx context.Context, owner stri
 		ActionsToReplaceWithStepSecurityActions: actionsToReplace,
 		UpdatePrecommitFile:                     updatePrecommitFiles,
 		PackageEcosystem:                        selectedConfig.ControlSettings.PackageEcosystem,
+		Subtractive:                             selectedConfig.ControlSettings.Subtractive,
 		AddWorkflows:                            selectedConfig.ControlSettings.AddWorkflows,
 	}
 

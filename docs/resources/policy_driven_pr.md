@@ -63,15 +63,17 @@ resource "stepsecurity_policy_driven_pr" "repo_level_config" {
     restrict_github_token_permissions             = true
     secure_docker_file                            = true
     actions_to_exempt_while_pinning               = ["actions/checkout", "actions/setup-node"]
-    actions_to_replace_with_step_security_actions = ["EnricoMi/publish-unit-test-result-action"]
+    actions_to_replace_with_step_security_actions = ["enricomi/publish-unit-test-result-action"]
     images_to_exempt_while_pinning                = ["amazon*"]
 
     # v2-only features (requires policy-driven PR v2 to be enabled)
     update_precommit_file = ["eslint"]
     package_ecosystem = [
       {
-        package  = "npm"
-        interval = "daily"
+        package       = "npm"
+        interval      = "daily"
+        cooldown_yaml = "default-days: 7\npackage-rules:\n  - match-package-patterns:\n      - \"*\"\n    days: 3\n"
+        groups_yaml   = "production-dependencies:\n  patterns:\n    - \"*\"\n  exclude-patterns:\n    - \"@types/*\"\n"
       },
       {
         package  = "pip"
@@ -84,7 +86,8 @@ resource "stepsecurity_policy_driven_pr" "repo_level_config" {
       "codecov/codecov-action@v4" : "5ecb98a3c6b747ed38dc09f787459979aebb39be",
       "google-github-actions/auth@v2" : "ba79af03959ebeac9769e648f473a284504d9193",
       "google-github-actions/auth@v3" : "7c6bc770dae815cd3e89ee6cdf493a5fab2cc093"
-    }
+    },
+    update_existing_configuration = true # update existing dependabot configurations
   }
 }
 
@@ -177,6 +180,7 @@ Optional:
 - `pin_actions_to_sha` (Boolean) When enabled, this creates a PR/issue to pin actions to SHA. GitHub's Security Hardening guide recommends pinning actions to full length commit for third party actions.
 - `restrict_github_token_permissions` (Boolean) When enabled, this creates a PR/issue to restrict GitHub token permissions. GitHub's Security Hardening guide recommends restricting permissions to the minimum required
 - `secure_docker_file` (Boolean) When enabled, this creates a PR/issue to secure Dockerfile by pinning base images to SHA.
+- `update_existing_configuration` (Boolean) When enabled, dependabot will remove existing entries that are not in the package_ecosystem config.
 - `update_precommit_file` (List of String) List of pre-commit file paths to update (e.g., ['.pre-commit-config.yaml']).
 
 <a id="nestedatt--auto_remediation_options--package_ecosystem"></a>
@@ -186,6 +190,11 @@ Required:
 
 - `interval` (String) Update interval (e.g., 'daily', 'weekly', 'monthly').
 - `package` (String) Package ecosystem (e.g., 'npm', 'pip', 'docker').
+
+Optional:
+
+- `cooldown_yaml` (String) YAML string configuring cooldown periods for dependency updates.
+- `groups_yaml` (String) YAML string configuring dependency update groups.
 
 
 
