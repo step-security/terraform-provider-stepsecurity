@@ -1099,6 +1099,10 @@ func (r *policyDrivenPRResource) Read(ctx context.Context, req resource.ReadRequ
 	// Update state with API response, preserving selected_repos and excluded_repos from state
 	r.updatePolicyDrivenPRState(ctx, *stepSecurityPolicy, &state, stateSelectedRepos, stateExcludedRepos)
 
+	// Preserve ordering of list attributes from current state to prevent spurious diffs
+	// when the API returns the same elements in a different order.
+	r.preserveAutoRemediationListOrder(ctx, currentStateOptions, &state)
+
 	// Set state to fully populated data
 	diags = resp.State.Set(ctx, state)
 	resp.Diagnostics.Append(diags...)
@@ -1598,4 +1602,87 @@ func (r *policyDrivenPRResource) updatePolicyDrivenPRState(ctx context.Context, 
 		excludedList, _ := types.ListValueFrom(ctx, types.StringType, excludedElements)
 		state.ExcludedRepos = excludedList
 	}
+}
+
+// preserveAutoRemediationListOrder prevents spurious diffs caused by the API returning
+func (r *policyDrivenPRResource) preserveAutoRemediationListOrder(_ context.Context, currentStateOptions autoRemdiationOptionsModel, state *policyDrivenPRModel) {
+	if state.AutoRemdiationOptions.IsNull() || state.AutoRemdiationOptions.IsUnknown() {
+		return
+	}
+
+	attrs := state.AutoRemdiationOptions.Attributes()
+	changed := false
+
+	// preserveOrder replaces attrs[key] with stateList when both contain the same elements.
+	preserveOrder := func(key string, stateList types.List) {
+		if stateList.IsNull() || stateList.IsUnknown() {
+			return
+		}
+		newList, ok := attrs[key].(types.List)
+		if !ok || newList.IsNull() || newList.IsUnknown() {
+			return
+		}
+
+		stateElems := make([]string, 0, len(stateList.Elements()))
+		for _, e := range stateList.Elements() {
+			stateElems = append(stateElems, e.(types.String).ValueString())
+		}
+		newElems := make([]string, 0, len(newList.Elements()))
+		for _, e := range newList.Elements() {
+			newElems = append(newElems, e.(types.String).ValueString())
+		}
+
+		if len(stateElems) != len(newElems) {
+			return
+		}
+		stateSorted := make([]string, len(stateElems))
+		copy(stateSorted, stateElems)
+		newSorted := make([]string, len(newElems))
+		copy(newSorted, newElems)
+		slices.Sort(stateSorted)
+		slices.Sort(newSorted)
+		if slices.Equal(stateSorted, newSorted) {
+			attrs[key] = stateList
+			changed = true
+		}
+	}
+
+	preserveOrder("actions_to_replace_with_step_security_actions", currentStateOptions.ActionsToReplaceWithStepSecurityActions)
+	preserveOrder("actions_to_exempt_while_pinning", currentStateOptions.ActionsToExemptWhilePinning)
+	preserveOrder("images_to_exempt_while_pinning", currentStateOptions.ImagesToExemptWhilePinning)
+
+	if !changed {
+		return
+	}
+
+	updatedObj, diags := types.ObjectValue(
+		map[string]attr.Type{
+			"create_pr":                                     types.BoolType,
+			"create_issue":                                  types.BoolType,
+			"create_github_advanced_security_alert":         types.BoolType,
+			"harden_github_hosted_runner":                   types.BoolType,
+			"pin_actions_to_sha":                            types.BoolType,
+			"restrict_github_token_permissions":             types.BoolType,
+			"secure_docker_file":                            types.BoolType,
+			"actions_to_exempt_while_pinning":               types.ListType{ElemType: types.StringType},
+			"images_to_exempt_while_pinning":                types.ListType{ElemType: types.StringType},
+			"actions_to_replace_with_step_security_actions": types.ListType{ElemType: types.StringType},
+			"update_precommit_file":                         types.ListType{ElemType: types.StringType},
+			"package_ecosystem": types.ListType{
+				ElemType: types.ObjectType{
+					AttrTypes: map[string]attr.Type{
+						"package":  types.StringType,
+						"interval": types.StringType,
+					},
+				},
+			},
+			"add_workflows":     types.StringType,
+			"action_commit_map": types.MapType{ElemType: types.StringType},
+		},
+		attrs,
+	)
+	if diags.HasError() {
+		return
+	}
+	state.AutoRemdiationOptions = updatedObj
 }
