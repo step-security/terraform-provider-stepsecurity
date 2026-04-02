@@ -1605,7 +1605,7 @@ func (r *policyDrivenPRResource) updatePolicyDrivenPRState(ctx context.Context, 
 }
 
 // preserveAutoRemediationListOrder prevents spurious diffs caused by the API returning
-func (r *policyDrivenPRResource) preserveAutoRemediationListOrder(_ context.Context, currentStateOptions autoRemdiationOptionsModel, state *policyDrivenPRModel) {
+func (r *policyDrivenPRResource) preserveAutoRemediationListOrder(ctx context.Context, currentStateOptions autoRemdiationOptionsModel, state *policyDrivenPRModel) {
 	if state.AutoRemdiationOptions.IsNull() || state.AutoRemdiationOptions.IsUnknown() {
 		return
 	}
@@ -1655,32 +1655,13 @@ func (r *policyDrivenPRResource) preserveAutoRemediationListOrder(_ context.Cont
 		return
 	}
 
-	updatedObj, diags := types.ObjectValue(
-		map[string]attr.Type{
-			"create_pr":                                     types.BoolType,
-			"create_issue":                                  types.BoolType,
-			"create_github_advanced_security_alert":         types.BoolType,
-			"harden_github_hosted_runner":                   types.BoolType,
-			"pin_actions_to_sha":                            types.BoolType,
-			"restrict_github_token_permissions":             types.BoolType,
-			"secure_docker_file":                            types.BoolType,
-			"actions_to_exempt_while_pinning":               types.ListType{ElemType: types.StringType},
-			"images_to_exempt_while_pinning":                types.ListType{ElemType: types.StringType},
-			"actions_to_replace_with_step_security_actions": types.ListType{ElemType: types.StringType},
-			"update_precommit_file":                         types.ListType{ElemType: types.StringType},
-			"package_ecosystem": types.ListType{
-				ElemType: types.ObjectType{
-					AttrTypes: map[string]attr.Type{
-						"package":  types.StringType,
-						"interval": types.StringType,
-					},
-				},
-			},
-			"add_workflows":     types.StringType,
-			"action_commit_map": types.MapType{ElemType: types.StringType},
-		},
-		attrs,
-	)
+	// Derive attrTypes from the existing object rather than hardcoding, so this
+	// remains correct when new fields are added to auto_remediation_options.
+	objType, ok := state.AutoRemdiationOptions.Type(ctx).(basetypes.ObjectType)
+	if !ok {
+		return
+	}
+	updatedObj, diags := types.ObjectValue(objType.AttrTypes, attrs)
 	if diags.HasError() {
 		return
 	}
