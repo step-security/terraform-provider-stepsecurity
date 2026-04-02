@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/hashicorp/terraform-plugin-framework/diag"
+	"github.com/hashicorp/terraform-plugin-framework/types/basetypes"
 	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
 	"github.com/stretchr/testify/assert"
 
@@ -42,6 +43,16 @@ func TestAccGithubRunPolicyResource(t *testing.T) {
 				Check: resource.ComposeAggregateTestCheckFunc(
 					resource.TestCheckResourceAttr("stepsecurity_github_run_policy.test", "name", "Updated Test Policy"),
 					resource.TestCheckResourceAttr("stepsecurity_github_run_policy.test", "policy_config.enable_secrets_policy", "true"),
+				),
+			},
+			// Update with pinned actions and Read testing
+			{
+				Config: testAccGithubRunPolicyResourceConfigWithPinning("test-org", "Pinned Actions Policy"),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr("stepsecurity_github_run_policy.test", "name", "Pinned Actions Policy"),
+					resource.TestCheckResourceAttr("stepsecurity_github_run_policy.test", "policy_config.enable_action_policy", "true"),
+					resource.TestCheckResourceAttr("stepsecurity_github_run_policy.test", "policy_config.require_pinned_actions", "true"),
+					resource.TestCheckResourceAttr("stepsecurity_github_run_policy.test", "policy_config.pinned_actions_exemptions.#", "1"),
 				),
 			},
 			// Delete testing automatically occurs in TestCase
@@ -91,17 +102,68 @@ func TestGithubRunPolicyResource_UpdateModelFromAPI(t *testing.T) {
 			DisallowedRunnerLabels: map[string]struct{}{
 				"self-hosted": {},
 			},
+			RequirePinnedActions:    true,
+			PinnedActionsExemptions: []string{"actions/*", "my-org/*"},
 		},
 	}
 
 	var diags diag.Diagnostics
 	resource.updateModelFromAPI(ctx, model, apiResponse, &diags)
 
+	assert.False(t, diags.HasError(), "updateModelFromAPI should not produce errors")
 	assert.Equal(t, "test-org", model.Owner.ValueString())
 	assert.Equal(t, "test-policy-123", model.PolicyID.ValueString())
 	assert.Equal(t, "Test Policy", model.Name.ValueString())
 	assert.True(t, model.AllRepos.ValueBool())
 	assert.False(t, model.AllOrgs.ValueBool())
+
+	// Verify pinned actions fields are mapped correctly
+	var policyConfig policyConfigModel
+	policyConfigDiags := model.PolicyConfig.As(ctx, &policyConfig, basetypes.ObjectAsOptions{})
+	assert.False(t, policyConfigDiags.HasError(), "extracting policy config should not produce errors")
+	assert.True(t, policyConfig.RequirePinnedActions.ValueBool())
+	assert.False(t, policyConfig.PinnedActionsExemptions.IsNull())
+
+	var pinnedExemptions []string
+	exemptionsDiags := policyConfig.PinnedActionsExemptions.ElementsAs(ctx, &pinnedExemptions, false)
+	assert.False(t, exemptionsDiags.HasError())
+	assert.ElementsMatch(t, []string{"actions/*", "my-org/*"}, pinnedExemptions)
+}
+
+func TestGithubRunPolicyResource_UpdateModelFromAPI_NilPinnedExemptions(t *testing.T) {
+	resource := &githubRunPolicyResource{}
+
+	ctx := context.Background()
+	model := &githubRunPolicyResourceModel{}
+
+	apiResponse := &stepsecurityapi.RunPolicy{
+		Owner:         "test-org",
+		Customer:      "test-customer",
+		PolicyID:      "test-policy-456",
+		Name:          "No Pinning Policy",
+		CreatedBy:     "test-user",
+		CreatedAt:     time.Date(2023, 1, 1, 0, 0, 0, 0, time.UTC),
+		LastUpdatedBy: "test-user",
+		LastUpdatedAt: time.Date(2023, 1, 2, 0, 0, 0, 0, time.UTC),
+		AllRepos:      true,
+		PolicyConfig: stepsecurityapi.RunPolicyConfig{
+			Owner:                "test-org",
+			Name:                 "No Pinning Policy",
+			EnableActionPolicy:   true,
+			RequirePinnedActions: false,
+		},
+	}
+
+	var diags diag.Diagnostics
+	resource.updateModelFromAPI(ctx, model, apiResponse, &diags)
+
+	assert.False(t, diags.HasError())
+
+	var policyConfig policyConfigModel
+	policyConfigDiags := model.PolicyConfig.As(ctx, &policyConfig, basetypes.ObjectAsOptions{})
+	assert.False(t, policyConfigDiags.HasError())
+	assert.False(t, policyConfig.RequirePinnedActions.ValueBool())
+	assert.True(t, policyConfig.PinnedActionsExemptions.IsNull())
 }
 
 func testAccGithubRunPolicyResourceConfig(owner, name string) string {
@@ -115,6 +177,27 @@ resource "stepsecurity_github_run_policy" "test" {
     owner                = %[1]q
     name                 = %[2]q
     enable_action_policy = true
+    allowed_actions = {
+      "actions/checkout" = "allow"
+    }
+  }
+}
+`, owner, name)
+}
+
+func testAccGithubRunPolicyResourceConfigWithPinning(owner, name string) string {
+	return fmt.Sprintf(`
+resource "stepsecurity_github_run_policy" "test" {
+  owner     = %[1]q
+  name      = %[2]q
+  all_repos = true
+
+  policy_config = {
+    owner                     = %[1]q
+    name                      = %[2]q
+    enable_action_policy      = true
+    require_pinned_actions    = true
+    pinned_actions_exemptions = ["actions/*"]
     allowed_actions = {
       "actions/checkout" = "allow"
     }

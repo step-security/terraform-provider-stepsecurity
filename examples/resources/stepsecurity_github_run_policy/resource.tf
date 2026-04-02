@@ -226,6 +226,44 @@ resource "stepsecurity_github_run_policy" "repo_specific_runner_policy" {
   }
 }
 
+# Pinned Actions Policy Example (all_repos) - Require all actions to be pinned to SHAs
+resource "stepsecurity_github_run_policy" "pinned_actions_policy" {
+  owner     = "my-org"
+  name      = "Pinned Actions Policy"
+  all_repos = true
+
+  policy_config = {
+    owner                     = "my-org"
+    name                      = "Pinned Actions Policy"
+    enable_action_policy      = true
+    require_pinned_actions    = true
+    pinned_actions_exemptions = ["actions/*", "my-trusted-org/*"]
+    allowed_actions = {
+      "actions/checkout"            = "allow"
+      "step-security/harden-runner" = "allow"
+    }
+  }
+}
+
+# Pinned Actions Policy Example (dry_run) - Test pinned actions policy without enforcement
+resource "stepsecurity_github_run_policy" "pinned_actions_policy_dry_run" {
+  owner     = "my-org"
+  name      = "Pinned Actions Policy - Dry Run"
+  all_repos = true
+
+  policy_config = {
+    owner                  = "my-org"
+    name                   = "Pinned Actions Policy - Dry Run"
+    enable_action_policy   = true
+    require_pinned_actions = true
+    allowed_actions = {
+      "actions/checkout"            = "allow"
+      "step-security/harden-runner" = "allow"
+    }
+    is_dry_run = true
+  }
+}
+
 # For importing existing run policy to terraform state
 # this will be helpful to manage existing policy using terraform
 # alternative to this is to use terraform import command
