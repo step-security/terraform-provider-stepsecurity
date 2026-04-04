@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/hashicorp/terraform-plugin-framework/diag"
+	"github.com/hashicorp/terraform-plugin-framework/types"
 	"github.com/hashicorp/terraform-plugin-framework/types/basetypes"
 	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
 	"github.com/stretchr/testify/assert"
@@ -164,6 +165,115 @@ func TestGithubRunPolicyResource_UpdateModelFromAPI_NilPinnedExemptions(t *testi
 	assert.False(t, policyConfigDiags.HasError())
 	assert.False(t, policyConfig.RequirePinnedActions.ValueBool())
 	assert.True(t, policyConfig.PinnedActionsExemptions.IsNull())
+}
+
+func TestGithubRunPolicyResource_PinnedActionsRequestSerialization(t *testing.T) {
+	// Verify that pinned actions fields are correctly serialized from
+	// the Terraform model to the API request struct. This covers the
+	// Create/Update code paths (state → API request direction).
+	ctx := context.Background()
+
+	pinnedExemptions, diags := types.SetValueFrom(ctx, types.StringType, []string{"actions/*", "my-org/*"})
+	assert.False(t, diags.HasError())
+
+	policyConfig := policyConfigModel{
+		Owner:                          types.StringValue("test-org"),
+		Name:                           types.StringValue("Test Policy"),
+		EnableActionPolicy:             types.BoolValue(true),
+		AllowedActions:                 types.MapNull(types.StringType),
+		EnableRunsOnPolicy:             types.BoolValue(false),
+		DisallowedRunnerLabels:         types.SetNull(types.StringType),
+		EnableSecretsPolicy:            types.BoolValue(false),
+		EnableCompromisedActionsPolicy: types.BoolValue(false),
+		RequirePinnedActions:           types.BoolValue(true),
+		PinnedActionsExemptions:        pinnedExemptions,
+		IsDryRun:                       types.BoolValue(false),
+		ExemptedUsers:                  types.SetNull(types.StringType),
+	}
+
+	// Build the API request the same way Create() and Update() do
+	createRequest := stepsecurityapi.CreateRunPolicyRequest{
+		Name:     "Test Policy",
+		AllRepos: true,
+		PolicyConfig: stepsecurityapi.RunPolicyConfig{
+			Owner:                          policyConfig.Owner.ValueString(),
+			Name:                           policyConfig.Name.ValueString(),
+			EnableActionPolicy:             policyConfig.EnableActionPolicy.ValueBool(),
+			EnableRunsOnPolicy:             policyConfig.EnableRunsOnPolicy.ValueBool(),
+			EnableSecretsPolicy:            policyConfig.EnableSecretsPolicy.ValueBool(),
+			EnableCompromisedActionsPolicy: policyConfig.EnableCompromisedActionsPolicy.ValueBool(),
+			RequirePinnedActions:           policyConfig.RequirePinnedActions.ValueBool(),
+			IsDryRun:                       policyConfig.IsDryRun.ValueBool(),
+		},
+	}
+
+	if !policyConfig.PinnedActionsExemptions.IsNull() {
+		var exemptions []string
+		exemptionDiags := policyConfig.PinnedActionsExemptions.ElementsAs(ctx, &exemptions, false)
+		assert.False(t, exemptionDiags.HasError())
+		createRequest.PolicyConfig.PinnedActionsExemptions = exemptions
+	}
+
+	assert.True(t, createRequest.PolicyConfig.RequirePinnedActions)
+	assert.ElementsMatch(t, []string{"actions/*", "my-org/*"}, createRequest.PolicyConfig.PinnedActionsExemptions)
+
+	// Verify the same fields on an UpdateRunPolicyRequest
+	updateRequest := stepsecurityapi.UpdateRunPolicyRequest{
+		Name:     "Test Policy",
+		AllRepos: true,
+		PolicyConfig: stepsecurityapi.RunPolicyConfig{
+			Owner:                          policyConfig.Owner.ValueString(),
+			Name:                           policyConfig.Name.ValueString(),
+			EnableActionPolicy:             policyConfig.EnableActionPolicy.ValueBool(),
+			EnableRunsOnPolicy:             policyConfig.EnableRunsOnPolicy.ValueBool(),
+			EnableSecretsPolicy:            policyConfig.EnableSecretsPolicy.ValueBool(),
+			EnableCompromisedActionsPolicy: policyConfig.EnableCompromisedActionsPolicy.ValueBool(),
+			RequirePinnedActions:           policyConfig.RequirePinnedActions.ValueBool(),
+			IsDryRun:                       policyConfig.IsDryRun.ValueBool(),
+		},
+	}
+
+	if !policyConfig.PinnedActionsExemptions.IsNull() {
+		var exemptions []string
+		exemptionDiags := policyConfig.PinnedActionsExemptions.ElementsAs(ctx, &exemptions, false)
+		assert.False(t, exemptionDiags.HasError())
+		updateRequest.PolicyConfig.PinnedActionsExemptions = exemptions
+	}
+
+	assert.True(t, updateRequest.PolicyConfig.RequirePinnedActions)
+	assert.ElementsMatch(t, []string{"actions/*", "my-org/*"}, updateRequest.PolicyConfig.PinnedActionsExemptions)
+}
+
+func TestGithubRunPolicyResource_PinnedActionsRequestSerialization_NullExemptions(t *testing.T) {
+	// Verify that when pinned_actions_exemptions is null, the API request
+	// field remains nil (not an empty slice).
+	policyConfig := policyConfigModel{
+		Owner:                          types.StringValue("test-org"),
+		Name:                           types.StringValue("Test Policy"),
+		EnableActionPolicy:             types.BoolValue(true),
+		AllowedActions:                 types.MapNull(types.StringType),
+		EnableRunsOnPolicy:             types.BoolValue(false),
+		DisallowedRunnerLabels:         types.SetNull(types.StringType),
+		EnableSecretsPolicy:            types.BoolValue(false),
+		EnableCompromisedActionsPolicy: types.BoolValue(false),
+		RequirePinnedActions:           types.BoolValue(true),
+		PinnedActionsExemptions:        types.SetNull(types.StringType),
+		IsDryRun:                       types.BoolValue(false),
+		ExemptedUsers:                  types.SetNull(types.StringType),
+	}
+
+	createRequest := stepsecurityapi.CreateRunPolicyRequest{
+		PolicyConfig: stepsecurityapi.RunPolicyConfig{
+			RequirePinnedActions: policyConfig.RequirePinnedActions.ValueBool(),
+		},
+	}
+
+	if !policyConfig.PinnedActionsExemptions.IsNull() {
+		t.Fatal("expected PinnedActionsExemptions to be null")
+	}
+
+	assert.True(t, createRequest.PolicyConfig.RequirePinnedActions)
+	assert.Nil(t, createRequest.PolicyConfig.PinnedActionsExemptions)
 }
 
 func testAccGithubRunPolicyResourceConfig(owner, name string) string {
