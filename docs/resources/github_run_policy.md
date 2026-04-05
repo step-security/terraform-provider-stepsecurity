@@ -330,7 +330,7 @@ Optional:
 - `exempted_users` (Set of String) Set of exempted users (can be bots/usernames) for the secrets exfiltration policy. These users will not be subject to the secrets policy checks.
 - `is_dry_run` (Boolean) Whether this policy is in dry-run mode.
 - `pinned_actions_exemptions` (Set of String) Set of actions exempt from pinning requirements. Supports exact match (e.g., 'actions/checkout'), name-only match, and owner wildcard (e.g., 'my-org/*').
-- `require_pinned_actions` (Boolean) Whether to require all actions to be pinned to full-length commit SHAs. Sub-toggle of the action policy — only meaningful when `enable_action_policy` is true.
+- `require_pinned_actions` (Boolean) Whether to require all actions to be pinned to full-length commit SHAs. Sub-feature of the allowed actions policy — only meaningful when `enable_action_policy` is true.
 
 ## Import
 

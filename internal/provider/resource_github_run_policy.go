@@ -172,7 +172,7 @@ func (r *githubRunPolicyResource) Schema(_ context.Context, _ resource.SchemaReq
 						Optional:            true,
 						Computed:            true,
 						Default:             booldefault.StaticBool(false),
-						MarkdownDescription: "Whether to require all actions to be pinned to full-length commit SHAs. Sub-toggle of the action policy — only meaningful when `enable_action_policy` is true.",
+						MarkdownDescription: "Whether to require all actions to be pinned to full-length commit SHAs. Sub-feature of the allowed actions policy — only meaningful when `enable_action_policy` is true.",
 					},
 					"pinned_actions_exemptions": schema.SetAttribute{
 						ElementType:         types.StringType,
