@@ -213,6 +213,22 @@ func (r *policyDrivenPRResource) Schema(_ context.Context, _ resource.SchemaRequ
 						Optional:    true,
 						Description: "Map of actions to their corresponding commit SHAs to bypass pinning",
 					},
+					"harden_runner_config": schema.SingleNestedAttribute{
+						Optional:    true,
+						Description: "Configuration for harden runner.",
+						Attributes: map[string]schema.Attribute{
+							"config": schema.StringAttribute{
+								Optional:    true,
+								Description: "YAML string configuring the harden runner.",
+							},
+							"subtractive": schema.BoolAttribute{
+								Optional:    true,
+								Computed:    true,
+								Default:     booldefault.StaticBool(false),
+								Description: "When enabled, removes existing harden runner configurations not in the config.",
+							},
+						},
+					},
 				},
 			},
 			"selected_repos": schema.ListAttribute{
@@ -426,6 +442,10 @@ func (r *policyDrivenPRResource) ImportState(ctx context.Context, req resource.I
 			"update_existing_configuration": types.BoolType,
 			"add_workflows":                 types.StringType,
 			"action_commit_map":             types.MapType{ElemType: types.StringType},
+			"harden_runner_config": types.ObjectType{AttrTypes: map[string]attr.Type{
+				"config":      types.StringType,
+				"subtractive": types.BoolType,
+			}},
 		},
 		map[string]attr.Value{
 			"create_pr":                                     types.BoolValue(policy.AutoRemdiationOptions.CreatePR),
@@ -448,6 +468,19 @@ func (r *policyDrivenPRResource) ImportState(ctx context.Context, req resource.I
 			}()),
 			"add_workflows":     addWorkflowsValue,
 			"action_commit_map": actionCommitMapValue,
+			"harden_runner_config": func() attr.Value {
+				if policy.AutoRemdiationOptions.HardenRunnerConfig != nil {
+					obj, _ := types.ObjectValue(
+						map[string]attr.Type{"config": types.StringType, "subtractive": types.BoolType},
+						map[string]attr.Value{
+							"config":      types.StringValue(policy.AutoRemdiationOptions.HardenRunnerConfig.Config),
+							"subtractive": types.BoolValue(policy.AutoRemdiationOptions.HardenRunnerConfig.Subtractive),
+						},
+					)
+					return obj
+				}
+				return types.ObjectNull(map[string]attr.Type{"config": types.StringType, "subtractive": types.BoolType})
+			}(),
 		},
 	)
 	state.AutoRemdiationOptions = optionsObj
@@ -486,6 +519,7 @@ type autoRemdiationOptionsModel struct {
 	UpdateExistingConfiguration             types.Bool   `tfsdk:"update_existing_configuration"`
 	AddWorkflows                            types.String `tfsdk:"add_workflows"`
 	ActionCommitMap                         types.Map    `tfsdk:"action_commit_map"`
+	HardenRunnerConfig                      types.Object `tfsdk:"harden_runner_config"`
 }
 
 type packageEcosystemModel struct {
@@ -493,6 +527,11 @@ type packageEcosystemModel struct {
 	Interval     types.String `tfsdk:"interval"`
 	CoolDownYAML types.String `tfsdk:"cooldown_yaml"`
 	GroupsYAML   types.String `tfsdk:"groups_yaml"`
+}
+
+type hardenRunnerConfigModel struct {
+	Config      types.String `tfsdk:"config"`
+	Subtractive types.Bool   `tfsdk:"subtractive"`
 }
 
 type ActionsToReplaceModel struct {
@@ -804,6 +843,16 @@ func (r *policyDrivenPRResource) Create(ctx context.Context, req resource.Create
 		subtractive = &v
 	}
 
+	var hardenRunnerConfig *stepsecurityapi.HardenRunnerConfig
+	if !options.HardenRunnerConfig.IsNull() && !options.HardenRunnerConfig.IsUnknown() {
+		var model hardenRunnerConfigModel
+		options.HardenRunnerConfig.As(ctx, &model, basetypes.ObjectAsOptions{})
+		hardenRunnerConfig = &stepsecurityapi.HardenRunnerConfig{
+			Config:      model.Config.ValueString(),
+			Subtractive: model.Subtractive.ValueBool(),
+		}
+	}
+
 	// convert to stepsecurityapi.PolicyDrivenPRPolicy
 	stepSecurityPolicy := stepsecurityapi.PolicyDrivenPRPolicy{
 		Owner: plan.Owner.ValueString(),
@@ -823,6 +872,7 @@ func (r *policyDrivenPRResource) Create(ctx context.Context, req resource.Create
 			Subtractive:                             subtractive,
 			AddWorkflows:                            options.AddWorkflows.ValueString(),
 			ActionCommitMap:                         actionCommitMap,
+			HardenRunnerConfig:                      hardenRunnerConfig,
 		},
 		SelectedRepos:       selectedRepos,
 		SelectedReposFilter: selectedReposFilterForAllRepos,
@@ -972,7 +1022,8 @@ func (r *policyDrivenPRResource) Read(ctx context.Context, req resource.ReadRequ
 			hasPackageEcosystem := !currentStateOptions.PackageEcosystem.IsNull() && len(currentStateOptions.PackageEcosystem.Elements()) > 0
 			hasAddWorkflows := !currentStateOptions.AddWorkflows.IsNull() && currentStateOptions.AddWorkflows.ValueString() != ""
 			hasUpdateExistingConfig := !currentStateOptions.UpdateExistingConfiguration.IsNull() && currentStateOptions.UpdateExistingConfiguration.ValueBool()
-			hasV2FeaturesInState = hasUpdatePrecommit || hasPackageEcosystem || hasAddWorkflows || hasUpdateExistingConfig
+			hasHardenRunnerConfig := !currentStateOptions.HardenRunnerConfig.IsNull()
+			hasV2FeaturesInState = hasUpdatePrecommit || hasPackageEcosystem || hasAddWorkflows || hasUpdateExistingConfig || hasHardenRunnerConfig
 		}
 	}
 
@@ -1029,6 +1080,15 @@ func (r *policyDrivenPRResource) Read(ctx context.Context, req resource.ReadRequ
 
 		if !currentStateOptions.AddWorkflows.IsNull() {
 			stepSecurityPolicy.AutoRemdiationOptions.AddWorkflows = currentStateOptions.AddWorkflows.ValueString()
+		}
+
+		if !currentStateOptions.HardenRunnerConfig.IsNull() {
+			var model hardenRunnerConfigModel
+			currentStateOptions.HardenRunnerConfig.As(ctx, &model, basetypes.ObjectAsOptions{})
+			stepSecurityPolicy.AutoRemdiationOptions.HardenRunnerConfig = &stepsecurityapi.HardenRunnerConfig{
+				Config:      model.Config.ValueString(),
+				Subtractive: model.Subtractive.ValueBool(),
+			}
 		}
 
 		if !currentStateOptions.UpdateExistingConfiguration.IsNull() {
@@ -1294,6 +1354,16 @@ func (r *policyDrivenPRResource) Update(ctx context.Context, req resource.Update
 		subtractiveUpdate = &v
 	}
 
+	var hardenRunnerConfigUpdate *stepsecurityapi.HardenRunnerConfig
+	if !planOptions.HardenRunnerConfig.IsNull() && !planOptions.HardenRunnerConfig.IsUnknown() {
+		var model hardenRunnerConfigModel
+		planOptions.HardenRunnerConfig.As(ctx, &model, basetypes.ObjectAsOptions{})
+		hardenRunnerConfigUpdate = &stepsecurityapi.HardenRunnerConfig{
+			Config:      model.Config.ValueString(),
+			Subtractive: model.Subtractive.ValueBool(),
+		}
+	}
+
 	policy := stepsecurityapi.PolicyDrivenPRPolicy{
 		Owner: plan.Owner.ValueString(),
 		AutoRemdiationOptions: stepsecurityapi.AutoRemdiationOptions{
@@ -1312,6 +1382,7 @@ func (r *policyDrivenPRResource) Update(ctx context.Context, req resource.Update
 			Subtractive:                             subtractiveUpdate,
 			AddWorkflows:                            planOptions.AddWorkflows.ValueString(),
 			ActionCommitMap:                         actionCommitMapPlan,
+			HardenRunnerConfig:                      hardenRunnerConfigUpdate,
 		},
 		SelectedRepos:       planRepos,
 		SelectedReposFilter: selectedReposFilterForAllRepos,
@@ -1551,6 +1622,10 @@ func (r *policyDrivenPRResource) updatePolicyDrivenPRState(ctx context.Context, 
 			"update_existing_configuration": types.BoolType,
 			"add_workflows":                 types.StringType,
 			"action_commit_map":             types.MapType{ElemType: types.StringType},
+			"harden_runner_config": types.ObjectType{AttrTypes: map[string]attr.Type{
+				"config":      types.StringType,
+				"subtractive": types.BoolType,
+			}},
 		},
 		map[string]attr.Value{
 			"create_pr":                                     types.BoolValue(stepSecurityPolicy.AutoRemdiationOptions.CreatePR),
@@ -1573,6 +1648,19 @@ func (r *policyDrivenPRResource) updatePolicyDrivenPRState(ctx context.Context, 
 			}()),
 			"add_workflows":     addWorkflowsValue,
 			"action_commit_map": actionCommitMapValue,
+			"harden_runner_config": func() attr.Value {
+				if stepSecurityPolicy.AutoRemdiationOptions.HardenRunnerConfig != nil {
+					obj, _ := types.ObjectValue(
+						map[string]attr.Type{"config": types.StringType, "subtractive": types.BoolType},
+						map[string]attr.Value{
+							"config":      types.StringValue(stepSecurityPolicy.AutoRemdiationOptions.HardenRunnerConfig.Config),
+							"subtractive": types.BoolValue(stepSecurityPolicy.AutoRemdiationOptions.HardenRunnerConfig.Subtractive),
+						},
+					)
+					return obj
+				}
+				return types.ObjectNull(map[string]attr.Type{"config": types.StringType, "subtractive": types.BoolType})
+			}(),
 		},
 	)
 	state.AutoRemdiationOptions = optionsObj

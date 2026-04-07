@@ -40,6 +40,7 @@ type AutoRemdiationOptions struct {
 	Subtractive                             *bool              `json:"subtractive,omitempty"`
 	AddWorkflows                            string             `json:"add_workflows,omitempty"`
 	ActionCommitMap                         map[string]string  `json:"action_commit_map"`
+	HardenRunnerConfig                      *HardenRunnerConfig `json:"harden_runner_config,omitempty"`
 }
 
 // API request/response structures matching agent-api
@@ -70,6 +71,7 @@ type controlSettings struct {
 	ApplyIssuePRConfigForAllReposFilter *ApplyIssuePRConfigForAllReposFilter `json:"apply_issue_pr_config_for_all_repos_filter,omitempty"`
 	ActionCommitMap                     map[string]string                    `json:"action_commit_map"`
 	ExemptedImages                      []string                             `json:"exempted_images,omitempty"`
+	HardenRunnerConfig                  *HardenRunnerConfig                  `json:"harden_runner_config,omitempty"`
 }
 
 type ApplyIssuePRConfigForAllReposFilter struct {
@@ -81,6 +83,11 @@ type DependabotConfig struct {
 	Interval     string `json:"interval"`
 	CoolDownYAML string `json:"cooldown_yaml,omitempty"`
 	GroupsYAML   string `json:"groups_yaml,omitempty"`
+}
+
+type HardenRunnerConfig struct {
+	Config      string `json:"config"`
+	Subtractive bool   `json:"subtractive"`
 }
 
 type featureConfigResponse struct {
@@ -197,6 +204,7 @@ func (c *APIClient) CreatePolicyDrivenPRPolicy(ctx context.Context, createReques
 		AddWorkflows:                        createRequest.AutoRemdiationOptions.AddWorkflows,
 		ActionCommitMap:                     createRequest.AutoRemdiationOptions.ActionCommitMap,
 		ExemptedImages:                      createRequest.AutoRemdiationOptions.ImagesToExemptWhilePinning,
+		HardenRunnerConfig:                  createRequest.AutoRemdiationOptions.HardenRunnerConfig,
 		ApplyIssuePRConfigForAllRepos:       &applyToAllRepos,
 		ApplyIssuePRConfigForAllReposFilter: &createRequest.SelectedReposFilter,
 	}
@@ -399,6 +407,7 @@ func (c *APIClient) GetPolicyDrivenPRPolicy(ctx context.Context, owner string, r
 		PackageEcosystem:                        selectedConfig.ControlSettings.PackageEcosystem,
 		Subtractive:                             selectedConfig.ControlSettings.Subtractive,
 		AddWorkflows:                            selectedConfig.ControlSettings.AddWorkflows,
+		HardenRunnerConfig:                      selectedConfig.ControlSettings.HardenRunnerConfig,
 	}
 
 	// Populate SelectedReposFilter from API response
@@ -613,6 +622,7 @@ func (c *APIClient) DiscoverPolicyDrivenPRConfig(ctx context.Context, owner stri
 		PackageEcosystem:                        selectedConfig.ControlSettings.PackageEcosystem,
 		Subtractive:                             selectedConfig.ControlSettings.Subtractive,
 		AddWorkflows:                            selectedConfig.ControlSettings.AddWorkflows,
+		HardenRunnerConfig:                      selectedConfig.ControlSettings.HardenRunnerConfig,
 	}
 
 	// Populate SelectedReposFilter from API response
