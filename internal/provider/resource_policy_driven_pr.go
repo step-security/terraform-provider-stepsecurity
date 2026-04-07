@@ -215,7 +215,7 @@ func (r *policyDrivenPRResource) Schema(_ context.Context, _ resource.SchemaRequ
 					},
 					"harden_runner_config": schema.SingleNestedAttribute{
 						Optional:    true,
-						Description: "Configuration for harden runner.",
+						Description: "Configuration for harden runner. When not provided, the default harden runner config will be applied.",
 						Attributes: map[string]schema.Attribute{
 							"config": schema.StringAttribute{
 								Optional:    true,
@@ -618,6 +618,15 @@ func (r *policyDrivenPRResource) ValidateConfig(ctx context.Context, req resourc
 				"GitHub Advanced Security Alert can only be true if Create Issue is true",
 				"GitHub Advanced Security Alert can only be triggered when issue creation is enabled",
 			)
+		}
+
+		if !options.HardenRunnerConfig.IsNull() && !options.HardenRunnerConfig.IsUnknown() {
+			if options.HardenGitHubHostedRunner.IsNull() || !options.HardenGitHubHostedRunner.ValueBool() {
+				resp.Diagnostics.AddError(
+					"Invalid Configuration",
+					"harden_runner_config can only be set when harden_github_hosted_runner is true",
+				)
+			}
 		}
 
 	}
