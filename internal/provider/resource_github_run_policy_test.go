@@ -34,6 +34,9 @@ func TestAccGithubRunPolicyResource(t *testing.T) {
 					resourcehelper.TestCheckResourceAttr("stepsecurity_github_run_policy.test", "name", "Test Policy"),
 					resourcehelper.TestCheckResourceAttr("stepsecurity_github_run_policy.test", "all_repos", "true"),
 					resourcehelper.TestCheckResourceAttr("stepsecurity_github_run_policy.test", "policy_config.enable_action_policy", "true"),
+					resourcehelper.TestCheckResourceAttr("stepsecurity_github_run_policy.test", "policy_config.enable_harden_runner_policy", "true"),
+					resourcehelper.TestCheckTypeSetElemAttr("stepsecurity_github_run_policy.test", "policy_config.harden_runner_labels.*", "ubuntu-step-security"),
+					resourcehelper.TestCheckTypeSetElemAttr("stepsecurity_github_run_policy.test", "policy_config.harden_runner_custom_actions.*", "my-org/harden-runner"),
 					resourcehelper.TestCheckResourceAttrSet("stepsecurity_github_run_policy.test", "policy_id"),
 					resourcehelper.TestCheckResourceAttrSet("stepsecurity_github_run_policy.test", "id"),
 				),
@@ -347,9 +350,12 @@ resource "stepsecurity_github_run_policy" "test" {
   all_repos = true
 
   policy_config = {
-    owner                = %[1]q
-    name                 = %[2]q
-    enable_action_policy = true
+    owner                        = %[1]q
+    name                         = %[2]q
+    enable_action_policy         = true
+    enable_harden_runner_policy  = true
+    harden_runner_labels         = ["ubuntu-step-security"]
+    harden_runner_custom_actions = ["my-org/harden-runner"]
     allowed_actions = {
       "actions/checkout" = "allow"
     }
