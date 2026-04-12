@@ -136,8 +136,6 @@ func TestGithubRunPolicyResource_UpdateSendsEmptyHardenRunnerSets(t *testing.T) 
 	ctx := context.Background()
 	previousLabels := []string{"ubuntu-step-security"}
 	previousActions := []string{"my-org/harden-runner"}
-	emptyLabels := []string{}
-	emptyActions := []string{}
 	now := time.Date(2024, 2, 3, 4, 5, 6, 0, time.UTC)
 
 	state := githubRunPolicyResourceModel{
@@ -223,11 +221,12 @@ func TestGithubRunPolicyResource_UpdateSendsEmptyHardenRunnerSets(t *testing.T) 
 			AllRepos:      true,
 			AllOrgs:       false,
 			PolicyConfig: stepsecurityapi.RunPolicyConfig{
-				Owner:                     "test-org",
-				Name:                      "Updated Policy",
-				EnableHardenRunnerPolicy:  true,
-				HardenRunnerLabels:        &emptyLabels,
-				HardenRunnerCustomActions: &emptyActions,
+				Owner:                    "test-org",
+				Name:                     "Updated Policy",
+				EnableHardenRunnerPolicy: true,
+				// agent-api uses []string with `omitempty`, so cleared values can come back omitted.
+				HardenRunnerLabels:        nil,
+				HardenRunnerCustomActions: nil,
 			},
 		}, nil).
 		Once()

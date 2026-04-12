@@ -575,7 +575,41 @@ func (r *githubRunPolicyResource) ImportState(ctx context.Context, req resource.
 }
 
 // updateModelFromAPI updates the Terraform model with data from the API response.
-func (r *githubRunPolicyResource) updateModelFromAPI(_ context.Context, model *githubRunPolicyResourceModel, policy *stepsecurityapi.RunPolicy, diags *diag.Diagnostics) {
+func (r *githubRunPolicyResource) updateModelFromAPI(ctx context.Context, model *githubRunPolicyResourceModel, policy *stepsecurityapi.RunPolicy, diags *diag.Diagnostics) {
+	var existingPolicyConfig policyConfigModel
+	hasExistingPolicyConfig := !model.PolicyConfig.IsNull() && !model.PolicyConfig.IsUnknown()
+	if hasExistingPolicyConfig {
+		existingDiags := model.PolicyConfig.As(ctx, &existingPolicyConfig, basetypes.ObjectAsOptions{})
+		diags.Append(existingDiags...)
+		if diags.HasError() {
+			return
+		}
+	}
+
+	preservePreviousEmptySet := func(previous types.Set) (attr.Value, bool) {
+		if previous.IsNull() || previous.IsUnknown() {
+			return nil, false
+		}
+
+		var values []string
+		setDiags := previous.ElementsAs(ctx, &values, false)
+		diags.Append(setDiags...)
+		if diags.HasError() {
+			return nil, false
+		}
+
+		if len(values) != 0 {
+			return nil, false
+		}
+
+		emptySet, emptySetDiags := types.SetValue(types.StringType, []attr.Value{})
+		diags.Append(emptySetDiags...)
+		if diags.HasError() {
+			return nil, false
+		}
+
+		return emptySet, true
+	}
 
 	// when applied across org..preserve owner set in state/plan
 	if !strings.Contains(policy.Owner, "#[all]") {
@@ -636,6 +670,12 @@ func (r *githubRunPolicyResource) updateModelFromAPI(_ context.Context, model *g
 		setValue, setDiags := types.SetValue(types.StringType, hardenRunnerLabelsList)
 		diags.Append(setDiags...)
 		policyConfigAttrs["harden_runner_labels"] = setValue
+	} else if hasExistingPolicyConfig {
+		if preservedValue, ok := preservePreviousEmptySet(existingPolicyConfig.HardenRunnerLabels); ok {
+			policyConfigAttrs["harden_runner_labels"] = preservedValue
+		} else {
+			policyConfigAttrs["harden_runner_labels"] = types.SetNull(types.StringType)
+		}
 	} else {
 		policyConfigAttrs["harden_runner_labels"] = types.SetNull(types.StringType)
 	}
@@ -648,6 +688,12 @@ func (r *githubRunPolicyResource) updateModelFromAPI(_ context.Context, model *g
 		setValue, setDiags := types.SetValue(types.StringType, hardenRunnerCustomActionsList)
 		diags.Append(setDiags...)
 		policyConfigAttrs["harden_runner_custom_actions"] = setValue
+	} else if hasExistingPolicyConfig {
+		if preservedValue, ok := preservePreviousEmptySet(existingPolicyConfig.HardenRunnerCustomActions); ok {
+			policyConfigAttrs["harden_runner_custom_actions"] = preservedValue
+		} else {
+			policyConfigAttrs["harden_runner_custom_actions"] = types.SetNull(types.StringType)
+		}
 	} else {
 		policyConfigAttrs["harden_runner_custom_actions"] = types.SetNull(types.StringType)
 	}
