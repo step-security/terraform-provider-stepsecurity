@@ -222,6 +222,7 @@ func (d *githubRunPoliciesDataSource) Read(ctx context.Context, req datasource.R
 			reposList = types.ListNull(types.StringType)
 		}
 
+		// Handle policy configuration
 		policyConfigAttrs := map[string]attr.Value{
 			"owner":                             types.StringValue(policy.PolicyConfig.Owner),
 			"name":                              types.StringValue(policy.PolicyConfig.Name),
@@ -233,6 +234,7 @@ func (d *githubRunPoliciesDataSource) Read(ctx context.Context, req datasource.R
 			"is_dry_run":                        types.BoolValue(policy.PolicyConfig.IsDryRun),
 		}
 
+		// Handle allowed actions map
 		if policy.PolicyConfig.AllowedActions != nil {
 			allowedActionsMap := make(map[string]attr.Value, len(policy.PolicyConfig.AllowedActions))
 			for action, permission := range policy.PolicyConfig.AllowedActions {
@@ -278,6 +280,7 @@ func (d *githubRunPoliciesDataSource) Read(ctx context.Context, req datasource.R
 			policyConfigAttrs["harden_runner_custom_actions"] = types.SetNull(types.StringType)
 		}
 
+		// Handle disallowed runner labels set
 		if policy.PolicyConfig.DisallowedRunnerLabels != nil {
 			disallowedLabelsList := make([]attr.Value, 0, len(policy.PolicyConfig.DisallowedRunnerLabels))
 			for label := range policy.PolicyConfig.DisallowedRunnerLabels {
@@ -293,6 +296,7 @@ func (d *githubRunPoliciesDataSource) Read(ctx context.Context, req datasource.R
 			policyConfigAttrs["disallowed_runner_labels"] = types.SetNull(types.StringType)
 		}
 
+		// Create the policy config object
 		policyConfigAttrTypes := map[string]attr.Type{
 			"owner":                             types.StringType,
 			"name":                              types.StringType,

@@ -253,6 +253,7 @@ func (r *githubRunPolicyResource) Create(ctx context.Context, req resource.Creat
 		return
 	}
 
+	// Convert to API request format
 	createRequest := stepsecurityapi.CreateRunPolicyRequest{
 		Name:     plan.Name.ValueString(),
 		AllRepos: plan.AllRepos.ValueBool(),
@@ -280,6 +281,7 @@ func (r *githubRunPolicyResource) Create(ctx context.Context, req resource.Creat
 		createRequest.Repositories = repos
 	}
 
+	// Handle allowed actions map
 	if !policyConfig.AllowedActions.IsNull() {
 		var allowedActions map[string]string
 		diags = policyConfig.AllowedActions.ElementsAs(ctx, &allowedActions, false)
@@ -310,6 +312,7 @@ func (r *githubRunPolicyResource) Create(ctx context.Context, req resource.Creat
 		createRequest.PolicyConfig.HardenRunnerCustomActions = &hardenRunnerCustomActions
 	}
 
+	// Handle disallowed runner labels set
 	if !policyConfig.DisallowedRunnerLabels.IsNull() {
 		var disallowedLabels []string
 		diags = policyConfig.DisallowedRunnerLabels.ElementsAs(ctx, &disallowedLabels, false)
@@ -318,6 +321,7 @@ func (r *githubRunPolicyResource) Create(ctx context.Context, req resource.Creat
 			return
 		}
 
+		// Convert to map[string]struct{} as expected by API
 		disallowedMap := make(map[string]struct{}, len(disallowedLabels))
 		for _, label := range disallowedLabels {
 			disallowedMap[label] = struct{}{}
@@ -325,6 +329,7 @@ func (r *githubRunPolicyResource) Create(ctx context.Context, req resource.Creat
 		createRequest.PolicyConfig.DisallowedRunnerLabels = disallowedMap
 	}
 
+	// Handle exempted users list
 	if !policyConfig.ExemptedUsers.IsNull() {
 		var exemptedUsers []string
 		diags = policyConfig.ExemptedUsers.ElementsAs(ctx, &exemptedUsers, false)
@@ -406,6 +411,7 @@ func (r *githubRunPolicyResource) Update(ctx context.Context, req resource.Updat
 		return
 	}
 
+	// Convert to API request format
 	updateRequest := stepsecurityapi.UpdateRunPolicyRequest{
 		Name:     plan.Name.ValueString(),
 		AllRepos: plan.AllRepos.ValueBool(),
@@ -433,6 +439,7 @@ func (r *githubRunPolicyResource) Update(ctx context.Context, req resource.Updat
 		updateRequest.Repositories = repos
 	}
 
+	// Handle allowed actions map
 	if !policyConfig.AllowedActions.IsNull() {
 		var allowedActions map[string]string
 		diags = policyConfig.AllowedActions.ElementsAs(ctx, &allowedActions, false)
@@ -463,6 +470,7 @@ func (r *githubRunPolicyResource) Update(ctx context.Context, req resource.Updat
 		updateRequest.PolicyConfig.HardenRunnerCustomActions = &hardenRunnerCustomActions
 	}
 
+	// Handle disallowed runner labels set
 	if !policyConfig.DisallowedRunnerLabels.IsNull() {
 		var disallowedLabels []string
 		diags = policyConfig.DisallowedRunnerLabels.ElementsAs(ctx, &disallowedLabels, false)
@@ -471,6 +479,7 @@ func (r *githubRunPolicyResource) Update(ctx context.Context, req resource.Updat
 			return
 		}
 
+		// Convert to map[string]struct{} as expected by API
 		disallowedMap := make(map[string]struct{}, len(disallowedLabels))
 		for _, label := range disallowedLabels {
 			disallowedMap[label] = struct{}{}
@@ -478,6 +487,7 @@ func (r *githubRunPolicyResource) Update(ctx context.Context, req resource.Updat
 		updateRequest.PolicyConfig.DisallowedRunnerLabels = disallowedMap
 	}
 
+	// Handle exempted users list
 	if !policyConfig.ExemptedUsers.IsNull() {
 		var exemptedUsers []string
 		diags = policyConfig.ExemptedUsers.ElementsAs(ctx, &exemptedUsers, false)
@@ -593,6 +603,7 @@ func (r *githubRunPolicyResource) updateModelFromAPI(_ context.Context, model *g
 		model.Repositories = types.ListNull(types.StringType)
 	}
 
+	// Handle policy configuration
 	policyConfigAttrs := map[string]attr.Value{
 		"owner":                             types.StringValue(policy.PolicyConfig.Owner),
 		"name":                              types.StringValue(policy.PolicyConfig.Name),
@@ -604,6 +615,7 @@ func (r *githubRunPolicyResource) updateModelFromAPI(_ context.Context, model *g
 		"is_dry_run":                        types.BoolValue(policy.PolicyConfig.IsDryRun),
 	}
 
+	// Handle allowed actions map
 	if policy.PolicyConfig.AllowedActions != nil {
 		allowedActionsMap := make(map[string]attr.Value, len(policy.PolicyConfig.AllowedActions))
 		for action, permission := range policy.PolicyConfig.AllowedActions {
@@ -640,6 +652,7 @@ func (r *githubRunPolicyResource) updateModelFromAPI(_ context.Context, model *g
 		policyConfigAttrs["harden_runner_custom_actions"] = types.SetNull(types.StringType)
 	}
 
+	// Handle disallowed runner labels set
 	if policy.PolicyConfig.DisallowedRunnerLabels != nil {
 		disallowedLabelsList := make([]attr.Value, 0, len(policy.PolicyConfig.DisallowedRunnerLabels))
 		for label := range policy.PolicyConfig.DisallowedRunnerLabels {
@@ -652,6 +665,7 @@ func (r *githubRunPolicyResource) updateModelFromAPI(_ context.Context, model *g
 		policyConfigAttrs["disallowed_runner_labels"] = types.SetNull(types.StringType)
 	}
 
+	// Handle exempted users set
 	if policy.PolicyConfig.ExemptedUsers != nil {
 		exemptedUsersList := make([]attr.Value, len(policy.PolicyConfig.ExemptedUsers))
 		for i, user := range policy.PolicyConfig.ExemptedUsers {
@@ -664,6 +678,7 @@ func (r *githubRunPolicyResource) updateModelFromAPI(_ context.Context, model *g
 		policyConfigAttrs["exempted_users"] = types.SetNull(types.StringType)
 	}
 
+	// Create the policy config object
 	policyConfigAttrTypes := map[string]attr.Type{
 		"owner":                             types.StringType,
 		"name":                              types.StringType,

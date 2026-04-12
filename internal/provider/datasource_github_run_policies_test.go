@@ -70,7 +70,7 @@ func TestGithubRunPoliciesDataSource_ReadMapsHardenRunnerFields(t *testing.T) {
 
 	ctx := context.Background()
 	labels := []string{"ubuntu-step-security", "linux-secure"}
-	customActions := []string{"acme/harden-runner", "octo/harden-runner-action"}
+	customActions := []string{"my-org/harden-runner", "octo/harden-runner-action"}
 	now := time.Date(2024, 3, 4, 5, 6, 7, 0, time.UTC)
 
 	mockClient := &stepsecurityapi.MockStepSecurityClient{}

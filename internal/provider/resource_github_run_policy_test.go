@@ -52,7 +52,7 @@ func TestAccGithubRunPolicyResource(t *testing.T) {
 					resourcehelper.TestCheckResourceAttr("stepsecurity_github_run_policy.test", "policy_config.enable_secrets_policy", "true"),
 					resourcehelper.TestCheckResourceAttr("stepsecurity_github_run_policy.test", "policy_config.enable_harden_runner_policy", "true"),
 					resourcehelper.TestCheckTypeSetElemAttr("stepsecurity_github_run_policy.test", "policy_config.harden_runner_labels.*", "ubuntu-step-security"),
-					resourcehelper.TestCheckTypeSetElemAttr("stepsecurity_github_run_policy.test", "policy_config.harden_runner_custom_actions.*", "acme/harden-runner"),
+					resourcehelper.TestCheckTypeSetElemAttr("stepsecurity_github_run_policy.test", "policy_config.harden_runner_custom_actions.*", "my-org/harden-runner"),
 				),
 			},
 			// Delete testing automatically occurs in TestCase
@@ -79,7 +79,7 @@ func TestGithubRunPolicyResource_UpdateModelFromAPI(t *testing.T) {
 	ctx := context.Background()
 	model := &githubRunPolicyResourceModel{}
 	hardenRunnerLabels := []string{"ubuntu-step-security", "linux-secure"}
-	hardenRunnerCustomActions := []string{"acme/harden-runner", "octo/harden-runner-action"}
+	hardenRunnerCustomActions := []string{"my-org/harden-runner", "octo/harden-runner-action"}
 
 	apiResponse := &stepsecurityapi.RunPolicy{
 		Owner:         "test-org",
@@ -124,7 +124,7 @@ func TestGithubRunPolicyResource_UpdateModelFromAPI(t *testing.T) {
 	require.False(t, diags.HasError())
 	assert.True(t, policyConfig.EnableHardenRunnerPolicy.ValueBool())
 	assert.ElementsMatch(t, []string{"ubuntu-step-security", "linux-secure"}, setStrings(t, policyConfig.HardenRunnerLabels))
-	assert.ElementsMatch(t, []string{"acme/harden-runner", "octo/harden-runner-action"}, setStrings(t, policyConfig.HardenRunnerCustomActions))
+	assert.ElementsMatch(t, []string{"my-org/harden-runner", "octo/harden-runner-action"}, setStrings(t, policyConfig.HardenRunnerCustomActions))
 }
 
 func TestGithubRunPolicyResource_UpdateSendsEmptyHardenRunnerSets(t *testing.T) {
@@ -132,7 +132,7 @@ func TestGithubRunPolicyResource_UpdateSendsEmptyHardenRunnerSets(t *testing.T) 
 
 	ctx := context.Background()
 	previousLabels := []string{"ubuntu-step-security"}
-	previousActions := []string{"acme/harden-runner"}
+	previousActions := []string{"my-org/harden-runner"}
 	emptyLabels := []string{}
 	emptyActions := []string{}
 	now := time.Date(2024, 2, 3, 4, 5, 6, 0, time.UTC)
@@ -345,7 +345,7 @@ resource "stepsecurity_github_run_policy" "test" {
   owner     = %[1]q
   name      = %[2]q
   all_repos = true
-  
+
   policy_config = {
     owner                = %[1]q
     name                 = %[2]q
@@ -364,7 +364,7 @@ resource "stepsecurity_github_run_policy" "test" {
   owner     = %[1]q
   name      = %[2]q
   all_repos = true
-  
+
   policy_config = {
     owner                        = %[1]q
     name                         = %[2]q
@@ -372,7 +372,7 @@ resource "stepsecurity_github_run_policy" "test" {
     enable_harden_runner_policy  = true
     enable_secrets_policy        = true
     harden_runner_labels         = ["ubuntu-step-security"]
-    harden_runner_custom_actions = ["acme/harden-runner"]
+    harden_runner_custom_actions = ["my-org/harden-runner"]
     allowed_actions = {
       "actions/checkout"             = "allow"
       "step-security/harden-runner" = "allow"
