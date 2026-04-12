@@ -201,8 +201,8 @@ Read-Only:
 - `allowed_actions` (Map of String) Map of allowed actions and their permissions.
 - `disallowed_runner_labels` (Set of String) Set of disallowed runner labels.
 - `enable_action_policy` (Boolean) Whether the action policy is enabled.
-- `enable_harden_runner_policy` (Boolean) Whether the Harden Runner policy is enabled.
 - `enable_compromised_actions_policy` (Boolean) Whether the compromised actions policy is enabled.
+- `enable_harden_runner_policy` (Boolean) Whether the Harden Runner policy is enabled.
 - `enable_runs_on_policy` (Boolean) Whether the runs-on policy is enabled.
 - `enable_secrets_policy` (Boolean) Whether the secrets policy is enabled.
 - `harden_runner_custom_actions` (Set of String) Set of custom actions accepted as Harden Runner equivalents.
