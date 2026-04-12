@@ -322,7 +322,7 @@ func (r *githubRunPolicyResource) Create(ctx context.Context, req resource.Creat
 		}
 
 		// Convert to map[string]struct{} as expected by API
-		disallowedMap := make(map[string]struct{}, len(disallowedLabels))
+		disallowedMap := make(map[string]struct{})
 		for _, label := range disallowedLabels {
 			disallowedMap[label] = struct{}{}
 		}
@@ -480,7 +480,7 @@ func (r *githubRunPolicyResource) Update(ctx context.Context, req resource.Updat
 		}
 
 		// Convert to map[string]struct{} as expected by API
-		disallowedMap := make(map[string]struct{}, len(disallowedLabels))
+		disallowedMap := make(map[string]struct{})
 		for _, label := range disallowedLabels {
 			disallowedMap[label] = struct{}{}
 		}
@@ -617,7 +617,7 @@ func (r *githubRunPolicyResource) updateModelFromAPI(_ context.Context, model *g
 
 	// Handle allowed actions map
 	if policy.PolicyConfig.AllowedActions != nil {
-		allowedActionsMap := make(map[string]attr.Value, len(policy.PolicyConfig.AllowedActions))
+		allowedActionsMap := make(map[string]attr.Value)
 		for action, permission := range policy.PolicyConfig.AllowedActions {
 			allowedActionsMap[action] = types.StringValue(permission)
 		}

@@ -236,15 +236,11 @@ func (d *githubRunPoliciesDataSource) Read(ctx context.Context, req datasource.R
 
 		// Handle allowed actions map
 		if policy.PolicyConfig.AllowedActions != nil {
-			allowedActionsMap := make(map[string]attr.Value, len(policy.PolicyConfig.AllowedActions))
+			allowedActionsMap := make(map[string]attr.Value)
 			for action, permission := range policy.PolicyConfig.AllowedActions {
 				allowedActionsMap[action] = types.StringValue(permission)
 			}
-			mapValue, mapDiags := types.MapValue(types.StringType, allowedActionsMap)
-			resp.Diagnostics.Append(mapDiags...)
-			if resp.Diagnostics.HasError() {
-				return
-			}
+			mapValue, _ := types.MapValue(types.StringType, allowedActionsMap)
 			policyConfigAttrs["allowed_actions"] = mapValue
 		} else {
 			policyConfigAttrs["allowed_actions"] = types.MapNull(types.StringType)
@@ -255,11 +251,7 @@ func (d *githubRunPoliciesDataSource) Read(ctx context.Context, req datasource.R
 			for i, label := range *policy.PolicyConfig.HardenRunnerLabels {
 				hardenRunnerLabelsList[i] = types.StringValue(label)
 			}
-			setValue, setDiags := types.SetValue(types.StringType, hardenRunnerLabelsList)
-			resp.Diagnostics.Append(setDiags...)
-			if resp.Diagnostics.HasError() {
-				return
-			}
+			setValue, _ := types.SetValue(types.StringType, hardenRunnerLabelsList)
 			policyConfigAttrs["harden_runner_labels"] = setValue
 		} else {
 			policyConfigAttrs["harden_runner_labels"] = types.SetNull(types.StringType)
@@ -270,11 +262,7 @@ func (d *githubRunPoliciesDataSource) Read(ctx context.Context, req datasource.R
 			for i, action := range *policy.PolicyConfig.HardenRunnerCustomActions {
 				hardenRunnerCustomActionsList[i] = types.StringValue(action)
 			}
-			setValue, setDiags := types.SetValue(types.StringType, hardenRunnerCustomActionsList)
-			resp.Diagnostics.Append(setDiags...)
-			if resp.Diagnostics.HasError() {
-				return
-			}
+			setValue, _ := types.SetValue(types.StringType, hardenRunnerCustomActionsList)
 			policyConfigAttrs["harden_runner_custom_actions"] = setValue
 		} else {
 			policyConfigAttrs["harden_runner_custom_actions"] = types.SetNull(types.StringType)
@@ -286,11 +274,7 @@ func (d *githubRunPoliciesDataSource) Read(ctx context.Context, req datasource.R
 			for label := range policy.PolicyConfig.DisallowedRunnerLabels {
 				disallowedLabelsList = append(disallowedLabelsList, types.StringValue(label))
 			}
-			setValue, setDiags := types.SetValue(types.StringType, disallowedLabelsList)
-			resp.Diagnostics.Append(setDiags...)
-			if resp.Diagnostics.HasError() {
-				return
-			}
+			setValue, _ := types.SetValue(types.StringType, disallowedLabelsList)
 			policyConfigAttrs["disallowed_runner_labels"] = setValue
 		} else {
 			policyConfigAttrs["disallowed_runner_labels"] = types.SetNull(types.StringType)
@@ -312,11 +296,7 @@ func (d *githubRunPoliciesDataSource) Read(ctx context.Context, req datasource.R
 			"is_dry_run":                        types.BoolType,
 		}
 
-		policyConfigObj, objDiags := types.ObjectValue(policyConfigAttrTypes, policyConfigAttrs)
-		resp.Diagnostics.Append(objDiags...)
-		if resp.Diagnostics.HasError() {
-			return
-		}
+		policyConfigObj, _ := types.ObjectValue(policyConfigAttrTypes, policyConfigAttrs)
 
 		// Create run policy object
 		runPolicyAttrs := map[string]attr.Value{
