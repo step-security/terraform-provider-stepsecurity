@@ -125,6 +125,20 @@ func (d *githubRunPoliciesDataSource) Schema(_ context.Context, _ datasource.Sch
 									Computed:            true,
 									MarkdownDescription: "Map of allowed actions and their permissions.",
 								},
+								"enable_harden_runner_policy": schema.BoolAttribute{
+									Computed:            true,
+									MarkdownDescription: "Whether the Harden Runner policy is enabled.",
+								},
+								"harden_runner_labels": schema.SetAttribute{
+									ElementType:         types.StringType,
+									Computed:            true,
+									MarkdownDescription: "Set of runner labels that require Harden Runner to be the first step.",
+								},
+								"harden_runner_custom_actions": schema.SetAttribute{
+									ElementType:         types.StringType,
+									Computed:            true,
+									MarkdownDescription: "Set of custom actions accepted as Harden Runner equivalents.",
+								},
 								"enable_runs_on_policy": schema.BoolAttribute{
 									Computed:            true,
 									MarkdownDescription: "Whether the runs-on policy is enabled.",
@@ -208,47 +222,85 @@ func (d *githubRunPoliciesDataSource) Read(ctx context.Context, req datasource.R
 			reposList = types.ListNull(types.StringType)
 		}
 
-		// Handle policy configuration
 		policyConfigAttrs := map[string]attr.Value{
 			"owner":                             types.StringValue(policy.PolicyConfig.Owner),
 			"name":                              types.StringValue(policy.PolicyConfig.Name),
 			"enable_action_policy":              types.BoolValue(policy.PolicyConfig.EnableActionPolicy),
+			"enable_harden_runner_policy":       types.BoolValue(policy.PolicyConfig.EnableHardenRunnerPolicy),
 			"enable_runs_on_policy":             types.BoolValue(policy.PolicyConfig.EnableRunsOnPolicy),
 			"enable_secrets_policy":             types.BoolValue(policy.PolicyConfig.EnableSecretsPolicy),
 			"enable_compromised_actions_policy": types.BoolValue(policy.PolicyConfig.EnableCompromisedActionsPolicy),
 			"is_dry_run":                        types.BoolValue(policy.PolicyConfig.IsDryRun),
 		}
 
-		// Handle allowed actions map
 		if policy.PolicyConfig.AllowedActions != nil {
-			allowedActionsMap := make(map[string]attr.Value)
+			allowedActionsMap := make(map[string]attr.Value, len(policy.PolicyConfig.AllowedActions))
 			for action, permission := range policy.PolicyConfig.AllowedActions {
 				allowedActionsMap[action] = types.StringValue(permission)
 			}
-			mapValue, _ := types.MapValue(types.StringType, allowedActionsMap)
+			mapValue, mapDiags := types.MapValue(types.StringType, allowedActionsMap)
+			resp.Diagnostics.Append(mapDiags...)
+			if resp.Diagnostics.HasError() {
+				return
+			}
 			policyConfigAttrs["allowed_actions"] = mapValue
 		} else {
 			policyConfigAttrs["allowed_actions"] = types.MapNull(types.StringType)
 		}
 
-		// Handle disallowed runner labels set
+		if policy.PolicyConfig.HardenRunnerLabels != nil {
+			hardenRunnerLabelsList := make([]attr.Value, len(*policy.PolicyConfig.HardenRunnerLabels))
+			for i, label := range *policy.PolicyConfig.HardenRunnerLabels {
+				hardenRunnerLabelsList[i] = types.StringValue(label)
+			}
+			setValue, setDiags := types.SetValue(types.StringType, hardenRunnerLabelsList)
+			resp.Diagnostics.Append(setDiags...)
+			if resp.Diagnostics.HasError() {
+				return
+			}
+			policyConfigAttrs["harden_runner_labels"] = setValue
+		} else {
+			policyConfigAttrs["harden_runner_labels"] = types.SetNull(types.StringType)
+		}
+
+		if policy.PolicyConfig.HardenRunnerCustomActions != nil {
+			hardenRunnerCustomActionsList := make([]attr.Value, len(*policy.PolicyConfig.HardenRunnerCustomActions))
+			for i, action := range *policy.PolicyConfig.HardenRunnerCustomActions {
+				hardenRunnerCustomActionsList[i] = types.StringValue(action)
+			}
+			setValue, setDiags := types.SetValue(types.StringType, hardenRunnerCustomActionsList)
+			resp.Diagnostics.Append(setDiags...)
+			if resp.Diagnostics.HasError() {
+				return
+			}
+			policyConfigAttrs["harden_runner_custom_actions"] = setValue
+		} else {
+			policyConfigAttrs["harden_runner_custom_actions"] = types.SetNull(types.StringType)
+		}
+
 		if policy.PolicyConfig.DisallowedRunnerLabels != nil {
 			disallowedLabelsList := make([]attr.Value, 0, len(policy.PolicyConfig.DisallowedRunnerLabels))
 			for label := range policy.PolicyConfig.DisallowedRunnerLabels {
 				disallowedLabelsList = append(disallowedLabelsList, types.StringValue(label))
 			}
-			setValue, _ := types.SetValue(types.StringType, disallowedLabelsList)
+			setValue, setDiags := types.SetValue(types.StringType, disallowedLabelsList)
+			resp.Diagnostics.Append(setDiags...)
+			if resp.Diagnostics.HasError() {
+				return
+			}
 			policyConfigAttrs["disallowed_runner_labels"] = setValue
 		} else {
 			policyConfigAttrs["disallowed_runner_labels"] = types.SetNull(types.StringType)
 		}
 
-		// Create the policy config object
 		policyConfigAttrTypes := map[string]attr.Type{
 			"owner":                             types.StringType,
 			"name":                              types.StringType,
 			"enable_action_policy":              types.BoolType,
 			"allowed_actions":                   types.MapType{ElemType: types.StringType},
+			"enable_harden_runner_policy":       types.BoolType,
+			"harden_runner_labels":              types.SetType{ElemType: types.StringType},
+			"harden_runner_custom_actions":      types.SetType{ElemType: types.StringType},
 			"enable_runs_on_policy":             types.BoolType,
 			"disallowed_runner_labels":          types.SetType{ElemType: types.StringType},
 			"enable_secrets_policy":             types.BoolType,
@@ -256,7 +308,11 @@ func (d *githubRunPoliciesDataSource) Read(ctx context.Context, req datasource.R
 			"is_dry_run":                        types.BoolType,
 		}
 
-		policyConfigObj, _ := types.ObjectValue(policyConfigAttrTypes, policyConfigAttrs)
+		policyConfigObj, objDiags := types.ObjectValue(policyConfigAttrTypes, policyConfigAttrs)
+		resp.Diagnostics.Append(objDiags...)
+		if resp.Diagnostics.HasError() {
+			return
+		}
 
 		// Create run policy object
 		runPolicyAttrs := map[string]attr.Value{
@@ -311,6 +367,9 @@ func (d *githubRunPoliciesDataSource) Read(ctx context.Context, req datasource.R
 			"name":                              types.StringType,
 			"enable_action_policy":              types.BoolType,
 			"allowed_actions":                   types.MapType{ElemType: types.StringType},
+			"enable_harden_runner_policy":       types.BoolType,
+			"harden_runner_labels":              types.SetType{ElemType: types.StringType},
+			"harden_runner_custom_actions":      types.SetType{ElemType: types.StringType},
 			"enable_runs_on_policy":             types.BoolType,
 			"disallowed_runner_labels":          types.SetType{ElemType: types.StringType},
 			"enable_secrets_policy":             types.BoolType,

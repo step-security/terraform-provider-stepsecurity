@@ -112,6 +112,21 @@ resource "stepsecurity_github_run_policy" "runner_policy_dry_run" {
   }
 }
 
+# Harden Runner Policy Example (all_repos) - Ensures Harden Runner is the first step on matching runners
+resource "stepsecurity_github_run_policy" "harden_runner_policy_all_repos" {
+  owner     = "my-org"
+  name      = "Harden Runner Policy - All Repos"
+  all_repos = true
+
+  policy_config = {
+    owner                        = "my-org"
+    name                         = "Harden Runner Policy - All Repos"
+    enable_harden_runner_policy  = true
+    harden_runner_labels         = ["ubuntu-step-security", "linux-secure"]
+    harden_runner_custom_actions = ["acme/harden-runner"]
+  }
+}
+
 # Secrets Policy Example (all_orgs) - Prevents secrets from being exfiltrated across all orgs
 resource "stepsecurity_github_run_policy" "secrets_policy_all_orgs" {
   owner    = "my-org"

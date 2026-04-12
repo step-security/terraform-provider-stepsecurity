@@ -68,6 +68,20 @@ output "runner_policies" {
   ]
 }
 
+output "harden_runner_policies" {
+  description = "Policies that require Harden Runner to be the first step on matching runners"
+  value = [
+    for policy in data.stepsecurity_github_run_policies.all_policies.run_policies :
+    {
+      name                         = policy.name
+      policy_id                    = policy.policy_id
+      harden_runner_labels         = policy.policy_config.harden_runner_labels
+      harden_runner_custom_actions = policy.policy_config.harden_runner_custom_actions
+    }
+    if policy.policy_config.enable_harden_runner_policy
+  ]
+}
+
 output "secrets_policies" {
   description = "Policies that prevent secrets exfiltration"
   value = [
@@ -187,9 +201,12 @@ Read-Only:
 - `allowed_actions` (Map of String) Map of allowed actions and their permissions.
 - `disallowed_runner_labels` (Set of String) Set of disallowed runner labels.
 - `enable_action_policy` (Boolean) Whether the action policy is enabled.
+- `enable_harden_runner_policy` (Boolean) Whether the Harden Runner policy is enabled.
 - `enable_compromised_actions_policy` (Boolean) Whether the compromised actions policy is enabled.
 - `enable_runs_on_policy` (Boolean) Whether the runs-on policy is enabled.
 - `enable_secrets_policy` (Boolean) Whether the secrets policy is enabled.
+- `harden_runner_custom_actions` (Set of String) Set of custom actions accepted as Harden Runner equivalents.
+- `harden_runner_labels` (Set of String) Set of runner labels that require Harden Runner to be the first step.
 - `is_dry_run` (Boolean) Whether this policy is in dry-run mode.
 - `name` (String) The name of the policy configuration.
 - `owner` (String) The owner of the policy configuration.

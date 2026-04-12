@@ -127,6 +127,21 @@ resource "stepsecurity_github_run_policy" "runner_policy_dry_run" {
   }
 }
 
+# Harden Runner Policy Example (all_repos) - Ensures Harden Runner is the first step on matching runners
+resource "stepsecurity_github_run_policy" "harden_runner_policy_all_repos" {
+  owner     = "my-org"
+  name      = "Harden Runner Policy - All Repos"
+  all_repos = true
+
+  policy_config = {
+    owner                        = "my-org"
+    name                         = "Harden Runner Policy - All Repos"
+    enable_harden_runner_policy  = true
+    harden_runner_labels         = ["ubuntu-step-security", "linux-secure"]
+    harden_runner_custom_actions = ["acme/harden-runner"]
+  }
+}
+
 # Secrets Policy Example (all_orgs) - Prevents secrets from being exfiltrated across all orgs
 resource "stepsecurity_github_run_policy" "secrets_policy_all_orgs" {
   owner    = "my-org"
@@ -286,10 +301,13 @@ Optional:
 - `allowed_actions` (Map of String) Map of allowed actions and their permissions (e.g., 'actions/checkout': 'allow').
 - `disallowed_runner_labels` (Set of String) Set of disallowed runner labels.
 - `enable_action_policy` (Boolean) Whether to enable the action policy.
+- `enable_harden_runner_policy` (Boolean) Whether to enable the Harden Runner policy.
 - `enable_compromised_actions_policy` (Boolean) Whether to enable the compromised actions policy.
 - `enable_runs_on_policy` (Boolean) Whether to enable the runs-on policy.
 - `enable_secrets_policy` (Boolean) Whether to enable the secrets policy.
 - `exempted_users` (Set of String) Set of exempted users (can be bots/usernames) for the secrets exfiltration policy. These users will not be subject to the secrets policy checks.
+- `harden_runner_custom_actions` (Set of String) Set of custom actions accepted as Harden Runner equivalents.
+- `harden_runner_labels` (Set of String) Set of runner labels that require Harden Runner to be the first step.
 - `is_dry_run` (Boolean) Whether this policy is in dry-run mode.
 
 ## Import
