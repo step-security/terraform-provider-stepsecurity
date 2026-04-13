@@ -162,6 +162,12 @@ func (r *policyDrivenPRResource) Schema(_ context.Context, _ resource.SchemaRequ
 							),
 						),
 					},
+					"replace_by_major_tag": schema.BoolAttribute{
+						Optional:    true,
+						Computed:    true,
+						Description: "When enabled, actions in actions_to_replace_with_step_security_actions are replaced only when the major tag matches. Requires actions_to_replace_with_step_security_actions to be non-empty.",
+						Default:     booldefault.StaticBool(false),
+					},
 					"update_precommit_file": schema.ListAttribute{
 						ElementType: types.StringType,
 						Optional:    true,
@@ -412,6 +418,7 @@ func (r *policyDrivenPRResource) ImportState(ctx context.Context, req resource.I
 			"actions_to_exempt_while_pinning":               types.ListType{ElemType: types.StringType},
 			"images_to_exempt_while_pinning":                types.ListType{ElemType: types.StringType},
 			"actions_to_replace_with_step_security_actions": types.ListType{ElemType: types.StringType},
+			"replace_by_major_tag":                          types.BoolType,
 			"update_precommit_file":                         types.ListType{ElemType: types.StringType},
 			"package_ecosystem": types.ListType{
 				ElemType: types.ObjectType{
@@ -438,8 +445,14 @@ func (r *policyDrivenPRResource) ImportState(ctx context.Context, req resource.I
 			"actions_to_exempt_while_pinning":               exemptList,
 			"images_to_exempt_while_pinning":                exemptImagesList,
 			"actions_to_replace_with_step_security_actions": replaceList,
-			"update_precommit_file":                         updatePrecommitFileList,
-			"package_ecosystem":                             packageEcosystemList,
+			"replace_by_major_tag": types.BoolValue(func() bool {
+				if policy.AutoRemdiationOptions.ReplaceByMajorTag != nil {
+					return *policy.AutoRemdiationOptions.ReplaceByMajorTag
+				}
+				return false
+			}()),
+			"update_precommit_file":          updatePrecommitFileList,
+			"package_ecosystem":              packageEcosystemList,
 			"update_existing_configuration": types.BoolValue(func() bool {
 				if policy.AutoRemdiationOptions.Subtractive != nil {
 					return *policy.AutoRemdiationOptions.Subtractive
@@ -481,6 +494,7 @@ type autoRemdiationOptionsModel struct {
 	ActionsToExemptWhilePinning             types.List   `tfsdk:"actions_to_exempt_while_pinning"`
 	ImagesToExemptWhilePinning              types.List   `tfsdk:"images_to_exempt_while_pinning"`
 	ActionsToReplaceWithStepSecurityActions types.List   `tfsdk:"actions_to_replace_with_step_security_actions"`
+	ReplaceByMajorTag                       types.Bool   `tfsdk:"replace_by_major_tag"`
 	UpdatePrecommitFile                     types.List   `tfsdk:"update_precommit_file"`
 	PackageEcosystem                        types.List   `tfsdk:"package_ecosystem"`
 	UpdateExistingConfiguration             types.Bool   `tfsdk:"update_existing_configuration"`
@@ -579,6 +593,19 @@ func (r *policyDrivenPRResource) ValidateConfig(ctx context.Context, req resourc
 				"GitHub Advanced Security Alert can only be true if Create Issue is true",
 				"GitHub Advanced Security Alert can only be triggered when issue creation is enabled",
 			)
+		}
+
+		if !options.ReplaceByMajorTag.IsNull() && !options.ReplaceByMajorTag.IsUnknown() &&
+			options.ReplaceByMajorTag.ValueBool() {
+			hasActionsToReplace := !options.ActionsToReplaceWithStepSecurityActions.IsNull() &&
+				!options.ActionsToReplaceWithStepSecurityActions.IsUnknown() &&
+				len(options.ActionsToReplaceWithStepSecurityActions.Elements()) > 0
+			if !hasActionsToReplace {
+				resp.Diagnostics.AddError(
+					"Invalid Configuration",
+					"replace_by_major_tag can only be set to true when actions_to_replace_with_step_security_actions is non-empty",
+				)
+			}
 		}
 
 	}
@@ -804,6 +831,12 @@ func (r *policyDrivenPRResource) Create(ctx context.Context, req resource.Create
 		subtractive = &v
 	}
 
+	var replaceByMajorTag *bool
+	if !options.ReplaceByMajorTag.IsNull() && !options.ReplaceByMajorTag.IsUnknown() {
+		v := options.ReplaceByMajorTag.ValueBool()
+		replaceByMajorTag = &v
+	}
+
 	// convert to stepsecurityapi.PolicyDrivenPRPolicy
 	stepSecurityPolicy := stepsecurityapi.PolicyDrivenPRPolicy{
 		Owner: plan.Owner.ValueString(),
@@ -818,6 +851,7 @@ func (r *policyDrivenPRResource) Create(ctx context.Context, req resource.Create
 			ActionsToExemptWhilePinning:             actionsToExempt,
 			ImagesToExemptWhilePinning:              imagesToExempt,
 			ActionsToReplaceWithStepSecurityActions: actionsToReplace,
+			ReplaceByMajorTag:                       replaceByMajorTag,
 			UpdatePrecommitFile:                     updatePrecommitFile,
 			PackageEcosystem:                        packageEcosystem,
 			Subtractive:                             subtractive,
@@ -1294,6 +1328,12 @@ func (r *policyDrivenPRResource) Update(ctx context.Context, req resource.Update
 		subtractiveUpdate = &v
 	}
 
+	var replaceByMajorTagUpdate *bool
+	if !planOptions.ReplaceByMajorTag.IsNull() && !planOptions.ReplaceByMajorTag.IsUnknown() {
+		v := planOptions.ReplaceByMajorTag.ValueBool()
+		replaceByMajorTagUpdate = &v
+	}
+
 	policy := stepsecurityapi.PolicyDrivenPRPolicy{
 		Owner: plan.Owner.ValueString(),
 		AutoRemdiationOptions: stepsecurityapi.AutoRemdiationOptions{
@@ -1307,6 +1347,7 @@ func (r *policyDrivenPRResource) Update(ctx context.Context, req resource.Update
 			ActionsToExemptWhilePinning:             actionsToExempt,
 			ImagesToExemptWhilePinning:              imagesToExempt,
 			ActionsToReplaceWithStepSecurityActions: actionsToReplace,
+			ReplaceByMajorTag:                       replaceByMajorTagUpdate,
 			UpdatePrecommitFile:                     updatePrecommitFilePlan,
 			PackageEcosystem:                        packageEcosystemPlan,
 			Subtractive:                             subtractiveUpdate,
@@ -1537,6 +1578,7 @@ func (r *policyDrivenPRResource) updatePolicyDrivenPRState(ctx context.Context, 
 			"actions_to_exempt_while_pinning":               types.ListType{ElemType: types.StringType},
 			"images_to_exempt_while_pinning":                types.ListType{ElemType: types.StringType},
 			"actions_to_replace_with_step_security_actions": types.ListType{ElemType: types.StringType},
+			"replace_by_major_tag":                          types.BoolType,
 			"update_precommit_file":                         types.ListType{ElemType: types.StringType},
 			"package_ecosystem": types.ListType{
 				ElemType: types.ObjectType{
@@ -1563,8 +1605,14 @@ func (r *policyDrivenPRResource) updatePolicyDrivenPRState(ctx context.Context, 
 			"actions_to_exempt_while_pinning":               exemptList,
 			"images_to_exempt_while_pinning":                exemptImagesList,
 			"actions_to_replace_with_step_security_actions": replaceList,
-			"update_precommit_file":                         updatePrecommitFileList,
-			"package_ecosystem":                             packageEcosystemList,
+			"replace_by_major_tag": types.BoolValue(func() bool {
+				if stepSecurityPolicy.AutoRemdiationOptions.ReplaceByMajorTag != nil {
+					return *stepSecurityPolicy.AutoRemdiationOptions.ReplaceByMajorTag
+				}
+				return false
+			}()),
+			"update_precommit_file":          updatePrecommitFileList,
+			"package_ecosystem":              packageEcosystemList,
 			"update_existing_configuration": types.BoolValue(func() bool {
 				if stepSecurityPolicy.AutoRemdiationOptions.Subtractive != nil {
 					return *stepSecurityPolicy.AutoRemdiationOptions.Subtractive
