@@ -194,6 +194,8 @@ Optional:
 Optional:
 
 - `config` (String) YAML string configuring the harden runner.
+- `runner_labels` (List of String) List of runner labels to apply the harden runner config to.
+- `skip_harden_runner` (Boolean) When enabled, skips the harden runner step.
 - `subtractive` (Boolean) When enabled, removes existing harden runner configurations not in the config.
 
 

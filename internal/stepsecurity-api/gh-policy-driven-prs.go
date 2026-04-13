@@ -25,21 +25,21 @@ type PolicyDrivenPRPolicy struct {
 }
 
 type AutoRemdiationOptions struct {
-	CreatePR                                bool               `json:"create_pr"`
-	CreateIssue                             bool               `json:"create_issue"`
-	CreateGitHubAdvancedSecurityAlert       bool               `json:"create_github_advanced_security_alert"`
-	HardenGitHubHostedRunner                bool               `json:"harden_github_hosted_runner"`
-	PinActionsToSHA                         bool               `json:"pin_actions_to_sha"`
-	RestrictGitHubTokenPermissions          bool               `json:"restrict_github_token_permissions"`
-	SecureDockerFile                        bool               `json:"secure_docker_file"`
-	ActionsToExemptWhilePinning             []string           `json:"actions_to_exempt_while_pinning"`
-	ImagesToExemptWhilePinning              []string           `json:"images_to_exempt_while_pinning"`
-	ActionsToReplaceWithStepSecurityActions []string           `json:"actions_to_replace_with_step_security_actions"`
-	UpdatePrecommitFile                     []string           `json:"update_precommit_file,omitempty"`
-	PackageEcosystem                        []DependabotConfig `json:"package_ecosystem,omitempty"`
-	Subtractive                             *bool              `json:"subtractive,omitempty"`
-	AddWorkflows                            string             `json:"add_workflows,omitempty"`
-	ActionCommitMap                         map[string]string  `json:"action_commit_map"`
+	CreatePR                                bool                `json:"create_pr"`
+	CreateIssue                             bool                `json:"create_issue"`
+	CreateGitHubAdvancedSecurityAlert       bool                `json:"create_github_advanced_security_alert"`
+	HardenGitHubHostedRunner                bool                `json:"harden_github_hosted_runner"`
+	PinActionsToSHA                         bool                `json:"pin_actions_to_sha"`
+	RestrictGitHubTokenPermissions          bool                `json:"restrict_github_token_permissions"`
+	SecureDockerFile                        bool                `json:"secure_docker_file"`
+	ActionsToExemptWhilePinning             []string            `json:"actions_to_exempt_while_pinning"`
+	ImagesToExemptWhilePinning              []string            `json:"images_to_exempt_while_pinning"`
+	ActionsToReplaceWithStepSecurityActions []string            `json:"actions_to_replace_with_step_security_actions"`
+	UpdatePrecommitFile                     []string            `json:"update_precommit_file,omitempty"`
+	PackageEcosystem                        []DependabotConfig  `json:"package_ecosystem,omitempty"`
+	Subtractive                             *bool               `json:"subtractive,omitempty"`
+	AddWorkflows                            string              `json:"add_workflows,omitempty"`
+	ActionCommitMap                         map[string]string   `json:"action_commit_map"`
 	HardenRunnerConfig                      *HardenRunnerConfig `json:"harden_runner_config,omitempty"`
 }
 
@@ -86,8 +86,10 @@ type DependabotConfig struct {
 }
 
 type HardenRunnerConfig struct {
-	Config      string `json:"config"`
-	Subtractive bool   `json:"subtractive"`
+	Config           string   `json:"config"`
+	Subtractive      bool     `json:"subtractive"`
+	SkipHardenRunner bool     `json:"skipHardenRunner"`
+	RunnerLabels     []string `json:"runnerLabels"`
 }
 
 type featureConfigResponse struct {
