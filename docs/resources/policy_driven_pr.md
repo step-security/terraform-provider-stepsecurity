@@ -89,8 +89,10 @@ resource "stepsecurity_policy_driven_pr" "repo_level_config" {
     },
     update_existing_configuration = true # update existing dependabot configurations
     harden_runner_config = {
-      subtractive = true
-      config      = "- name: Harden the runner (Audit all outbound calls)\n  uses: step-security/custom-agent@v2\n  with:\n    egress-policy: audit\n    allowed-endpoints: >\n      github.com:443\n"
+      subtractive        = true
+      config             = "- name: Harden the runner (Audit all outbound calls)\n  uses: step-security/custom-agent@v2\n  with:\n    egress-policy: audit\n    allowed-endpoints: >\n      github.com:443\n"
+      skip_harden_runner = true
+      runner_labels      = ["ubuntu-latest", "ubuntu-latest-code"]
     }
   }
 }
