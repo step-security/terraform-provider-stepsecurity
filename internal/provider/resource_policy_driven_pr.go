@@ -221,26 +221,20 @@ func (r *policyDrivenPRResource) Schema(_ context.Context, _ resource.SchemaRequ
 								Optional:    true,
 								Description: "YAML string configuring the harden runner.",
 							},
-							"subtractive": schema.BoolAttribute{
+							"update_existing_configuration": schema.BoolAttribute{
 								Optional:    true,
 								Computed:    true,
 								Default:     booldefault.StaticBool(false),
 								Description: "When enabled, removes existing harden runner configurations not in the config.",
 							},
-							"skip_harden_runner": schema.BoolAttribute{
-								Optional:    true,
-								Computed:    true,
-								Default:     booldefault.StaticBool(false),
-								Description: "When enabled, skips the harden runner step.",
-							},
-							"runner_labels": schema.ListAttribute{
+							"target_runner_labels": schema.ListAttribute{
 								ElementType: types.StringType,
 								Optional:    true,
 								Computed:    true,
 								Default: listdefault.StaticValue(
 									types.ListValueMust(types.StringType, []attr.Value{}),
 								),
-								Description: "List of runner labels to apply the harden runner config to.",
+								Description: "List of runner labels to apply the harden runner config to. When non-empty, skip_harden_runner is automatically set to true internally.",
 							},
 						},
 					},
@@ -459,9 +453,8 @@ func (r *policyDrivenPRResource) ImportState(ctx context.Context, req resource.I
 			"action_commit_map":             types.MapType{ElemType: types.StringType},
 			"harden_runner_config": types.ObjectType{AttrTypes: map[string]attr.Type{
 				"config":             types.StringType,
-				"subtractive":        types.BoolType,
-				"skip_harden_runner": types.BoolType,
-				"runner_labels":      types.ListType{ElemType: types.StringType},
+				"update_existing_configuration": types.BoolType,
+				"target_runner_labels":      types.ListType{ElemType: types.StringType},
 			}},
 		},
 		map[string]attr.Value{
@@ -496,24 +489,21 @@ func (r *policyDrivenPRResource) ImportState(ctx context.Context, req resource.I
 					obj, _ := types.ObjectValue(
 						map[string]attr.Type{
 							"config":             types.StringType,
-							"subtractive":        types.BoolType,
-							"skip_harden_runner": types.BoolType,
-							"runner_labels":      types.ListType{ElemType: types.StringType},
+							"update_existing_configuration": types.BoolType,
+							"target_runner_labels":      types.ListType{ElemType: types.StringType},
 						},
 						map[string]attr.Value{
 							"config":             types.StringValue(policy.AutoRemdiationOptions.HardenRunnerConfig.Config),
-							"subtractive":        types.BoolValue(policy.AutoRemdiationOptions.HardenRunnerConfig.Subtractive),
-							"skip_harden_runner": types.BoolValue(policy.AutoRemdiationOptions.HardenRunnerConfig.SkipHardenRunner),
-							"runner_labels":      labelsList,
+							"update_existing_configuration": types.BoolValue(policy.AutoRemdiationOptions.HardenRunnerConfig.Subtractive),
+							"target_runner_labels":      labelsList,
 						},
 					)
 					return obj
 				}
 				return types.ObjectNull(map[string]attr.Type{
 					"config":             types.StringType,
-					"subtractive":        types.BoolType,
-					"skip_harden_runner": types.BoolType,
-					"runner_labels":      types.ListType{ElemType: types.StringType},
+					"update_existing_configuration": types.BoolType,
+					"target_runner_labels":      types.ListType{ElemType: types.StringType},
 				})
 			}(),
 		},
@@ -566,9 +556,8 @@ type packageEcosystemModel struct {
 
 type hardenRunnerConfigModel struct {
 	Config           types.String `tfsdk:"config"`
-	Subtractive      types.Bool   `tfsdk:"subtractive"`
-	SkipHardenRunner types.Bool   `tfsdk:"skip_harden_runner"`
-	RunnerLabels     types.List   `tfsdk:"runner_labels"`
+	UpdateExistingConfiguration types.Bool   `tfsdk:"update_existing_configuration"`
+	RunnerLabels     types.List   `tfsdk:"target_runner_labels"`
 }
 
 type ActionsToReplaceModel struct {
@@ -901,8 +890,8 @@ func (r *policyDrivenPRResource) Create(ctx context.Context, req resource.Create
 		}
 		hardenRunnerConfig = &stepsecurityapi.HardenRunnerConfig{
 			Config:           hrcModel.Config.ValueString(),
-			Subtractive:      hrcModel.Subtractive.ValueBool(),
-			SkipHardenRunner: hrcModel.SkipHardenRunner.ValueBool(),
+			Subtractive:      hrcModel.UpdateExistingConfiguration.ValueBool(),
+			SkipHardenRunner: len(runnerLabels) > 0,
 			RunnerLabels:     runnerLabels,
 		}
 	}
@@ -1147,8 +1136,8 @@ func (r *policyDrivenPRResource) Read(ctx context.Context, req resource.ReadRequ
 			}
 			stepSecurityPolicy.AutoRemdiationOptions.HardenRunnerConfig = &stepsecurityapi.HardenRunnerConfig{
 				Config:           hrcModel.Config.ValueString(),
-				Subtractive:      hrcModel.Subtractive.ValueBool(),
-				SkipHardenRunner: hrcModel.SkipHardenRunner.ValueBool(),
+				Subtractive:      hrcModel.UpdateExistingConfiguration.ValueBool(),
+				SkipHardenRunner: len(runnerLabels) > 0,
 				RunnerLabels:     runnerLabels,
 			}
 		}
@@ -1428,8 +1417,8 @@ func (r *policyDrivenPRResource) Update(ctx context.Context, req resource.Update
 		}
 		hardenRunnerConfigUpdate = &stepsecurityapi.HardenRunnerConfig{
 			Config:           hrcModel.Config.ValueString(),
-			Subtractive:      hrcModel.Subtractive.ValueBool(),
-			SkipHardenRunner: hrcModel.SkipHardenRunner.ValueBool(),
+			Subtractive:      hrcModel.UpdateExistingConfiguration.ValueBool(),
+			SkipHardenRunner: len(runnerLabels) > 0,
 			RunnerLabels:     runnerLabels,
 		}
 	}
@@ -1694,9 +1683,8 @@ func (r *policyDrivenPRResource) updatePolicyDrivenPRState(ctx context.Context, 
 			"action_commit_map":             types.MapType{ElemType: types.StringType},
 			"harden_runner_config": types.ObjectType{AttrTypes: map[string]attr.Type{
 				"config":             types.StringType,
-				"subtractive":        types.BoolType,
-				"skip_harden_runner": types.BoolType,
-				"runner_labels":      types.ListType{ElemType: types.StringType},
+				"update_existing_configuration": types.BoolType,
+				"target_runner_labels":      types.ListType{ElemType: types.StringType},
 			}},
 		},
 		map[string]attr.Value{
@@ -1731,24 +1719,21 @@ func (r *policyDrivenPRResource) updatePolicyDrivenPRState(ctx context.Context, 
 					obj, _ := types.ObjectValue(
 						map[string]attr.Type{
 							"config":             types.StringType,
-							"subtractive":        types.BoolType,
-							"skip_harden_runner": types.BoolType,
-							"runner_labels":      types.ListType{ElemType: types.StringType},
+							"update_existing_configuration": types.BoolType,
+							"target_runner_labels":      types.ListType{ElemType: types.StringType},
 						},
 						map[string]attr.Value{
 							"config":             types.StringValue(stepSecurityPolicy.AutoRemdiationOptions.HardenRunnerConfig.Config),
-							"subtractive":        types.BoolValue(stepSecurityPolicy.AutoRemdiationOptions.HardenRunnerConfig.Subtractive),
-							"skip_harden_runner": types.BoolValue(stepSecurityPolicy.AutoRemdiationOptions.HardenRunnerConfig.SkipHardenRunner),
-							"runner_labels":      labelsList,
+							"update_existing_configuration": types.BoolValue(stepSecurityPolicy.AutoRemdiationOptions.HardenRunnerConfig.Subtractive),
+							"target_runner_labels":      labelsList,
 						},
 					)
 					return obj
 				}
 				return types.ObjectNull(map[string]attr.Type{
 					"config":             types.StringType,
-					"subtractive":        types.BoolType,
-					"skip_harden_runner": types.BoolType,
-					"runner_labels":      types.ListType{ElemType: types.StringType},
+					"update_existing_configuration": types.BoolType,
+					"target_runner_labels":      types.ListType{ElemType: types.StringType},
 				})
 			}(),
 		},
