@@ -64,6 +64,7 @@ resource "stepsecurity_policy_driven_pr" "repo_level_config" {
     secure_docker_file                            = true
     actions_to_exempt_while_pinning               = ["actions/checkout", "actions/setup-node"]
     actions_to_replace_with_step_security_actions = ["enricomi/publish-unit-test-result-action"]
+    exempted_from_replacement                     = ["fkirc/skip-*", "amannn/*"] // either actions_to_replace_with_step_security_actions or exempted_from_replacement can be set at a time
     images_to_exempt_while_pinning                = ["amazon*"]
 
     # v2-only features (requires policy-driven PR v2 to be enabled)
@@ -179,6 +180,7 @@ Optional:
 - `create_github_advanced_security_alert` (Boolean) Create a GitHub Advanced Security alert when a finding is detected. Note that this triggers only when issue creation is enabled.
 - `create_issue` (Boolean) Create an issue when a finding is detected.
 - `create_pr` (Boolean) Create a PR when a finding is detected.
+- `exempted_from_replacement` (List of String) List of actions to exempt from replacement. When set, ALL maintained actions are replaced EXCEPT those listed. Mutually exclusive with actions_to_replace_with_step_security_actions.
 - `harden_github_hosted_runner` (Boolean) When enabled, this creates a PR/issue to install security agent on the GitHub-hosted runner to prevent exfiltration of credentials, monitor the build process, and detect compromised dependencies.
 - `harden_runner_config` (Attributes) Configuration for harden runner. When not provided, the default harden runner config will be applied. (see [below for nested schema](#nestedatt--auto_remediation_options--harden_runner_config))
 - `images_to_exempt_while_pinning` (List of String) List of Docker images to exempt while pinning images to SHA. When exempted, the image will not be pinned to SHA.
