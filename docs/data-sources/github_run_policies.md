@@ -205,8 +205,8 @@ Read-Only:
 - `enable_harden_runner_policy` (Boolean) Whether the Harden Runner policy is enabled.
 - `enable_runs_on_policy` (Boolean) Whether the runs-on policy is enabled.
 - `enable_secrets_policy` (Boolean) Whether the secrets policy is enabled.
-- `harden_runner_custom_actions` (Set of String) Set of custom actions accepted as Harden Runner equivalents.
-- `harden_runner_labels` (Set of String) Set of runner labels that require Harden Runner to be the first step.
+- `harden_runner_custom_actions` (Set of String) Set of custom actions accepted as Harden Runner equivalents (in addition to `step-security/harden-runner`).
+- `harden_runner_labels` (Set of String) Set of runner labels that target Harden Runner enforcement. When `enable_harden_runner_policy` is true, an empty set means the policy applies to every job; a non-empty set filters to jobs whose `runs-on` matches at least one label. When the policy is disabled, this attribute is null.
 - `is_dry_run` (Boolean) Whether this policy is in dry-run mode.
 - `name` (String) The name of the policy configuration.
 - `owner` (String) The owner of the policy configuration.

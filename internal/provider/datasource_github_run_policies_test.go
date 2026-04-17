@@ -92,8 +92,8 @@ func TestGithubRunPoliciesDataSource_ReadMapsHardenRunnerFields(t *testing.T) {
 					Owner:                     "test-org",
 					Name:                      "Test Policy",
 					EnableHardenRunnerPolicy:  true,
-					HardenRunnerLabels:        &labels,
-					HardenRunnerCustomActions: &customActions,
+					HardenRunnerLabels:        labels,
+					HardenRunnerCustomActions: customActions,
 				},
 			},
 		}, nil).
@@ -131,6 +131,100 @@ func TestGithubRunPoliciesDataSource_ReadMapsHardenRunnerFields(t *testing.T) {
 	assert.True(t, policyConfig.EnableHardenRunnerPolicy.ValueBool())
 	assert.ElementsMatch(t, labels, setStrings(t, policyConfig.HardenRunnerLabels))
 	assert.ElementsMatch(t, customActions, setStrings(t, policyConfig.HardenRunnerCustomActions))
+}
+
+func TestGithubRunPoliciesDataSource_ReadEmptyLabelsSurfaceAsEmptySet(t *testing.T) {
+	t.Parallel()
+
+	// Backend omits empty `harden_runner_labels` from the JSON response
+	// (omitempty). When the Harden Runner policy is enabled, the data source
+	// must still surface the "match all jobs" contract as an empty set rather
+	// than collapsing it to null, so downstream consumers (outputs, for-loops)
+	// can rely on the documented shape.
+	ctx := context.Background()
+	now := time.Date(2024, 6, 7, 8, 9, 10, 0, time.UTC)
+
+	mockClient := &stepsecurityapi.MockStepSecurityClient{}
+	mockClient.
+		On("ListRunPolicies", mock.Anything, "test-org").
+		Return([]stepsecurityapi.RunPolicy{
+			{
+				Owner:         "test-org",
+				PolicyID:      "policy-allmatch",
+				Name:          "All Jobs Policy",
+				CreatedBy:     "test-user",
+				CreatedAt:     now,
+				LastUpdatedBy: "test-user",
+				LastUpdatedAt: now,
+				AllRepos:      true,
+				PolicyConfig: stepsecurityapi.RunPolicyConfig{
+					Owner:                     "test-org",
+					Name:                      "All Jobs Policy",
+					EnableHardenRunnerPolicy:  true,
+					HardenRunnerLabels:        nil,
+					HardenRunnerCustomActions: nil,
+				},
+			},
+			{
+				Owner:         "test-org",
+				PolicyID:      "policy-disabled",
+				Name:          "Other Policy",
+				CreatedBy:     "test-user",
+				CreatedAt:     now,
+				LastUpdatedBy: "test-user",
+				LastUpdatedAt: now,
+				AllRepos:      true,
+				PolicyConfig: stepsecurityapi.RunPolicyConfig{
+					Owner:                    "test-org",
+					Name:                     "Other Policy",
+					EnableHardenRunnerPolicy: false,
+				},
+			},
+		}, nil).
+		Once()
+
+	d := &githubRunPoliciesDataSource{client: mockClient}
+	req := fwdatasource.ReadRequest{
+		Config: testGithubRunPoliciesDataSourceConfigValue(t, githubRunPoliciesDataSourceModel{
+			Owner:       types.StringValue("test-org"),
+			RunPolicies: types.ListNull(types.ObjectType{AttrTypes: testRunPolicyDataSourceAttrTypes()}),
+		}),
+	}
+	resp := &fwdatasource.ReadResponse{
+		State: tfsdk.State{Schema: testGithubRunPoliciesDataSourceSchema(t)},
+	}
+
+	d.Read(ctx, req, resp)
+
+	require.False(t, resp.Diagnostics.HasError())
+	mockClient.AssertExpectations(t)
+
+	var state githubRunPoliciesDataSourceModel
+	diags := resp.State.Get(ctx, &state)
+	require.False(t, diags.HasError())
+
+	var runPolicies []githubRunPolicyDataSourceEntryModel
+	diags = state.RunPolicies.ElementsAs(ctx, &runPolicies, false)
+	require.False(t, diags.HasError())
+	require.Len(t, runPolicies, 2)
+
+	// Enabled + empty: expect empty set, not null.
+	var enabled githubRunPolicyDataSourcePolicyConfigModel
+	diags = runPolicies[0].PolicyConfig.As(ctx, &enabled, basetypes.ObjectAsOptions{})
+	require.False(t, diags.HasError())
+	assert.True(t, enabled.EnableHardenRunnerPolicy.ValueBool())
+	assert.False(t, enabled.HardenRunnerLabels.IsNull(), "enabled+empty must surface as empty set, not null")
+	assert.False(t, enabled.HardenRunnerCustomActions.IsNull())
+	assert.Empty(t, setStrings(t, enabled.HardenRunnerLabels))
+	assert.Empty(t, setStrings(t, enabled.HardenRunnerCustomActions))
+
+	// Disabled: null is the correct shape (attribute doesn't apply).
+	var disabled githubRunPolicyDataSourcePolicyConfigModel
+	diags = runPolicies[1].PolicyConfig.As(ctx, &disabled, basetypes.ObjectAsOptions{})
+	require.False(t, diags.HasError())
+	assert.False(t, disabled.EnableHardenRunnerPolicy.ValueBool())
+	assert.True(t, disabled.HardenRunnerLabels.IsNull())
+	assert.True(t, disabled.HardenRunnerCustomActions.IsNull())
 }
 
 type githubRunPolicyDataSourceEntryModel struct {

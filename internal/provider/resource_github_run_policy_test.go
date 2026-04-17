@@ -3,6 +3,7 @@ package provider
 import (
 	"context"
 	"fmt"
+	"reflect"
 	"testing"
 	"time"
 
@@ -108,8 +109,8 @@ func TestGithubRunPolicyResource_UpdateModelFromAPI(t *testing.T) {
 			DisallowedRunnerLabels: map[string]struct{}{
 				"self-hosted": {},
 			},
-			HardenRunnerLabels:        &hardenRunnerLabels,
-			HardenRunnerCustomActions: &hardenRunnerCustomActions,
+			HardenRunnerLabels:        hardenRunnerLabels,
+			HardenRunnerCustomActions: hardenRunnerCustomActions,
 		},
 	}
 
@@ -203,12 +204,8 @@ func TestGithubRunPolicyResource_UpdateSendsEmptyHardenRunnerSets(t *testing.T) 
 			if req.PolicyConfig.Owner != "test-org" || req.PolicyConfig.Name != "Updated Policy" {
 				return false
 			}
-			if req.PolicyConfig.HardenRunnerLabels == nil || req.PolicyConfig.HardenRunnerCustomActions == nil {
-				return false
-			}
-
-			return len(*req.PolicyConfig.HardenRunnerLabels) == 0 &&
-				len(*req.PolicyConfig.HardenRunnerCustomActions) == 0
+			return len(req.PolicyConfig.HardenRunnerLabels) == 0 &&
+				len(req.PolicyConfig.HardenRunnerCustomActions) == 0
 		})).
 		Return(&stepsecurityapi.RunPolicy{
 			Owner:         "test-org",
@@ -224,7 +221,7 @@ func TestGithubRunPolicyResource_UpdateSendsEmptyHardenRunnerSets(t *testing.T) 
 				Owner:                    "test-org",
 				Name:                     "Updated Policy",
 				EnableHardenRunnerPolicy: true,
-				// agent-api uses []string with `omitempty`, so cleared values can come back omitted.
+				// agent-api uses []string with `omitempty`, so cleared values can come back omitted (nil) or as empty slice — both mean "match all jobs" under PR 7814.
 				HardenRunnerLabels:        nil,
 				HardenRunnerCustomActions: nil,
 			},
@@ -233,8 +230,9 @@ func TestGithubRunPolicyResource_UpdateSendsEmptyHardenRunnerSets(t *testing.T) 
 
 	r := &githubRunPolicyResource{client: mockClient}
 	req := fwresource.UpdateRequest{
-		Plan:  testGithubRunPolicyPlan(t, plan),
-		State: testGithubRunPolicyState(t, state),
+		Config: testGithubRunPolicyConfig(t, plan),
+		Plan:   testGithubRunPolicyPlan(t, plan),
+		State:  testGithubRunPolicyState(t, state),
 	}
 	resp := &fwresource.UpdateResponse{
 		State: tfsdk.State{Schema: testGithubRunPolicyResourceSchema(t)},
@@ -258,6 +256,302 @@ func TestGithubRunPolicyResource_UpdateSendsEmptyHardenRunnerSets(t *testing.T) 
 	assert.False(t, policyConfig.HardenRunnerCustomActions.IsNull())
 	assert.Empty(t, setStrings(t, policyConfig.HardenRunnerLabels))
 	assert.Empty(t, setStrings(t, policyConfig.HardenRunnerCustomActions))
+}
+
+func TestGithubRunPolicyResource_UpdatePreservesUnmanagedHardenRunnerFields(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	previousLabels := []string{"ubuntu-step-security"}
+	previousActions := []string{"my-org/harden-runner"}
+	now := time.Date(2024, 2, 3, 4, 5, 6, 0, time.UTC)
+
+	state := githubRunPolicyResourceModel{
+		Owner:        types.StringValue("test-org"),
+		Name:         types.StringValue("Test Policy"),
+		PolicyID:     types.StringValue("policy-123"),
+		AllRepos:     types.BoolValue(true),
+		AllOrgs:      types.BoolValue(false),
+		Repositories: types.ListNull(types.StringType),
+		PolicyConfig: testRunPolicyConfigObjectValue(policyConfigModel{
+			Owner:                          types.StringValue("test-org"),
+			Name:                           types.StringValue("Test Policy"),
+			EnableActionPolicy:             types.BoolValue(false),
+			AllowedActions:                 types.MapNull(types.StringType),
+			EnableHardenRunnerPolicy:       types.BoolValue(true),
+			HardenRunnerLabels:             types.SetValueMust(types.StringType, testStringAttrValues(previousLabels)),
+			HardenRunnerCustomActions:      types.SetValueMust(types.StringType, testStringAttrValues(previousActions)),
+			EnableRunsOnPolicy:             types.BoolValue(false),
+			DisallowedRunnerLabels:         types.SetNull(types.StringType),
+			EnableSecretsPolicy:            types.BoolValue(false),
+			EnableCompromisedActionsPolicy: types.BoolValue(false),
+			IsDryRun:                       types.BoolValue(false),
+			ExemptedUsers:                  types.SetNull(types.StringType),
+		}),
+		CreatedBy:     types.StringValue("test-user"),
+		CreatedAt:     types.StringValue(now.Format(time.RFC3339)),
+		LastUpdatedBy: types.StringValue("test-user"),
+		LastUpdatedAt: types.StringValue(now.Format(time.RFC3339)),
+	}
+
+	plan := githubRunPolicyResourceModel{
+		Owner:        types.StringValue("test-org"),
+		Name:         types.StringValue("Updated Policy"),
+		PolicyID:     types.StringValue("policy-123"),
+		AllRepos:     types.BoolValue(true),
+		AllOrgs:      types.BoolValue(false),
+		Repositories: types.ListNull(types.StringType),
+		PolicyConfig: testRunPolicyConfigObjectValue(policyConfigModel{
+			Owner:                          types.StringValue("test-org"),
+			Name:                           types.StringValue("Updated Policy"),
+			EnableActionPolicy:             types.BoolValue(false),
+			AllowedActions:                 types.MapNull(types.StringType),
+			EnableHardenRunnerPolicy:       types.BoolValue(false),
+			HardenRunnerLabels:             types.SetNull(types.StringType),
+			HardenRunnerCustomActions:      types.SetNull(types.StringType),
+			EnableRunsOnPolicy:             types.BoolValue(false),
+			DisallowedRunnerLabels:         types.SetNull(types.StringType),
+			EnableSecretsPolicy:            types.BoolValue(false),
+			EnableCompromisedActionsPolicy: types.BoolValue(false),
+			IsDryRun:                       types.BoolValue(false),
+			ExemptedUsers:                  types.SetNull(types.StringType),
+		}),
+		CreatedBy:     types.StringNull(),
+		CreatedAt:     types.StringNull(),
+		LastUpdatedBy: types.StringNull(),
+		LastUpdatedAt: types.StringNull(),
+	}
+
+	config := githubRunPolicyResourceModel{
+		Owner:        types.StringValue("test-org"),
+		Name:         types.StringValue("Updated Policy"),
+		PolicyID:     types.StringNull(),
+		AllRepos:     types.BoolValue(true),
+		AllOrgs:      types.BoolNull(),
+		Repositories: types.ListNull(types.StringType),
+		PolicyConfig: testRunPolicyConfigObjectValue(policyConfigModel{
+			Owner:                          types.StringValue("test-org"),
+			Name:                           types.StringValue("Updated Policy"),
+			EnableActionPolicy:             types.BoolNull(),
+			AllowedActions:                 types.MapNull(types.StringType),
+			EnableHardenRunnerPolicy:       types.BoolNull(),
+			HardenRunnerLabels:             types.SetNull(types.StringType),
+			HardenRunnerCustomActions:      types.SetNull(types.StringType),
+			EnableRunsOnPolicy:             types.BoolNull(),
+			DisallowedRunnerLabels:         types.SetNull(types.StringType),
+			EnableSecretsPolicy:            types.BoolNull(),
+			EnableCompromisedActionsPolicy: types.BoolNull(),
+			IsDryRun:                       types.BoolNull(),
+			ExemptedUsers:                  types.SetNull(types.StringType),
+		}),
+		CreatedBy:     types.StringNull(),
+		CreatedAt:     types.StringNull(),
+		LastUpdatedBy: types.StringNull(),
+		LastUpdatedAt: types.StringNull(),
+	}
+
+	mockClient := &stepsecurityapi.MockStepSecurityClient{}
+	mockClient.
+		On("UpdateRunPolicy", mock.Anything, "test-org", "policy-123", mock.MatchedBy(func(req stepsecurityapi.UpdateRunPolicyRequest) bool {
+			if req.Name != "Updated Policy" || !req.PolicyConfig.EnableHardenRunnerPolicy {
+				return false
+			}
+			if req.PolicyConfig.Owner != "test-org" || req.PolicyConfig.Name != "Updated Policy" {
+				return false
+			}
+			return reflect.DeepEqual(req.PolicyConfig.HardenRunnerLabels, previousLabels) &&
+				reflect.DeepEqual(req.PolicyConfig.HardenRunnerCustomActions, previousActions)
+		})).
+		Return(&stepsecurityapi.RunPolicy{
+			Owner:         "test-org",
+			PolicyID:      "policy-123",
+			Name:          "Updated Policy",
+			CreatedBy:     "test-user",
+			CreatedAt:     now,
+			LastUpdatedBy: "reviewer",
+			LastUpdatedAt: now,
+			AllRepos:      true,
+			AllOrgs:       false,
+			PolicyConfig: stepsecurityapi.RunPolicyConfig{
+				Owner:                     "test-org",
+				Name:                      "Updated Policy",
+				EnableHardenRunnerPolicy:  true,
+				HardenRunnerLabels:        previousLabels,
+				HardenRunnerCustomActions: previousActions,
+			},
+		}, nil).
+		Once()
+
+	r := &githubRunPolicyResource{client: mockClient}
+	req := fwresource.UpdateRequest{
+		Config: testGithubRunPolicyConfig(t, config),
+		Plan:   testGithubRunPolicyPlan(t, plan),
+		State:  testGithubRunPolicyState(t, state),
+	}
+	resp := &fwresource.UpdateResponse{
+		State: tfsdk.State{Schema: testGithubRunPolicyResourceSchema(t)},
+	}
+
+	r.Update(ctx, req, resp)
+
+	require.False(t, resp.Diagnostics.HasError())
+	mockClient.AssertExpectations(t)
+}
+
+func TestGithubRunPolicyResource_EmptyLabelsMatchAllJobs(t *testing.T) {
+	t.Parallel()
+
+	// Documents the contract introduced in agent-api PR #7814: an empty
+	// harden_runner_labels list applies the policy to all jobs. The provider
+	// must round-trip `harden_runner_labels = []` without drift even though
+	// the backend struct serializes the empty slice as omitted JSON.
+	ctx := context.Background()
+	now := time.Date(2024, 5, 6, 7, 8, 9, 0, time.UTC)
+
+	plan := githubRunPolicyResourceModel{
+		Owner:        types.StringValue("test-org"),
+		Name:         types.StringValue("All Jobs Policy"),
+		PolicyID:     types.StringNull(),
+		AllRepos:     types.BoolValue(true),
+		AllOrgs:      types.BoolValue(false),
+		Repositories: types.ListNull(types.StringType),
+		PolicyConfig: testRunPolicyConfigObjectValue(policyConfigModel{
+			Owner:                          types.StringValue("test-org"),
+			Name:                           types.StringValue("All Jobs Policy"),
+			EnableActionPolicy:             types.BoolValue(false),
+			AllowedActions:                 types.MapNull(types.StringType),
+			EnableHardenRunnerPolicy:       types.BoolValue(true),
+			HardenRunnerLabels:             types.SetValueMust(types.StringType, []attr.Value{}),
+			HardenRunnerCustomActions:      types.SetValueMust(types.StringType, []attr.Value{}),
+			EnableRunsOnPolicy:             types.BoolValue(false),
+			DisallowedRunnerLabels:         types.SetNull(types.StringType),
+			EnableSecretsPolicy:            types.BoolValue(false),
+			EnableCompromisedActionsPolicy: types.BoolValue(false),
+			IsDryRun:                       types.BoolValue(false),
+			ExemptedUsers:                  types.SetNull(types.StringType),
+		}),
+		CreatedBy:     types.StringNull(),
+		CreatedAt:     types.StringNull(),
+		LastUpdatedBy: types.StringNull(),
+		LastUpdatedAt: types.StringNull(),
+	}
+
+	mockClient := &stepsecurityapi.MockStepSecurityClient{}
+	mockClient.
+		On("CreateRunPolicy", mock.Anything, "test-org", mock.MatchedBy(func(req stepsecurityapi.CreateRunPolicyRequest) bool {
+			if !req.PolicyConfig.EnableHardenRunnerPolicy {
+				return false
+			}
+			// nil and []string{} both signal "match all jobs" under PR 7814.
+			return len(req.PolicyConfig.HardenRunnerLabels) == 0 &&
+				len(req.PolicyConfig.HardenRunnerCustomActions) == 0
+		})).
+		Return(&stepsecurityapi.RunPolicy{
+			Owner:         "test-org",
+			PolicyID:      "policy-allmatch",
+			Name:          "All Jobs Policy",
+			CreatedBy:     "test-user",
+			CreatedAt:     now,
+			LastUpdatedBy: "test-user",
+			LastUpdatedAt: now,
+			AllRepos:      true,
+			PolicyConfig: stepsecurityapi.RunPolicyConfig{
+				Owner:                    "test-org",
+				Name:                     "All Jobs Policy",
+				EnableHardenRunnerPolicy: true,
+				// Backend round-trips the empty slice as omitted JSON, so the
+				// response carries nil — preservePreviousEmptySet must keep []
+				// in state to avoid spurious diffs.
+				HardenRunnerLabels:        nil,
+				HardenRunnerCustomActions: nil,
+			},
+		}, nil).
+		Once()
+
+	r := &githubRunPolicyResource{client: mockClient}
+	req := fwresource.CreateRequest{
+		Plan: testGithubRunPolicyPlan(t, plan),
+	}
+	resp := &fwresource.CreateResponse{
+		State: tfsdk.State{Schema: testGithubRunPolicyResourceSchema(t)},
+	}
+
+	r.Create(ctx, req, resp)
+
+	require.False(t, resp.Diagnostics.HasError())
+	mockClient.AssertExpectations(t)
+
+	var state githubRunPolicyResourceModel
+	diags := resp.State.Get(ctx, &state)
+	require.False(t, diags.HasError())
+
+	var policyConfig policyConfigModel
+	diags = state.PolicyConfig.As(ctx, &policyConfig, basetypes.ObjectAsOptions{})
+	require.False(t, diags.HasError())
+
+	assert.True(t, policyConfig.EnableHardenRunnerPolicy.ValueBool())
+	assert.False(t, policyConfig.HardenRunnerLabels.IsNull(), "empty set must not drift to null")
+	assert.False(t, policyConfig.HardenRunnerCustomActions.IsNull(), "empty set must not drift to null")
+	assert.Empty(t, setStrings(t, policyConfig.HardenRunnerLabels))
+	assert.Empty(t, setStrings(t, policyConfig.HardenRunnerCustomActions))
+}
+
+func TestGithubRunPolicyResource_ImportAllJobsPolicyLandsAsNull(t *testing.T) {
+	t.Parallel()
+
+	// Documents the import/fresh-Read UX for an "all jobs" Harden Runner
+	// policy (enabled + empty labels on the backend, arriving as nil due to
+	// JSON omitempty). On first Read, the resource has no prior config to
+	// anchor an empty set to, so state lands as null. The user's HCL must
+	// then set `harden_runner_labels = []` to reconcile on the next apply.
+	//
+	// This behavior is intentional: surfacing `[]` unconditionally would
+	// break the additive-only contract, since users who omit the attribute
+	// would see a perpetual drift (plan=null vs state=[]). The prior-state
+	// signal is what lets `preservePreviousEmptySet` choose correctly in the
+	// update path.
+	ctx := context.Background()
+	now := time.Date(2024, 7, 8, 9, 10, 11, 0, time.UTC)
+
+	model := &githubRunPolicyResourceModel{
+		Owner:    types.StringValue("test-org"),
+		PolicyID: types.StringValue("policy-allmatch"),
+	}
+	apiResponse := &stepsecurityapi.RunPolicy{
+		Owner:         "test-org",
+		PolicyID:      "policy-allmatch",
+		Name:          "All Jobs Policy",
+		CreatedBy:     "test-user",
+		CreatedAt:     now,
+		LastUpdatedBy: "test-user",
+		LastUpdatedAt: now,
+		AllRepos:      true,
+		PolicyConfig: stepsecurityapi.RunPolicyConfig{
+			Owner:                    "test-org",
+			Name:                     "All Jobs Policy",
+			EnableHardenRunnerPolicy: true,
+			// Backend stored an empty labels list; omitempty strips it from the
+			// response, so the provider sees a nil slice.
+			HardenRunnerLabels:        nil,
+			HardenRunnerCustomActions: nil,
+		},
+	}
+
+	r := &githubRunPolicyResource{}
+	var diags diag.Diagnostics
+	r.updateModelFromAPI(ctx, model, apiResponse, &diags)
+	require.False(t, diags.HasError())
+
+	var policyConfig policyConfigModel
+	asDiags := model.PolicyConfig.As(ctx, &policyConfig, basetypes.ObjectAsOptions{})
+	require.False(t, asDiags.HasError())
+
+	assert.True(t, policyConfig.EnableHardenRunnerPolicy.ValueBool())
+	// Expected: null, because there is no prior config to signal that the
+	// user wants an empty-set representation. One `terraform apply` after
+	// import with `harden_runner_labels = []` in HCL reconciles the state.
+	assert.True(t, policyConfig.HardenRunnerLabels.IsNull(), "fresh Read must land as null; prior-state signal drives the empty-set preservation")
+	assert.True(t, policyConfig.HardenRunnerCustomActions.IsNull())
 }
 
 func testGithubRunPolicyResourceSchema(t *testing.T) resourceschema.Schema {
@@ -289,6 +583,13 @@ func testGithubRunPolicyState(t *testing.T, model githubRunPolicyResourceModel) 
 	require.False(t, diags.HasError())
 
 	return state
+}
+
+func testGithubRunPolicyConfig(t *testing.T, model githubRunPolicyResourceModel) tfsdk.Config {
+	t.Helper()
+
+	plan := testGithubRunPolicyPlan(t, model)
+	return tfsdk.Config{Raw: plan.Raw, Schema: testGithubRunPolicyResourceSchema(t)}
 }
 
 func testRunPolicyConfigObjectValue(policyConfig policyConfigModel) types.Object {

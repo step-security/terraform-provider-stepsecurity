@@ -132,12 +132,12 @@ func (d *githubRunPoliciesDataSource) Schema(_ context.Context, _ datasource.Sch
 								"harden_runner_labels": schema.SetAttribute{
 									ElementType:         types.StringType,
 									Computed:            true,
-									MarkdownDescription: "Set of runner labels that require Harden Runner to be the first step.",
+									MarkdownDescription: "Set of runner labels that target Harden Runner enforcement. When `enable_harden_runner_policy` is true, an empty set means the policy applies to every job; a non-empty set filters to jobs whose `runs-on` matches at least one label. When the policy is disabled, this attribute is null.",
 								},
 								"harden_runner_custom_actions": schema.SetAttribute{
 									ElementType:         types.StringType,
 									Computed:            true,
-									MarkdownDescription: "Set of custom actions accepted as Harden Runner equivalents.",
+									MarkdownDescription: "Set of custom actions accepted as Harden Runner equivalents (in addition to `step-security/harden-runner`).",
 								},
 								"enable_runs_on_policy": schema.BoolAttribute{
 									Computed:            true,
@@ -246,23 +246,33 @@ func (d *githubRunPoliciesDataSource) Read(ctx context.Context, req datasource.R
 			policyConfigAttrs["allowed_actions"] = types.MapNull(types.StringType)
 		}
 
-		if policy.PolicyConfig.HardenRunnerLabels != nil {
-			hardenRunnerLabelsList := make([]attr.Value, len(*policy.PolicyConfig.HardenRunnerLabels))
-			for i, label := range *policy.PolicyConfig.HardenRunnerLabels {
+		// When the Harden Runner policy is enabled, surface an empty set (not
+		// null) for empty labels so consumers can see the documented
+		// "empty = all jobs" contract even though the backend response omits
+		// the field for empty values (JSON omitempty).
+		if len(policy.PolicyConfig.HardenRunnerLabels) > 0 {
+			hardenRunnerLabelsList := make([]attr.Value, len(policy.PolicyConfig.HardenRunnerLabels))
+			for i, label := range policy.PolicyConfig.HardenRunnerLabels {
 				hardenRunnerLabelsList[i] = types.StringValue(label)
 			}
 			setValue, _ := types.SetValue(types.StringType, hardenRunnerLabelsList)
+			policyConfigAttrs["harden_runner_labels"] = setValue
+		} else if policy.PolicyConfig.EnableHardenRunnerPolicy {
+			setValue, _ := types.SetValue(types.StringType, []attr.Value{})
 			policyConfigAttrs["harden_runner_labels"] = setValue
 		} else {
 			policyConfigAttrs["harden_runner_labels"] = types.SetNull(types.StringType)
 		}
 
-		if policy.PolicyConfig.HardenRunnerCustomActions != nil {
-			hardenRunnerCustomActionsList := make([]attr.Value, len(*policy.PolicyConfig.HardenRunnerCustomActions))
-			for i, action := range *policy.PolicyConfig.HardenRunnerCustomActions {
+		if len(policy.PolicyConfig.HardenRunnerCustomActions) > 0 {
+			hardenRunnerCustomActionsList := make([]attr.Value, len(policy.PolicyConfig.HardenRunnerCustomActions))
+			for i, action := range policy.PolicyConfig.HardenRunnerCustomActions {
 				hardenRunnerCustomActionsList[i] = types.StringValue(action)
 			}
 			setValue, _ := types.SetValue(types.StringType, hardenRunnerCustomActionsList)
+			policyConfigAttrs["harden_runner_custom_actions"] = setValue
+		} else if policy.PolicyConfig.EnableHardenRunnerPolicy {
+			setValue, _ := types.SetValue(types.StringType, []attr.Value{})
 			policyConfigAttrs["harden_runner_custom_actions"] = setValue
 		} else {
 			policyConfigAttrs["harden_runner_custom_actions"] = types.SetNull(types.StringType)
