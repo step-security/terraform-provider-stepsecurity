@@ -53,6 +53,20 @@ output "runner_policies" {
   ]
 }
 
+output "harden_runner_policies" {
+  description = "Policies that require Harden Runner to be the first step on matching runners"
+  value = [
+    for policy in data.stepsecurity_github_run_policies.all_policies.run_policies :
+    {
+      name                         = policy.name
+      policy_id                    = policy.policy_id
+      harden_runner_labels         = policy.policy_config.harden_runner_labels
+      harden_runner_custom_actions = policy.policy_config.harden_runner_custom_actions
+    }
+    if policy.policy_config.enable_harden_runner_policy
+  ]
+}
+
 output "secrets_policies" {
   description = "Policies that prevent secrets exfiltration"
   value = [
