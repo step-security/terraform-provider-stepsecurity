@@ -49,7 +49,7 @@ resource "stepsecurity_policy_driven_pr" "repo_level_config" {
     secure_docker_file                            = true
     actions_to_exempt_while_pinning               = ["actions/checkout", "actions/setup-node"]
     actions_to_replace_with_step_security_actions = ["enricomi/publish-unit-test-result-action"]
-    actions_exempted_from_replacement             = ["fkirc/skip-*", "amannn/*"] // either actions_to_replace_with_step_security_actions or actions_exempted_from_replacement can be set at a time
+    actions_exempted_from_replacement             = ["fkirc/skip-*", "amannn/*"] // either actions_to_replace_with_step_security_actions or actions_exempted_from_replacement can be set at a time unless its *
     images_to_exempt_while_pinning                = ["amazon*"]
 
     # v2-only features (requires policy-driven PR v2 to be enabled)
@@ -121,6 +121,7 @@ resource "stepsecurity_policy_driven_pr" "org_level_with_exclusions" {
     restrict_github_token_permissions             = false
     secure_docker_file                            = false
     actions_to_replace_with_step_security_actions = ["*"] // all actions with stepsecurity actions will be replaced
+    actions_exempted_from_replacement             = ["fkirc/skip-*", "amannn/*"] // all actions except these will be replaced since its specified 
   }
 }
 

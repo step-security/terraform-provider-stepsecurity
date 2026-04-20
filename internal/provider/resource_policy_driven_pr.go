@@ -668,12 +668,16 @@ func (r *policyDrivenPRResource) ValidateConfig(ctx context.Context, req resourc
 		}
 
 		hasExemptedFromReplacement := !options.ExemptedFromReplacement.IsNull() && !options.ExemptedFromReplacement.IsUnknown() && len(options.ExemptedFromReplacement.Elements()) > 0
-		hasActionsToReplace := !options.ActionsToReplaceWithStepSecurityActions.IsNull() && !options.ActionsToReplaceWithStepSecurityActions.IsUnknown() && len(options.ActionsToReplaceWithStepSecurityActions.Elements()) > 0
-		if hasExemptedFromReplacement && hasActionsToReplace {
-			resp.Diagnostics.AddError(
-				"Invalid Configuration",
-				"actions_exempted_from_replacement and actions_to_replace_with_step_security_actions are mutually exclusive — only one can be set at a time",
-			)
+		if hasExemptedFromReplacement {
+			// actions_exempted_from_replacement requires actions_to_replace_with_step_security_actions = ["*"]
+			actionsToReplaceElems := options.ActionsToReplaceWithStepSecurityActions.Elements()
+			isWildcard := len(actionsToReplaceElems) == 1 && actionsToReplaceElems[0].(types.String).ValueString() == "*"
+			if !isWildcard {
+				resp.Diagnostics.AddError(
+					"Invalid Configuration",
+					"actions_exempted_from_replacement can only be used when actions_to_replace_with_step_security_actions is [\"*\"]",
+				)
+			}
 		}
 
 		if !options.HardenRunnerConfig.IsNull() && !options.HardenRunnerConfig.IsUnknown() {
