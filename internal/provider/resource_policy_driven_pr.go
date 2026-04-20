@@ -162,7 +162,7 @@ func (r *policyDrivenPRResource) Schema(_ context.Context, _ resource.SchemaRequ
 							),
 						),
 					},
-					"exempted_from_replacement": schema.ListAttribute{
+					"actions_exempted_from_replacement": schema.ListAttribute{
 						ElementType: types.StringType,
 						Optional:    true,
 						Computed:    true,
@@ -455,7 +455,7 @@ func (r *policyDrivenPRResource) ImportState(ctx context.Context, req resource.I
 			"actions_to_exempt_while_pinning":               types.ListType{ElemType: types.StringType},
 			"images_to_exempt_while_pinning":                types.ListType{ElemType: types.StringType},
 			"actions_to_replace_with_step_security_actions": types.ListType{ElemType: types.StringType},
-			"exempted_from_replacement":                     types.ListType{ElemType: types.StringType},
+			"actions_exempted_from_replacement":                     types.ListType{ElemType: types.StringType},
 			"update_precommit_file":                         types.ListType{ElemType: types.StringType},
 			"package_ecosystem": types.ListType{
 				ElemType: types.ObjectType{
@@ -487,7 +487,7 @@ func (r *policyDrivenPRResource) ImportState(ctx context.Context, req resource.I
 			"actions_to_exempt_while_pinning":               exemptList,
 			"images_to_exempt_while_pinning":                exemptImagesList,
 			"actions_to_replace_with_step_security_actions": replaceList,
-			"exempted_from_replacement":                     exemptedFromReplacementList,
+			"actions_exempted_from_replacement":                     exemptedFromReplacementList,
 			"update_precommit_file":                         updatePrecommitFileList,
 			"package_ecosystem":                             packageEcosystemList,
 			"update_existing_configuration": types.BoolValue(func() bool {
@@ -559,7 +559,7 @@ type autoRemdiationOptionsModel struct {
 	ActionsToExemptWhilePinning             types.List   `tfsdk:"actions_to_exempt_while_pinning"`
 	ImagesToExemptWhilePinning              types.List   `tfsdk:"images_to_exempt_while_pinning"`
 	ActionsToReplaceWithStepSecurityActions types.List   `tfsdk:"actions_to_replace_with_step_security_actions"`
-	ExemptedFromReplacement                 types.List   `tfsdk:"exempted_from_replacement"`
+	ExemptedFromReplacement                 types.List   `tfsdk:"actions_exempted_from_replacement"`
 	UpdatePrecommitFile                     types.List   `tfsdk:"update_precommit_file"`
 	PackageEcosystem                        types.List   `tfsdk:"package_ecosystem"`
 	UpdateExistingConfiguration             types.Bool   `tfsdk:"update_existing_configuration"`
@@ -672,7 +672,7 @@ func (r *policyDrivenPRResource) ValidateConfig(ctx context.Context, req resourc
 		if hasExemptedFromReplacement && hasActionsToReplace {
 			resp.Diagnostics.AddError(
 				"Invalid Configuration",
-				"exempted_from_replacement and actions_to_replace_with_step_security_actions are mutually exclusive — only one can be set at a time",
+				"actions_exempted_from_replacement and actions_to_replace_with_step_security_actions are mutually exclusive — only one can be set at a time",
 			)
 		}
 
@@ -1723,7 +1723,7 @@ func (r *policyDrivenPRResource) updatePolicyDrivenPRState(ctx context.Context, 
 			"actions_to_exempt_while_pinning":               types.ListType{ElemType: types.StringType},
 			"images_to_exempt_while_pinning":                types.ListType{ElemType: types.StringType},
 			"actions_to_replace_with_step_security_actions": types.ListType{ElemType: types.StringType},
-			"exempted_from_replacement":                     types.ListType{ElemType: types.StringType},
+			"actions_exempted_from_replacement":                     types.ListType{ElemType: types.StringType},
 			"update_precommit_file":                         types.ListType{ElemType: types.StringType},
 			"package_ecosystem": types.ListType{
 				ElemType: types.ObjectType{
@@ -1755,7 +1755,7 @@ func (r *policyDrivenPRResource) updatePolicyDrivenPRState(ctx context.Context, 
 			"actions_to_exempt_while_pinning":               exemptList,
 			"images_to_exempt_while_pinning":                exemptImagesList,
 			"actions_to_replace_with_step_security_actions": replaceList,
-			"exempted_from_replacement":                     exemptedFromReplacementList,
+			"actions_exempted_from_replacement":                     exemptedFromReplacementList,
 			"update_precommit_file":                         updatePrecommitFileList,
 			"package_ecosystem":                             packageEcosystemList,
 			"update_existing_configuration": types.BoolValue(func() bool {

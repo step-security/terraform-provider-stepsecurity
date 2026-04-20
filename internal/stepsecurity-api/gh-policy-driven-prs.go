@@ -166,7 +166,8 @@ func (c *APIClient) CreatePolicyDrivenPRPolicy(ctx context.Context, createReques
 		}
 	}
 
-	if len(createRequest.AutoRemdiationOptions.ActionsToReplaceWithStepSecurityActions) > 0 {
+	if len(createRequest.AutoRemdiationOptions.ActionsToReplaceWithStepSecurityActions) > 0 ||
+		len(createRequest.AutoRemdiationOptions.ExemptedFromReplacement) > 0 {
 		controlChecksConfig["MaintainedGitHubActionsShouldBeUsed"] = issuePRConfig{
 			TriggerGithubIssue: createIssue,
 			TriggerGithubPr:    createPR,
