@@ -65,6 +65,7 @@ type controlSettings struct {
 	ExemptedActions                     []string                             `json:"exempted_actions,omitempty"`
 	ActionsToReplace                    map[string]string                    `json:"actions_to_replace,omitempty"`
 	ExemptedFromReplacement             []string                             `json:"exempted_from_replacement,omitempty"`
+	ReplaceAllActions                   *bool                                `json:"replace_all_actions,omitempty"`
 	UpdatePrecommitFile                 map[string]bool                      `json:"update_precommit_file,omitempty"`
 	PackageEcosystem                    []DependabotConfig                   `json:"package_ecosystem,omitempty"`
 	Subtractive                         *bool                                `json:"subtractive,omitempty"`
@@ -128,9 +129,23 @@ func (c *APIClient) CreatePolicyDrivenPRPolicy(ctx context.Context, createReques
 	}
 
 	// Build actions to replace map
+	// If the list is exactly ["*"], treat it as replace-all instead of a literal map entry
 	actionsToReplace := make(map[string]string)
-	for _, action := range createRequest.AutoRemdiationOptions.ActionsToReplaceWithStepSecurityActions {
-		actionsToReplace[action] = ""
+	var replaceAllActions *bool
+	if len(createRequest.AutoRemdiationOptions.ActionsToReplaceWithStepSecurityActions) == 1 &&
+		createRequest.AutoRemdiationOptions.ActionsToReplaceWithStepSecurityActions[0] == "*" {
+		t := true
+		replaceAllActions = &t
+	} else {
+		for _, action := range createRequest.AutoRemdiationOptions.ActionsToReplaceWithStepSecurityActions {
+			actionsToReplace[action] = ""
+		}
+	}
+
+	// If exempted_from_replacement is set, replace_all_actions must also be true
+	if len(createRequest.AutoRemdiationOptions.ExemptedFromReplacement) > 0 {
+		t := true
+		replaceAllActions = &t
 	}
 
 	// Build control checks config
@@ -204,6 +219,7 @@ func (c *APIClient) CreatePolicyDrivenPRPolicy(ctx context.Context, createReques
 		ExemptedActions:                     createRequest.AutoRemdiationOptions.ActionsToExemptWhilePinning,
 		ActionsToReplace:                    actionsToReplace,
 		ExemptedFromReplacement:             createRequest.AutoRemdiationOptions.ExemptedFromReplacement,
+		ReplaceAllActions:                   replaceAllActions,
 		UpdatePrecommitFile:                 updatePrecommitFileMap,
 		PackageEcosystem:                    createRequest.AutoRemdiationOptions.PackageEcosystem,
 		Subtractive:                         createRequest.AutoRemdiationOptions.Subtractive,
