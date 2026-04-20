@@ -87,8 +87,8 @@ resource "stepsecurity_policy_driven_pr" "repo_level_config" {
       "google-github-actions/auth@v2" : "ba79af03959ebeac9769e648f473a284504d9193",
       "google-github-actions/auth@v3" : "7c6bc770dae815cd3e89ee6cdf493a5fab2cc093"
     },
-    update_existing_configuration = true # update existing dependabot configurations
-    replace_by_major_tag          = true # actions in actions_to_replace_with_step_security_actions are replaced only when the major tag matches
+    update_existing_configuration     = true # update existing dependabot configurations
+    replace_action_on_major_tag_match = true # actions in actions_to_replace_with_step_security_actions are replaced only when the major tag matches
   }
 }
 
@@ -179,7 +179,7 @@ Optional:
 - `images_to_exempt_while_pinning` (List of String) List of Docker images to exempt while pinning images to SHA. When exempted, the image will not be pinned to SHA.
 - `package_ecosystem` (Attributes List) List of package ecosystems to enable for dependency updates. (see [below for nested schema](#nestedatt--auto_remediation_options--package_ecosystem))
 - `pin_actions_to_sha` (Boolean) When enabled, this creates a PR/issue to pin actions to SHA. GitHub's Security Hardening guide recommends pinning actions to full length commit for third party actions.
-- `replace_by_major_tag` (Boolean) When enabled, actions in actions_to_replace_with_step_security_actions are replaced only when the major tag matches. Requires actions_to_replace_with_step_security_actions to be non-empty.
+- `replace_action_on_major_tag_match` (Boolean) When enabled, actions in actions_to_replace_with_step_security_actions are replaced only when the major tag matches. Requires actions_to_replace_with_step_security_actions to be non-empty.
 - `restrict_github_token_permissions` (Boolean) When enabled, this creates a PR/issue to restrict GitHub token permissions. GitHub's Security Hardening guide recommends restricting permissions to the minimum required
 - `secure_docker_file` (Boolean) When enabled, this creates a PR/issue to secure Dockerfile by pinning base images to SHA.
 - `update_existing_configuration` (Boolean) When enabled, dependabot will remove existing entries that are not in the package_ecosystem config.
