@@ -73,7 +73,7 @@ resource "stepsecurity_policy_driven_pr" "repo_level_config" {
       "google-github-actions/auth@v2" : "ba79af03959ebeac9769e648f473a284504d9193",
       "google-github-actions/auth@v3" : "7c6bc770dae815cd3e89ee6cdf493a5fab2cc093"
     },
-    update_existing_configuration     = true # update existing dependabot configurations
+    update_existing_configuration = true # update existing dependabot configurations
   }
 }
 
