@@ -120,7 +120,7 @@ resource "stepsecurity_policy_driven_pr" "org_level_with_exclusions" {
     pin_actions_to_sha                            = true
     restrict_github_token_permissions             = false
     secure_docker_file                            = false
-    actions_to_replace_with_step_security_actions = ["*"] // all actions with stepsecurity actions will be replaced
+    actions_to_replace_with_step_security_actions = ["*"]                        // all actions with stepsecurity actions will be replaced
     actions_exempted_from_replacement             = ["fkirc/skip-*", "amannn/*"] // all actions except these will be replaced since its specified 
   }
 }
