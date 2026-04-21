@@ -48,12 +48,12 @@ func TestAccGithubRunPolicyResource(t *testing.T) {
 			},
 			// Update with pinned actions and Read testing
 			{
-				Config: testAccGithubRunPolicyResourceConfigWithPinning("test-org", "Pinned Actions Policy"),
+				Config: testAccGithubRunPolicyResourceConfigWithPinning("test-org", "Allowed Actions Policy - Pinned Actions Enforcement"),
 				Check: resource.ComposeAggregateTestCheckFunc(
-					resource.TestCheckResourceAttr("stepsecurity_github_run_policy.test", "name", "Pinned Actions Policy"),
+					resource.TestCheckResourceAttr("stepsecurity_github_run_policy.test", "name", "Allowed Actions Policy - Pinned Actions Enforcement"),
 					resource.TestCheckResourceAttr("stepsecurity_github_run_policy.test", "policy_config.enable_action_policy", "true"),
 					resource.TestCheckResourceAttr("stepsecurity_github_run_policy.test", "policy_config.require_pinned_actions", "true"),
-					resource.TestCheckResourceAttr("stepsecurity_github_run_policy.test", "policy_config.pinned_actions_exemptions.#", "1"),
+					resource.TestCheckResourceAttr("stepsecurity_github_run_policy.test", "policy_config.actions_to_exempt_while_pinning.#", "1"),
 				),
 			},
 			// Delete testing automatically occurs in TestCase
@@ -245,7 +245,7 @@ func TestGithubRunPolicyResource_PinnedActionsRequestSerialization(t *testing.T)
 }
 
 func TestGithubRunPolicyResource_PinnedActionsRequestSerialization_NullExemptions(t *testing.T) {
-	// Verify that when pinned_actions_exemptions is null, the API request
+	// Verify that when actions_to_exempt_while_pinning is null, the API request
 	// field remains nil (not an empty slice).
 	policyConfig := policyConfigModel{
 		Owner:                          types.StringValue("test-org"),
@@ -307,7 +307,7 @@ resource "stepsecurity_github_run_policy" "test" {
     name                      = %[2]q
     enable_action_policy      = true
     require_pinned_actions    = true
-    pinned_actions_exemptions = ["actions/*"]
+    actions_to_exempt_while_pinning = ["actions/*"]
     allowed_actions = {
       "actions/checkout" = "allow"
     }

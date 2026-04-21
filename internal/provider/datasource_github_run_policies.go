@@ -146,7 +146,7 @@ func (d *githubRunPoliciesDataSource) Schema(_ context.Context, _ datasource.Sch
 									Computed:            true,
 									MarkdownDescription: "Whether all actions are required to be pinned to full-length commit SHAs.",
 								},
-								"pinned_actions_exemptions": schema.SetAttribute{
+								"actions_to_exempt_while_pinning": schema.SetAttribute{
 									ElementType:         types.StringType,
 									Computed:            true,
 									MarkdownDescription: "Set of actions exempt from pinning requirements.",
@@ -260,9 +260,9 @@ func (d *githubRunPoliciesDataSource) Read(ctx context.Context, req datasource.R
 				pinnedExemptionsList[i] = types.StringValue(exemption)
 			}
 			setValue, _ := types.SetValue(types.StringType, pinnedExemptionsList)
-			policyConfigAttrs["pinned_actions_exemptions"] = setValue
+			policyConfigAttrs["actions_to_exempt_while_pinning"] = setValue
 		} else {
-			policyConfigAttrs["pinned_actions_exemptions"] = types.SetNull(types.StringType)
+			policyConfigAttrs["actions_to_exempt_while_pinning"] = types.SetNull(types.StringType)
 		}
 
 		// Create the policy config object
@@ -276,7 +276,7 @@ func (d *githubRunPoliciesDataSource) Read(ctx context.Context, req datasource.R
 			"enable_secrets_policy":             types.BoolType,
 			"enable_compromised_actions_policy": types.BoolType,
 			"require_pinned_actions":            types.BoolType,
-			"pinned_actions_exemptions":         types.SetType{ElemType: types.StringType},
+			"actions_to_exempt_while_pinning":   types.SetType{ElemType: types.StringType},
 			"is_dry_run":                        types.BoolType,
 		}
 
@@ -340,7 +340,7 @@ func (d *githubRunPoliciesDataSource) Read(ctx context.Context, req datasource.R
 			"enable_secrets_policy":             types.BoolType,
 			"enable_compromised_actions_policy": types.BoolType,
 			"require_pinned_actions":            types.BoolType,
-			"pinned_actions_exemptions":         types.SetType{ElemType: types.StringType},
+			"actions_to_exempt_while_pinning":   types.SetType{ElemType: types.StringType},
 			"is_dry_run":                        types.BoolType,
 		}},
 	}

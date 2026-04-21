@@ -78,7 +78,7 @@ func TestGithubRunPoliciesDataSource_ReadMappingWithPinnedActions(t *testing.T) 
 	}
 	pinnedSet, diags := types.SetValue(types.StringType, pinnedExemptionsList)
 	assert.False(t, diags.HasError())
-	policyConfigAttrs["pinned_actions_exemptions"] = pinnedSet
+	policyConfigAttrs["actions_to_exempt_while_pinning"] = pinnedSet
 
 	// This is the critical check: the type map must include all fields or ObjectValue panics
 	policyConfigAttrTypes := map[string]attr.Type{
@@ -91,7 +91,7 @@ func TestGithubRunPoliciesDataSource_ReadMappingWithPinnedActions(t *testing.T) 
 		"enable_secrets_policy":             types.BoolType,
 		"enable_compromised_actions_policy": types.BoolType,
 		"require_pinned_actions":            types.BoolType,
-		"pinned_actions_exemptions":         types.SetType{ElemType: types.StringType},
+		"actions_to_exempt_while_pinning":   types.SetType{ElemType: types.StringType},
 		"is_dry_run":                        types.BoolType,
 	}
 

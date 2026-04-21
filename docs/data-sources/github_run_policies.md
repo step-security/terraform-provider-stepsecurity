@@ -184,6 +184,7 @@ Read-Only:
 
 Read-Only:
 
+- `actions_to_exempt_while_pinning` (Set of String) Set of actions exempt from pinning requirements.
 - `allowed_actions` (Map of String) Map of allowed actions and their permissions.
 - `disallowed_runner_labels` (Set of String) Set of disallowed runner labels.
 - `enable_action_policy` (Boolean) Whether the action policy is enabled.
@@ -193,5 +194,4 @@ Read-Only:
 - `is_dry_run` (Boolean) Whether this policy is in dry-run mode.
 - `name` (String) The name of the policy configuration.
 - `owner` (String) The owner of the policy configuration.
-- `pinned_actions_exemptions` (Set of String) Set of actions exempt from pinning requirements.
 - `require_pinned_actions` (Boolean) Whether all actions are required to be pinned to full-length commit SHAs.

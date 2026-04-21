@@ -226,18 +226,18 @@ resource "stepsecurity_github_run_policy" "repo_specific_runner_policy" {
   }
 }
 
-# Pinned Actions Policy Example (all_repos) - Require all actions to be pinned to SHAs
+# Allowed Actions Policy Example (all_repos, pinned actions enforcement)
 resource "stepsecurity_github_run_policy" "pinned_actions_policy" {
   owner     = "my-org"
-  name      = "Pinned Actions Policy"
+  name      = "Allowed Actions Policy - Pinned Actions Enforcement"
   all_repos = true
 
   policy_config = {
-    owner                     = "my-org"
-    name                      = "Pinned Actions Policy"
-    enable_action_policy      = true
-    require_pinned_actions    = true
-    pinned_actions_exemptions = ["actions/*", "my-trusted-org/*"]
+    owner                           = "my-org"
+    name                            = "Allowed Actions Policy - Pinned Actions Enforcement"
+    enable_action_policy            = true
+    require_pinned_actions          = true
+    actions_to_exempt_while_pinning = ["actions/*", "my-trusted-org/*"]
     allowed_actions = {
       "actions/checkout"            = "allow"
       "step-security/harden-runner" = "allow"
@@ -245,15 +245,15 @@ resource "stepsecurity_github_run_policy" "pinned_actions_policy" {
   }
 }
 
-# Pinned Actions Policy Example (dry_run) - Test pinned actions policy without enforcement
+# Allowed Actions Policy Example (dry_run, pinned actions enforcement)
 resource "stepsecurity_github_run_policy" "pinned_actions_policy_dry_run" {
   owner     = "my-org"
-  name      = "Pinned Actions Policy - Dry Run"
+  name      = "Allowed Actions Policy - Pinned Actions Enforcement - Dry Run"
   all_repos = true
 
   policy_config = {
     owner                  = "my-org"
-    name                   = "Pinned Actions Policy - Dry Run"
+    name                   = "Allowed Actions Policy - Pinned Actions Enforcement - Dry Run"
     enable_action_policy   = true
     require_pinned_actions = true
     allowed_actions = {

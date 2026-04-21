@@ -66,7 +66,7 @@ type policyConfigModel struct {
 	EnableSecretsPolicy            types.Bool   `tfsdk:"enable_secrets_policy"`
 	EnableCompromisedActionsPolicy types.Bool   `tfsdk:"enable_compromised_actions_policy"`
 	RequirePinnedActions           types.Bool   `tfsdk:"require_pinned_actions"`
-	PinnedActionsExemptions        types.Set    `tfsdk:"pinned_actions_exemptions"`
+	PinnedActionsExemptions        types.Set    `tfsdk:"actions_to_exempt_while_pinning"`
 	IsDryRun                       types.Bool   `tfsdk:"is_dry_run"`
 	ExemptedUsers                  types.Set    `tfsdk:"exempted_users"`
 }
@@ -174,7 +174,7 @@ func (r *githubRunPolicyResource) Schema(_ context.Context, _ resource.SchemaReq
 						Default:             booldefault.StaticBool(false),
 						MarkdownDescription: "Whether to require all actions to be pinned to full-length commit SHAs. Sub-feature of the allowed actions policy — only meaningful when `enable_action_policy` is true.",
 					},
-					"pinned_actions_exemptions": schema.SetAttribute{
+					"actions_to_exempt_while_pinning": schema.SetAttribute{
 						ElementType:         types.StringType,
 						Optional:            true,
 						MarkdownDescription: "Set of actions exempt from pinning requirements. Supports exact match (e.g., 'actions/checkout'), name-only match, and owner wildcard (e.g., 'my-org/*').",
@@ -625,9 +625,9 @@ func (r *githubRunPolicyResource) updateModelFromAPI(_ context.Context, model *g
 		}
 		setValue, setDiags := types.SetValue(types.StringType, pinnedExemptionsList)
 		diags.Append(setDiags...)
-		policyConfigAttrs["pinned_actions_exemptions"] = setValue
+		policyConfigAttrs["actions_to_exempt_while_pinning"] = setValue
 	} else {
-		policyConfigAttrs["pinned_actions_exemptions"] = types.SetNull(types.StringType)
+		policyConfigAttrs["actions_to_exempt_while_pinning"] = types.SetNull(types.StringType)
 	}
 
 	// Handle exempted users set
@@ -654,7 +654,7 @@ func (r *githubRunPolicyResource) updateModelFromAPI(_ context.Context, model *g
 		"enable_secrets_policy":             types.BoolType,
 		"enable_compromised_actions_policy": types.BoolType,
 		"require_pinned_actions":            types.BoolType,
-		"pinned_actions_exemptions":         types.SetType{ElemType: types.StringType},
+		"actions_to_exempt_while_pinning":   types.SetType{ElemType: types.StringType},
 		"is_dry_run":                        types.BoolType,
 		"exempted_users":                    types.SetType{ElemType: types.StringType},
 	}
