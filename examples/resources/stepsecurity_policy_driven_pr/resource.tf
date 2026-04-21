@@ -48,7 +48,8 @@ resource "stepsecurity_policy_driven_pr" "repo_level_config" {
     restrict_github_token_permissions             = true
     secure_docker_file                            = true
     actions_to_exempt_while_pinning               = ["actions/checkout", "actions/setup-node"]
-    actions_to_replace_with_step_security_actions = ["enricomi/publish-unit-test-result-action"]
+    actions_to_replace_with_step_security_actions = ["enricomi/publish-unit-test-result-action", "tj-actions/changed-files"]
+    replace_action_on_major_tag_match             = true                         # actions in actions_to_replace_with_step_security_actions are replaced only when the major tag matches
     actions_exempted_from_replacement             = ["fkirc/skip-*", "amannn/*"] // either actions_to_replace_with_step_security_actions or actions_exempted_from_replacement can be set at a time unless its *
     images_to_exempt_while_pinning                = ["amazon*"]
 

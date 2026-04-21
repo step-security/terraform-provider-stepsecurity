@@ -35,6 +35,7 @@ type AutoRemdiationOptions struct {
 	ActionsToExemptWhilePinning             []string            `json:"actions_to_exempt_while_pinning"`
 	ImagesToExemptWhilePinning              []string            `json:"images_to_exempt_while_pinning"`
 	ActionsToReplaceWithStepSecurityActions []string            `json:"actions_to_replace_with_step_security_actions"`
+	ReplaceByMajorTag                       *bool               `json:"replace_by_major_tag,omitempty"`
 	ExemptedFromReplacement                 []string            `json:"exempted_from_replacement,omitempty"`
 	UpdatePrecommitFile                     []string            `json:"update_precommit_file,omitempty"`
 	PackageEcosystem                        []DependabotConfig  `json:"package_ecosystem,omitempty"`
@@ -64,6 +65,7 @@ type issuePRConfig struct {
 type controlSettings struct {
 	ExemptedActions                     []string                             `json:"exempted_actions,omitempty"`
 	ActionsToReplace                    map[string]string                    `json:"actions_to_replace,omitempty"`
+	ReplaceByMajorTag                   *bool                                `json:"replace_by_major_tag,omitempty"`
 	ExemptedFromReplacement             []string                             `json:"exempted_from_replacement,omitempty"`
 	ReplaceAllActions                   *bool                                `json:"replace_all_actions,omitempty"`
 	UpdatePrecommitFile                 map[string]bool                      `json:"update_precommit_file,omitempty"`
@@ -218,6 +220,7 @@ func (c *APIClient) CreatePolicyDrivenPRPolicy(ctx context.Context, createReques
 	cs := &controlSettings{
 		ExemptedActions:                     createRequest.AutoRemdiationOptions.ActionsToExemptWhilePinning,
 		ActionsToReplace:                    actionsToReplace,
+		ReplaceByMajorTag:                   createRequest.AutoRemdiationOptions.ReplaceByMajorTag,
 		ExemptedFromReplacement:             createRequest.AutoRemdiationOptions.ExemptedFromReplacement,
 		ReplaceAllActions:                   replaceAllActions,
 		UpdatePrecommitFile:                 updatePrecommitFileMap,
@@ -425,6 +428,7 @@ func (c *APIClient) GetPolicyDrivenPRPolicy(ctx context.Context, owner string, r
 		ActionsToExemptWhilePinning:             selectedConfig.ControlSettings.ExemptedActions,
 		ImagesToExemptWhilePinning:              selectedConfig.ControlSettings.ExemptedImages,
 		ActionsToReplaceWithStepSecurityActions: actionsToReplace,
+		ReplaceByMajorTag:                       selectedConfig.ControlSettings.ReplaceByMajorTag,
 		ExemptedFromReplacement:                 selectedConfig.ControlSettings.ExemptedFromReplacement,
 		UpdatePrecommitFile:                     updatePrecommitFiles,
 		PackageEcosystem:                        selectedConfig.ControlSettings.PackageEcosystem,
@@ -641,6 +645,7 @@ func (c *APIClient) DiscoverPolicyDrivenPRConfig(ctx context.Context, owner stri
 		ActionsToExemptWhilePinning:             selectedConfig.ControlSettings.ExemptedActions,
 		ImagesToExemptWhilePinning:              selectedConfig.ControlSettings.ExemptedImages,
 		ActionsToReplaceWithStepSecurityActions: actionsToReplace,
+		ReplaceByMajorTag:                       selectedConfig.ControlSettings.ReplaceByMajorTag,
 		ExemptedFromReplacement:                 selectedConfig.ControlSettings.ExemptedFromReplacement,
 		UpdatePrecommitFile:                     updatePrecommitFiles,
 		PackageEcosystem:                        selectedConfig.ControlSettings.PackageEcosystem,
