@@ -88,6 +88,11 @@ resource "stepsecurity_policy_driven_pr" "repo_level_config" {
       "google-github-actions/auth@v3" : "7c6bc770dae815cd3e89ee6cdf493a5fab2cc093"
     },
     update_existing_configuration = true # update existing dependabot configurations
+    harden_runner_config = {
+      update_existing_configuration = false
+      config                        = "- name: Harden the runner (Audit all outbound calls)\n  uses: step-security/custom-agent@v2\n  with:\n    egress-policy: audit\n    allowed-endpoints: >\n      github.com:443\n"
+      target_runner_labels          = ["ubuntu-latest", "macos-latest"]
+    }
   }
 }
 
@@ -175,6 +180,7 @@ Optional:
 - `create_issue` (Boolean) Create an issue when a finding is detected.
 - `create_pr` (Boolean) Create a PR when a finding is detected.
 - `harden_github_hosted_runner` (Boolean) When enabled, this creates a PR/issue to install security agent on the GitHub-hosted runner to prevent exfiltration of credentials, monitor the build process, and detect compromised dependencies.
+- `harden_runner_config` (Attributes) Configuration for harden runner. When not provided, the default harden runner config will be applied. (see [below for nested schema](#nestedatt--auto_remediation_options--harden_runner_config))
 - `images_to_exempt_while_pinning` (List of String) List of Docker images to exempt while pinning images to SHA. When exempted, the image will not be pinned to SHA.
 - `package_ecosystem` (Attributes List) List of package ecosystems to enable for dependency updates. (see [below for nested schema](#nestedatt--auto_remediation_options--package_ecosystem))
 - `pin_actions_to_sha` (Boolean) When enabled, this creates a PR/issue to pin actions to SHA. GitHub's Security Hardening guide recommends pinning actions to full length commit for third party actions.
@@ -182,6 +188,16 @@ Optional:
 - `secure_docker_file` (Boolean) When enabled, this creates a PR/issue to secure Dockerfile by pinning base images to SHA.
 - `update_existing_configuration` (Boolean) When enabled, dependabot will remove existing entries that are not in the package_ecosystem config.
 - `update_precommit_file` (List of String) List of pre-commit file paths to update (e.g., ['.pre-commit-config.yaml']).
+
+<a id="nestedatt--auto_remediation_options--harden_runner_config"></a>
+### Nested Schema for `auto_remediation_options.harden_runner_config`
+
+Optional:
+
+- `config` (String) YAML string configuring the harden runner.
+- `target_runner_labels` (List of String) List of runner labels to apply the harden runner config to. When non-empty, skip_harden_runner is automatically set to true internally.
+- `update_existing_configuration` (Boolean) When enabled, removes existing harden runner configurations not in the config.
+
 
 <a id="nestedatt--auto_remediation_options--package_ecosystem"></a>
 ### Nested Schema for `auto_remediation_options.package_ecosystem`
