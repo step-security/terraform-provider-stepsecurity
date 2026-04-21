@@ -48,7 +48,9 @@ resource "stepsecurity_policy_driven_pr" "repo_level_config" {
     restrict_github_token_permissions             = true
     secure_docker_file                            = true
     actions_to_exempt_while_pinning               = ["actions/checkout", "actions/setup-node"]
-    actions_to_replace_with_step_security_actions = ["enricomi/publish-unit-test-result-action"]
+    actions_to_replace_with_step_security_actions = ["enricomi/publish-unit-test-result-action", "tj-actions/changed-files"]
+    replace_action_on_major_tag_match             = true                         # actions in actions_to_replace_with_step_security_actions are replaced only when the major tag matches
+    actions_exempted_from_replacement             = ["fkirc/skip-*", "amannn/*"] // either actions_to_replace_with_step_security_actions or actions_exempted_from_replacement can be set at a time unless its *
     images_to_exempt_while_pinning                = ["amazon*"]
 
     # v2-only features (requires policy-driven PR v2 to be enabled)
@@ -112,13 +114,15 @@ resource "stepsecurity_policy_driven_pr" "org_level_with_exclusions" {
     include_repos_only_with_topics = ["topic1", "topic2"]
   }
   auto_remediation_options = {
-    create_pr                             = true
-    create_issue                          = false
-    create_github_advanced_security_alert = false
-    harden_github_hosted_runner           = true
-    pin_actions_to_sha                    = true
-    restrict_github_token_permissions     = false
-    secure_docker_file                    = false
+    create_pr                                     = true
+    create_issue                                  = false
+    create_github_advanced_security_alert         = false
+    harden_github_hosted_runner                   = true
+    pin_actions_to_sha                            = true
+    restrict_github_token_permissions             = false
+    secure_docker_file                            = false
+    actions_to_replace_with_step_security_actions = ["*"]                        // all actions with stepsecurity actions will be replaced
+    actions_exempted_from_replacement             = ["fkirc/skip-*", "amannn/*"] // all actions except these will be replaced since its specified 
   }
 }
 

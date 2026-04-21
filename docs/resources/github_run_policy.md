@@ -127,6 +127,49 @@ resource "stepsecurity_github_run_policy" "runner_policy_dry_run" {
   }
 }
 
+# Harden Runner Policy Example (targeted) - Enforces Harden Runner only on jobs whose runs-on matches the listed labels
+resource "stepsecurity_github_run_policy" "harden_runner_policy_targeted" {
+  owner     = "my-org"
+  name      = "Harden Runner Policy - Targeted"
+  all_repos = true
+
+  policy_config = {
+    owner                       = "my-org"
+    name                        = "Harden Runner Policy - Targeted"
+    enable_harden_runner_policy = true
+    harden_runner_target_labels = ["ubuntu-step-security", "linux-secure"]
+  }
+}
+
+# Harden Runner Policy Example (all jobs) - Empty harden_runner_target_labels applies the policy to every job
+resource "stepsecurity_github_run_policy" "harden_runner_policy_all_jobs" {
+  owner     = "my-org"
+  name      = "Harden Runner Policy - All Jobs"
+  all_repos = true
+
+  policy_config = {
+    owner                       = "my-org"
+    name                        = "Harden Runner Policy - All Jobs"
+    enable_harden_runner_policy = true
+    harden_runner_target_labels = []
+  }
+}
+
+# Harden Runner Policy Example (custom actions) - Accepts additional Harden Runner-equivalent actions
+resource "stepsecurity_github_run_policy" "harden_runner_policy_custom_actions" {
+  owner     = "my-org"
+  name      = "Harden Runner Policy - Custom Actions"
+  all_repos = true
+
+  policy_config = {
+    owner                        = "my-org"
+    name                         = "Harden Runner Policy - Custom Actions"
+    enable_harden_runner_policy  = true
+    harden_runner_target_labels  = []
+    harden_runner_custom_actions = ["my-org/harden-runner"]
+  }
+}
+
 # Secrets Policy Example (all_orgs) - Prevents secrets from being exfiltrated across all orgs
 resource "stepsecurity_github_run_policy" "secrets_policy_all_orgs" {
   owner    = "my-org"
@@ -326,9 +369,12 @@ Optional:
 - `disallowed_runner_labels` (Set of String) Set of disallowed runner labels.
 - `enable_action_policy` (Boolean) Whether to enable the action policy.
 - `enable_compromised_actions_policy` (Boolean) Whether to enable the compromised actions policy.
+- `enable_harden_runner_policy` (Boolean) Whether to enable the Harden Runner policy.
 - `enable_runs_on_policy` (Boolean) Whether to enable the runs-on policy.
 - `enable_secrets_policy` (Boolean) Whether to enable the secrets policy.
 - `exempted_users` (Set of String) Set of exempted users (can be bots/usernames) for the secrets exfiltration policy. These users will not be subject to the secrets policy checks.
+- `harden_runner_custom_actions` (Set of String) Set of custom actions accepted as Harden Runner equivalents (in addition to `step-security/harden-runner`).
+- `harden_runner_target_labels` (Set of String) Set of runner labels that target Harden Runner enforcement. Set to `[]` to apply the policy to every job; set a non-empty list to filter to jobs whose `runs-on` matches at least one label. Omitting the attribute leaves any existing backend value untouched (additive-only).
 - `is_dry_run` (Boolean) Whether this policy is in dry-run mode.
 - `require_pinned_actions` (Boolean) Whether to require all actions to be pinned to full-length commit SHAs. Sub-feature of the allowed actions policy — only meaningful when `enable_action_policy` is true.
 

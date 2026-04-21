@@ -162,6 +162,24 @@ func (r *policyDrivenPRResource) Schema(_ context.Context, _ resource.SchemaRequ
 							),
 						),
 					},
+					"replace_action_on_major_tag_match": schema.BoolAttribute{
+						Optional:    true,
+						Computed:    true,
+						Description: "When enabled, actions in actions_to_replace_with_step_security_actions are replaced only when the major tag matches. Requires actions_to_replace_with_step_security_actions to be non-empty.",
+						Default:     booldefault.StaticBool(false),
+					},
+					"actions_exempted_from_replacement": schema.ListAttribute{
+						ElementType: types.StringType,
+						Optional:    true,
+						Computed:    true,
+						Description: "List of actions to exempt from replacement. When set, ALL maintained actions are replaced EXCEPT those listed. Mutually exclusive with actions_to_replace_with_step_security_actions.",
+						Default: listdefault.StaticValue(
+							types.ListValueMust(
+								types.StringType,
+								[]attr.Value{},
+							),
+						),
+					},
 					"update_precommit_file": schema.ListAttribute{
 						ElementType: types.StringType,
 						Optional:    true,
@@ -353,6 +371,12 @@ func (r *policyDrivenPRResource) ImportState(ctx context.Context, req resource.I
 	}
 	replaceList, _ := types.ListValueFrom(ctx, types.StringType, replaceElements)
 
+	exemptedFromReplacementElements := make([]types.String, len(policy.AutoRemdiationOptions.ExemptedFromReplacement))
+	for i, action := range policy.AutoRemdiationOptions.ExemptedFromReplacement {
+		exemptedFromReplacementElements[i] = types.StringValue(action)
+	}
+	exemptedFromReplacementList, _ := types.ListValueFrom(ctx, types.StringType, exemptedFromReplacementElements)
+
 	var packageEcosystemList types.List
 	if len(policy.AutoRemdiationOptions.PackageEcosystem) > 0 {
 		var ecosystemObjects []attr.Value
@@ -437,6 +461,8 @@ func (r *policyDrivenPRResource) ImportState(ctx context.Context, req resource.I
 			"actions_to_exempt_while_pinning":               types.ListType{ElemType: types.StringType},
 			"images_to_exempt_while_pinning":                types.ListType{ElemType: types.StringType},
 			"actions_to_replace_with_step_security_actions": types.ListType{ElemType: types.StringType},
+			"replace_action_on_major_tag_match":             types.BoolType,
+			"actions_exempted_from_replacement":             types.ListType{ElemType: types.StringType},
 			"update_precommit_file":                         types.ListType{ElemType: types.StringType},
 			"package_ecosystem": types.ListType{
 				ElemType: types.ObjectType{
@@ -452,9 +478,9 @@ func (r *policyDrivenPRResource) ImportState(ctx context.Context, req resource.I
 			"add_workflows":                 types.StringType,
 			"action_commit_map":             types.MapType{ElemType: types.StringType},
 			"harden_runner_config": types.ObjectType{AttrTypes: map[string]attr.Type{
-				"config":             types.StringType,
+				"config":                        types.StringType,
 				"update_existing_configuration": types.BoolType,
-				"target_runner_labels":      types.ListType{ElemType: types.StringType},
+				"target_runner_labels":          types.ListType{ElemType: types.StringType},
 			}},
 		},
 		map[string]attr.Value{
@@ -468,8 +494,15 @@ func (r *policyDrivenPRResource) ImportState(ctx context.Context, req resource.I
 			"actions_to_exempt_while_pinning":               exemptList,
 			"images_to_exempt_while_pinning":                exemptImagesList,
 			"actions_to_replace_with_step_security_actions": replaceList,
-			"update_precommit_file":                         updatePrecommitFileList,
-			"package_ecosystem":                             packageEcosystemList,
+			"replace_action_on_major_tag_match": types.BoolValue(func() bool {
+				if policy.AutoRemdiationOptions.ReplaceByMajorTag != nil {
+					return *policy.AutoRemdiationOptions.ReplaceByMajorTag
+				}
+				return false
+			}()),
+			"update_precommit_file":             updatePrecommitFileList,
+			"package_ecosystem":                 packageEcosystemList,
+			"actions_exempted_from_replacement": exemptedFromReplacementList,
 			"update_existing_configuration": types.BoolValue(func() bool {
 				if policy.AutoRemdiationOptions.Subtractive != nil {
 					return *policy.AutoRemdiationOptions.Subtractive
@@ -488,22 +521,22 @@ func (r *policyDrivenPRResource) ImportState(ctx context.Context, req resource.I
 					labelsList, _ := types.ListValue(types.StringType, labelElems)
 					obj, _ := types.ObjectValue(
 						map[string]attr.Type{
-							"config":             types.StringType,
+							"config":                        types.StringType,
 							"update_existing_configuration": types.BoolType,
-							"target_runner_labels":      types.ListType{ElemType: types.StringType},
+							"target_runner_labels":          types.ListType{ElemType: types.StringType},
 						},
 						map[string]attr.Value{
-							"config":             types.StringValue(policy.AutoRemdiationOptions.HardenRunnerConfig.Config),
+							"config":                        types.StringValue(policy.AutoRemdiationOptions.HardenRunnerConfig.Config),
 							"update_existing_configuration": types.BoolValue(policy.AutoRemdiationOptions.HardenRunnerConfig.Subtractive),
-							"target_runner_labels":      labelsList,
+							"target_runner_labels":          labelsList,
 						},
 					)
 					return obj
 				}
 				return types.ObjectNull(map[string]attr.Type{
-					"config":             types.StringType,
+					"config":                        types.StringType,
 					"update_existing_configuration": types.BoolType,
-					"target_runner_labels":      types.ListType{ElemType: types.StringType},
+					"target_runner_labels":          types.ListType{ElemType: types.StringType},
 				})
 			}(),
 		},
@@ -539,6 +572,8 @@ type autoRemdiationOptionsModel struct {
 	ActionsToExemptWhilePinning             types.List   `tfsdk:"actions_to_exempt_while_pinning"`
 	ImagesToExemptWhilePinning              types.List   `tfsdk:"images_to_exempt_while_pinning"`
 	ActionsToReplaceWithStepSecurityActions types.List   `tfsdk:"actions_to_replace_with_step_security_actions"`
+	ReplaceByMajorTag                       types.Bool   `tfsdk:"replace_action_on_major_tag_match"`
+	ExemptedFromReplacement                 types.List   `tfsdk:"actions_exempted_from_replacement"`
 	UpdatePrecommitFile                     types.List   `tfsdk:"update_precommit_file"`
 	PackageEcosystem                        types.List   `tfsdk:"package_ecosystem"`
 	UpdateExistingConfiguration             types.Bool   `tfsdk:"update_existing_configuration"`
@@ -555,9 +590,9 @@ type packageEcosystemModel struct {
 }
 
 type hardenRunnerConfigModel struct {
-	Config           types.String `tfsdk:"config"`
+	Config                      types.String `tfsdk:"config"`
 	UpdateExistingConfiguration types.Bool   `tfsdk:"update_existing_configuration"`
-	RunnerLabels     types.List   `tfsdk:"target_runner_labels"`
+	RunnerLabels                types.List   `tfsdk:"target_runner_labels"`
 }
 
 type ActionsToReplaceModel struct {
@@ -644,6 +679,31 @@ func (r *policyDrivenPRResource) ValidateConfig(ctx context.Context, req resourc
 				"GitHub Advanced Security Alert can only be true if Create Issue is true",
 				"GitHub Advanced Security Alert can only be triggered when issue creation is enabled",
 			)
+		}
+
+		if !options.ReplaceByMajorTag.IsNull() && !options.ReplaceByMajorTag.IsUnknown() &&
+			options.ReplaceByMajorTag.ValueBool() {
+			hasActionsToReplace := !options.ActionsToReplaceWithStepSecurityActions.IsNull() &&
+				!options.ActionsToReplaceWithStepSecurityActions.IsUnknown() &&
+				len(options.ActionsToReplaceWithStepSecurityActions.Elements()) > 0
+			if !hasActionsToReplace {
+				resp.Diagnostics.AddError(
+					"Invalid Configuration",
+					"replace_action_on_major_tag_match can only be set to true when actions_to_replace_with_step_security_actions is non-empty",
+				)
+			}
+		}
+		hasExemptedFromReplacement := !options.ExemptedFromReplacement.IsNull() && !options.ExemptedFromReplacement.IsUnknown() && len(options.ExemptedFromReplacement.Elements()) > 0
+		if hasExemptedFromReplacement {
+			// actions_exempted_from_replacement requires actions_to_replace_with_step_security_actions = ["*"]
+			actionsToReplaceElems := options.ActionsToReplaceWithStepSecurityActions.Elements()
+			isWildcard := len(actionsToReplaceElems) == 1 && actionsToReplaceElems[0].(types.String).ValueString() == "*"
+			if !isWildcard {
+				resp.Diagnostics.AddError(
+					"Invalid Configuration",
+					"actions_exempted_from_replacement can only be used when actions_to_replace_with_step_security_actions is [\"*\"]",
+				)
+			}
 		}
 
 		if !options.HardenRunnerConfig.IsNull() && !options.HardenRunnerConfig.IsUnknown() {
@@ -830,6 +890,15 @@ func (r *policyDrivenPRResource) Create(ctx context.Context, req resource.Create
 		}
 	}
 
+	var exemptedFromReplacement []string
+	if !options.ExemptedFromReplacement.IsNull() {
+		elements := options.ExemptedFromReplacement.Elements()
+		exemptedFromReplacement = make([]string, len(elements))
+		for i, elem := range elements {
+			exemptedFromReplacement[i] = elem.(types.String).ValueString()
+		}
+	}
+
 	// Extract new optional fields
 	var packageEcosystem []stepsecurityapi.DependabotConfig
 	if !options.PackageEcosystem.IsNull() {
@@ -878,6 +947,11 @@ func (r *policyDrivenPRResource) Create(ctx context.Context, req resource.Create
 		subtractive = &v
 	}
 
+	var replaceByMajorTag *bool
+	if !options.ReplaceByMajorTag.IsNull() && !options.ReplaceByMajorTag.IsUnknown() {
+		v := options.ReplaceByMajorTag.ValueBool()
+		replaceByMajorTag = &v
+	}
 	var hardenRunnerConfig *stepsecurityapi.HardenRunnerConfig
 	if !options.HardenRunnerConfig.IsNull() && !options.HardenRunnerConfig.IsUnknown() {
 		var hrcModel hardenRunnerConfigModel
@@ -910,6 +984,8 @@ func (r *policyDrivenPRResource) Create(ctx context.Context, req resource.Create
 			ActionsToExemptWhilePinning:             actionsToExempt,
 			ImagesToExemptWhilePinning:              imagesToExempt,
 			ActionsToReplaceWithStepSecurityActions: actionsToReplace,
+			ReplaceByMajorTag:                       replaceByMajorTag,
+			ExemptedFromReplacement:                 exemptedFromReplacement,
 			UpdatePrecommitFile:                     updatePrecommitFile,
 			PackageEcosystem:                        packageEcosystem,
 			Subtractive:                             subtractive,
@@ -1355,6 +1431,15 @@ func (r *policyDrivenPRResource) Update(ctx context.Context, req resource.Update
 		}
 	}
 
+	var exemptedFromReplacementUpdate []string
+	if !planOptions.ExemptedFromReplacement.IsNull() {
+		elements := planOptions.ExemptedFromReplacement.Elements()
+		exemptedFromReplacementUpdate = make([]string, len(elements))
+		for i, elem := range elements {
+			exemptedFromReplacementUpdate[i] = elem.(types.String).ValueString()
+		}
+	}
+
 	// Extract new optional fields for update
 	var packageEcosystemPlan []stepsecurityapi.DependabotConfig
 	if !planOptions.PackageEcosystem.IsNull() {
@@ -1405,6 +1490,11 @@ func (r *policyDrivenPRResource) Update(ctx context.Context, req resource.Update
 		subtractiveUpdate = &v
 	}
 
+	var replaceByMajorTagUpdate *bool
+	if !planOptions.ReplaceByMajorTag.IsNull() && !planOptions.ReplaceByMajorTag.IsUnknown() {
+		v := planOptions.ReplaceByMajorTag.ValueBool()
+		replaceByMajorTagUpdate = &v
+	}
 	var hardenRunnerConfigUpdate *stepsecurityapi.HardenRunnerConfig
 	if !planOptions.HardenRunnerConfig.IsNull() && !planOptions.HardenRunnerConfig.IsUnknown() {
 		var hrcModel hardenRunnerConfigModel
@@ -1436,6 +1526,8 @@ func (r *policyDrivenPRResource) Update(ctx context.Context, req resource.Update
 			ActionsToExemptWhilePinning:             actionsToExempt,
 			ImagesToExemptWhilePinning:              imagesToExempt,
 			ActionsToReplaceWithStepSecurityActions: actionsToReplace,
+			ReplaceByMajorTag:                       replaceByMajorTagUpdate,
+			ExemptedFromReplacement:                 exemptedFromReplacementUpdate,
 			UpdatePrecommitFile:                     updatePrecommitFilePlan,
 			PackageEcosystem:                        packageEcosystemPlan,
 			Subtractive:                             subtractiveUpdate,
@@ -1582,6 +1674,12 @@ func (r *policyDrivenPRResource) updatePolicyDrivenPRState(ctx context.Context, 
 	}
 	replaceList, _ := types.ListValueFrom(ctx, types.StringType, replaceElements)
 
+	exemptedFromReplacementElements := make([]types.String, len(stepSecurityPolicy.AutoRemdiationOptions.ExemptedFromReplacement))
+	for i, action := range stepSecurityPolicy.AutoRemdiationOptions.ExemptedFromReplacement {
+		exemptedFromReplacementElements[i] = types.StringValue(action)
+	}
+	exemptedFromReplacementList, _ := types.ListValueFrom(ctx, types.StringType, exemptedFromReplacementElements)
+
 	// Handle new optional fields
 	var packageEcosystemList types.List
 	if len(stepSecurityPolicy.AutoRemdiationOptions.PackageEcosystem) > 0 {
@@ -1667,6 +1765,8 @@ func (r *policyDrivenPRResource) updatePolicyDrivenPRState(ctx context.Context, 
 			"actions_to_exempt_while_pinning":               types.ListType{ElemType: types.StringType},
 			"images_to_exempt_while_pinning":                types.ListType{ElemType: types.StringType},
 			"actions_to_replace_with_step_security_actions": types.ListType{ElemType: types.StringType},
+			"replace_action_on_major_tag_match":             types.BoolType,
+			"actions_exempted_from_replacement":             types.ListType{ElemType: types.StringType},
 			"update_precommit_file":                         types.ListType{ElemType: types.StringType},
 			"package_ecosystem": types.ListType{
 				ElemType: types.ObjectType{
@@ -1682,9 +1782,9 @@ func (r *policyDrivenPRResource) updatePolicyDrivenPRState(ctx context.Context, 
 			"add_workflows":                 types.StringType,
 			"action_commit_map":             types.MapType{ElemType: types.StringType},
 			"harden_runner_config": types.ObjectType{AttrTypes: map[string]attr.Type{
-				"config":             types.StringType,
+				"config":                        types.StringType,
 				"update_existing_configuration": types.BoolType,
-				"target_runner_labels":      types.ListType{ElemType: types.StringType},
+				"target_runner_labels":          types.ListType{ElemType: types.StringType},
 			}},
 		},
 		map[string]attr.Value{
@@ -1698,8 +1798,15 @@ func (r *policyDrivenPRResource) updatePolicyDrivenPRState(ctx context.Context, 
 			"actions_to_exempt_while_pinning":               exemptList,
 			"images_to_exempt_while_pinning":                exemptImagesList,
 			"actions_to_replace_with_step_security_actions": replaceList,
-			"update_precommit_file":                         updatePrecommitFileList,
-			"package_ecosystem":                             packageEcosystemList,
+			"replace_action_on_major_tag_match": types.BoolValue(func() bool {
+				if stepSecurityPolicy.AutoRemdiationOptions.ReplaceByMajorTag != nil {
+					return *stepSecurityPolicy.AutoRemdiationOptions.ReplaceByMajorTag
+				}
+				return false
+			}()),
+			"update_precommit_file":             updatePrecommitFileList,
+			"package_ecosystem":                 packageEcosystemList,
+			"actions_exempted_from_replacement": exemptedFromReplacementList,
 			"update_existing_configuration": types.BoolValue(func() bool {
 				if stepSecurityPolicy.AutoRemdiationOptions.Subtractive != nil {
 					return *stepSecurityPolicy.AutoRemdiationOptions.Subtractive
@@ -1718,22 +1825,22 @@ func (r *policyDrivenPRResource) updatePolicyDrivenPRState(ctx context.Context, 
 					labelsList, _ := types.ListValue(types.StringType, labelElems)
 					obj, _ := types.ObjectValue(
 						map[string]attr.Type{
-							"config":             types.StringType,
+							"config":                        types.StringType,
 							"update_existing_configuration": types.BoolType,
-							"target_runner_labels":      types.ListType{ElemType: types.StringType},
+							"target_runner_labels":          types.ListType{ElemType: types.StringType},
 						},
 						map[string]attr.Value{
-							"config":             types.StringValue(stepSecurityPolicy.AutoRemdiationOptions.HardenRunnerConfig.Config),
+							"config":                        types.StringValue(stepSecurityPolicy.AutoRemdiationOptions.HardenRunnerConfig.Config),
 							"update_existing_configuration": types.BoolValue(stepSecurityPolicy.AutoRemdiationOptions.HardenRunnerConfig.Subtractive),
-							"target_runner_labels":      labelsList,
+							"target_runner_labels":          labelsList,
 						},
 					)
 					return obj
 				}
 				return types.ObjectNull(map[string]attr.Type{
-					"config":             types.StringType,
+					"config":                        types.StringType,
 					"update_existing_configuration": types.BoolType,
-					"target_runner_labels":      types.ListType{ElemType: types.StringType},
+					"target_runner_labels":          types.ListType{ElemType: types.StringType},
 				})
 			}(),
 		},
