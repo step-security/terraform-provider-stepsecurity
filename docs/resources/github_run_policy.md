@@ -284,6 +284,44 @@ resource "stepsecurity_github_run_policy" "repo_specific_runner_policy" {
   }
 }
 
+# Allowed Actions Policy Example (all_repos, pinned actions enforcement)
+resource "stepsecurity_github_run_policy" "pinned_actions_policy" {
+  owner     = "my-org"
+  name      = "Allowed Actions Policy - Pinned Actions Enforcement"
+  all_repos = true
+
+  policy_config = {
+    owner                           = "my-org"
+    name                            = "Allowed Actions Policy - Pinned Actions Enforcement"
+    enable_action_policy            = true
+    require_pinned_actions          = true
+    actions_to_exempt_while_pinning = ["actions/*", "my-trusted-org/*"]
+    allowed_actions = {
+      "actions/checkout"            = "allow"
+      "step-security/harden-runner" = "allow"
+    }
+  }
+}
+
+# Allowed Actions Policy Example (dry_run, pinned actions enforcement)
+resource "stepsecurity_github_run_policy" "pinned_actions_policy_dry_run" {
+  owner     = "my-org"
+  name      = "Allowed Actions Policy - Pinned Actions Enforcement - Dry Run"
+  all_repos = true
+
+  policy_config = {
+    owner                  = "my-org"
+    name                   = "Allowed Actions Policy - Pinned Actions Enforcement - Dry Run"
+    enable_action_policy   = true
+    require_pinned_actions = true
+    allowed_actions = {
+      "actions/checkout"            = "allow"
+      "step-security/harden-runner" = "allow"
+    }
+    is_dry_run = true
+  }
+}
+
 # For importing existing run policy to terraform state
 # this will be helpful to manage existing policy using terraform
 # alternative to this is to use terraform import command
@@ -326,6 +364,7 @@ Required:
 
 Optional:
 
+- `actions_to_exempt_while_pinning` (Set of String) Set of actions exempt from pinning requirements. Supports exact match (e.g., 'actions/checkout'), name-only match, and owner wildcard (e.g., 'my-org/*').
 - `allowed_actions` (Map of String) Map of allowed actions and their permissions (e.g., 'actions/checkout': 'allow').
 - `disallowed_runner_labels` (Set of String) Set of disallowed runner labels.
 - `enable_action_policy` (Boolean) Whether to enable the action policy.
@@ -337,6 +376,7 @@ Optional:
 - `harden_runner_custom_actions` (Set of String) Set of custom actions accepted as Harden Runner equivalents (in addition to `step-security/harden-runner`).
 - `harden_runner_target_labels` (Set of String) Set of runner labels that target Harden Runner enforcement. Set to `[]` to apply the policy to every job; set a non-empty list to filter to jobs whose `runs-on` matches at least one label. Omitting the attribute leaves any existing backend value untouched (additive-only).
 - `is_dry_run` (Boolean) Whether this policy is in dry-run mode.
+- `require_pinned_actions` (Boolean) Whether to require all actions to be pinned to full-length commit SHAs. Sub-feature of the allowed actions policy — only meaningful when `enable_action_policy` is true.
 
 ## Import
 

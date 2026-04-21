@@ -156,6 +156,15 @@ func (d *githubRunPoliciesDataSource) Schema(_ context.Context, _ datasource.Sch
 									Computed:            true,
 									MarkdownDescription: "Whether the compromised actions policy is enabled.",
 								},
+								"require_pinned_actions": schema.BoolAttribute{
+									Computed:            true,
+									MarkdownDescription: "Whether all actions are required to be pinned to full-length commit SHAs.",
+								},
+								"actions_to_exempt_while_pinning": schema.SetAttribute{
+									ElementType:         types.StringType,
+									Computed:            true,
+									MarkdownDescription: "Set of actions exempt from pinning requirements.",
+								},
 								"is_dry_run": schema.BoolAttribute{
 									Computed:            true,
 									MarkdownDescription: "Whether this policy is in dry-run mode.",
@@ -231,6 +240,7 @@ func (d *githubRunPoliciesDataSource) Read(ctx context.Context, req datasource.R
 			"enable_runs_on_policy":             types.BoolValue(policy.PolicyConfig.EnableRunsOnPolicy),
 			"enable_secrets_policy":             types.BoolValue(policy.PolicyConfig.EnableSecretsPolicy),
 			"enable_compromised_actions_policy": types.BoolValue(policy.PolicyConfig.EnableCompromisedActionsPolicy),
+			"require_pinned_actions":            types.BoolValue(policy.PolicyConfig.RequirePinnedActions),
 			"is_dry_run":                        types.BoolValue(policy.PolicyConfig.IsDryRun),
 		}
 
@@ -290,6 +300,18 @@ func (d *githubRunPoliciesDataSource) Read(ctx context.Context, req datasource.R
 			policyConfigAttrs["disallowed_runner_labels"] = types.SetNull(types.StringType)
 		}
 
+		// Handle pinned actions exemptions set
+		if policy.PolicyConfig.PinnedActionsExemptions != nil {
+			pinnedExemptionsList := make([]attr.Value, len(policy.PolicyConfig.PinnedActionsExemptions))
+			for i, exemption := range policy.PolicyConfig.PinnedActionsExemptions {
+				pinnedExemptionsList[i] = types.StringValue(exemption)
+			}
+			setValue, _ := types.SetValue(types.StringType, pinnedExemptionsList)
+			policyConfigAttrs["actions_to_exempt_while_pinning"] = setValue
+		} else {
+			policyConfigAttrs["actions_to_exempt_while_pinning"] = types.SetNull(types.StringType)
+		}
+
 		// Create the policy config object
 		policyConfigAttrTypes := map[string]attr.Type{
 			"owner":                             types.StringType,
@@ -303,6 +325,8 @@ func (d *githubRunPoliciesDataSource) Read(ctx context.Context, req datasource.R
 			"disallowed_runner_labels":          types.SetType{ElemType: types.StringType},
 			"enable_secrets_policy":             types.BoolType,
 			"enable_compromised_actions_policy": types.BoolType,
+			"require_pinned_actions":            types.BoolType,
+			"actions_to_exempt_while_pinning":   types.SetType{ElemType: types.StringType},
 			"is_dry_run":                        types.BoolType,
 		}
 
@@ -368,6 +392,8 @@ func (d *githubRunPoliciesDataSource) Read(ctx context.Context, req datasource.R
 			"disallowed_runner_labels":          types.SetType{ElemType: types.StringType},
 			"enable_secrets_policy":             types.BoolType,
 			"enable_compromised_actions_policy": types.BoolType,
+			"require_pinned_actions":            types.BoolType,
+			"actions_to_exempt_while_pinning":   types.SetType{ElemType: types.StringType},
 			"is_dry_run":                        types.BoolType,
 		}},
 	}

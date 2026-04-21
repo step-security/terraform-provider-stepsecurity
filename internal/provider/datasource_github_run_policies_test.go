@@ -37,6 +37,75 @@ func TestAccGithubRunPoliciesDataSource(t *testing.T) {
 	})
 }
 
+func TestGithubRunPoliciesDataSource_ReadMappingWithPinnedActions(t *testing.T) {
+	dataSource := &githubRunPoliciesDataSource{}
+	assert.NotNil(t, dataSource)
+
+	policy := stepsecurityapi.RunPolicy{
+		Owner:         "test-org",
+		Customer:      "test-customer",
+		PolicyID:      "policy-123",
+		Name:          "Test Policy",
+		CreatedBy:     "user1",
+		CreatedAt:     time.Now(),
+		LastUpdatedBy: "user1",
+		LastUpdatedAt: time.Now(),
+		AllRepos:      true,
+		PolicyConfig: stepsecurityapi.RunPolicyConfig{
+			Owner:                   "test-org",
+			Name:                    "Test Policy",
+			EnableActionPolicy:      true,
+			RequirePinnedActions:    true,
+			PinnedActionsExemptions: []string{"actions/*"},
+		},
+	}
+
+	policyConfigAttrs := map[string]attr.Value{
+		"owner":                             types.StringValue(policy.PolicyConfig.Owner),
+		"name":                              types.StringValue(policy.PolicyConfig.Name),
+		"enable_action_policy":              types.BoolValue(policy.PolicyConfig.EnableActionPolicy),
+		"allowed_actions":                   types.MapNull(types.StringType),
+		"enable_harden_runner_policy":       types.BoolValue(policy.PolicyConfig.EnableHardenRunnerPolicy),
+		"harden_runner_target_labels":       types.SetNull(types.StringType),
+		"harden_runner_custom_actions":      types.SetNull(types.StringType),
+		"enable_runs_on_policy":             types.BoolValue(policy.PolicyConfig.EnableRunsOnPolicy),
+		"disallowed_runner_labels":          types.SetNull(types.StringType),
+		"enable_secrets_policy":             types.BoolValue(policy.PolicyConfig.EnableSecretsPolicy),
+		"enable_compromised_actions_policy": types.BoolValue(policy.PolicyConfig.EnableCompromisedActionsPolicy),
+		"require_pinned_actions":            types.BoolValue(policy.PolicyConfig.RequirePinnedActions),
+		"is_dry_run":                        types.BoolValue(policy.PolicyConfig.IsDryRun),
+	}
+
+	pinnedExemptionsList := make([]attr.Value, len(policy.PolicyConfig.PinnedActionsExemptions))
+	for i, exemption := range policy.PolicyConfig.PinnedActionsExemptions {
+		pinnedExemptionsList[i] = types.StringValue(exemption)
+	}
+	pinnedSet, diags := types.SetValue(types.StringType, pinnedExemptionsList)
+	assert.False(t, diags.HasError())
+	policyConfigAttrs["actions_to_exempt_while_pinning"] = pinnedSet
+
+	policyConfigAttrTypes := map[string]attr.Type{
+		"owner":                             types.StringType,
+		"name":                              types.StringType,
+		"enable_action_policy":              types.BoolType,
+		"allowed_actions":                   types.MapType{ElemType: types.StringType},
+		"enable_harden_runner_policy":       types.BoolType,
+		"harden_runner_target_labels":       types.SetType{ElemType: types.StringType},
+		"harden_runner_custom_actions":      types.SetType{ElemType: types.StringType},
+		"enable_runs_on_policy":             types.BoolType,
+		"disallowed_runner_labels":          types.SetType{ElemType: types.StringType},
+		"enable_secrets_policy":             types.BoolType,
+		"enable_compromised_actions_policy": types.BoolType,
+		"require_pinned_actions":            types.BoolType,
+		"actions_to_exempt_while_pinning":   types.SetType{ElemType: types.StringType},
+		"is_dry_run":                        types.BoolType,
+	}
+
+	policyConfigObj, objDiags := types.ObjectValue(policyConfigAttrTypes, policyConfigAttrs)
+	assert.False(t, objDiags.HasError(), "ObjectValue should not produce errors with synced type maps")
+	assert.False(t, policyConfigObj.IsNull())
+}
+
 func TestGithubRunPoliciesDataSource_Read(t *testing.T) {
 	dataSource := &githubRunPoliciesDataSource{}
 
@@ -254,6 +323,8 @@ type githubRunPolicyDataSourcePolicyConfigModel struct {
 	DisallowedRunnerLabels         types.Set    `tfsdk:"disallowed_runner_labels"`
 	EnableSecretsPolicy            types.Bool   `tfsdk:"enable_secrets_policy"`
 	EnableCompromisedActionsPolicy types.Bool   `tfsdk:"enable_compromised_actions_policy"`
+	RequirePinnedActions           types.Bool   `tfsdk:"require_pinned_actions"`
+	PinnedActionsExemptions        types.Set    `tfsdk:"actions_to_exempt_while_pinning"`
 	IsDryRun                       types.Bool   `tfsdk:"is_dry_run"`
 }
 
@@ -306,6 +377,8 @@ func testRunPolicyDataSourceAttrTypes() map[string]attr.Type {
 			"disallowed_runner_labels":          types.SetType{ElemType: types.StringType},
 			"enable_secrets_policy":             types.BoolType,
 			"enable_compromised_actions_policy": types.BoolType,
+			"require_pinned_actions":            types.BoolType,
+			"actions_to_exempt_while_pinning":   types.SetType{ElemType: types.StringType},
 			"is_dry_run":                        types.BoolType,
 		}},
 	}

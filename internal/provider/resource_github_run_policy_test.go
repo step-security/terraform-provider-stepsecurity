@@ -59,6 +59,15 @@ func TestAccGithubRunPolicyResource(t *testing.T) {
 					resourcehelper.TestCheckTypeSetElemAttr("stepsecurity_github_run_policy.test", "policy_config.harden_runner_custom_actions.*", "my-org/harden-runner"),
 				),
 			},
+			{
+				Config: testAccGithubRunPolicyResourceConfigWithPinning("test-org", "Allowed Actions Policy - Pinned Actions Enforcement"),
+				Check: resourcehelper.ComposeAggregateTestCheckFunc(
+					resourcehelper.TestCheckResourceAttr("stepsecurity_github_run_policy.test", "name", "Allowed Actions Policy - Pinned Actions Enforcement"),
+					resourcehelper.TestCheckResourceAttr("stepsecurity_github_run_policy.test", "policy_config.enable_action_policy", "true"),
+					resourcehelper.TestCheckResourceAttr("stepsecurity_github_run_policy.test", "policy_config.require_pinned_actions", "true"),
+					resourcehelper.TestCheckResourceAttr("stepsecurity_github_run_policy.test", "policy_config.actions_to_exempt_while_pinning.#", "1"),
+				),
+			},
 			// Delete testing automatically occurs in TestCase
 		},
 	})
@@ -109,6 +118,8 @@ func TestGithubRunPolicyResource_UpdateModelFromAPI(t *testing.T) {
 			DisallowedRunnerLabels: map[string]struct{}{
 				"self-hosted": {},
 			},
+			RequirePinnedActions:      true,
+			PinnedActionsExemptions:   []string{"actions/*", "my-org/*"},
 			HardenRunnerTargetLabels:  hardenRunnerTargetLabels,
 			HardenRunnerCustomActions: hardenRunnerCustomActions,
 		},
@@ -129,6 +140,153 @@ func TestGithubRunPolicyResource_UpdateModelFromAPI(t *testing.T) {
 	assert.True(t, policyConfig.EnableHardenRunnerPolicy.ValueBool())
 	assert.ElementsMatch(t, []string{"ubuntu-step-security", "linux-secure"}, setStrings(t, policyConfig.HardenRunnerTargetLabels))
 	assert.ElementsMatch(t, []string{"my-org/harden-runner", "octo/harden-runner-action"}, setStrings(t, policyConfig.HardenRunnerCustomActions))
+	assert.True(t, policyConfig.RequirePinnedActions.ValueBool())
+	assert.False(t, policyConfig.PinnedActionsExemptions.IsNull())
+	assert.ElementsMatch(t, []string{"actions/*", "my-org/*"}, setStrings(t, policyConfig.PinnedActionsExemptions))
+}
+
+func TestGithubRunPolicyResource_UpdateModelFromAPI_NilPinnedExemptions(t *testing.T) {
+	resource := &githubRunPolicyResource{}
+
+	ctx := context.Background()
+	model := &githubRunPolicyResourceModel{}
+
+	apiResponse := &stepsecurityapi.RunPolicy{
+		Owner:         "test-org",
+		Customer:      "test-customer",
+		PolicyID:      "test-policy-456",
+		Name:          "No Pinning Policy",
+		CreatedBy:     "test-user",
+		CreatedAt:     time.Date(2023, 1, 1, 0, 0, 0, 0, time.UTC),
+		LastUpdatedBy: "test-user",
+		LastUpdatedAt: time.Date(2023, 1, 2, 0, 0, 0, 0, time.UTC),
+		AllRepos:      true,
+		PolicyConfig: stepsecurityapi.RunPolicyConfig{
+			Owner:                "test-org",
+			Name:                 "No Pinning Policy",
+			EnableActionPolicy:   true,
+			RequirePinnedActions: false,
+		},
+	}
+
+	var diags diag.Diagnostics
+	resource.updateModelFromAPI(ctx, model, apiResponse, &diags)
+
+	assert.False(t, diags.HasError())
+
+	var policyConfig policyConfigModel
+	policyConfigDiags := model.PolicyConfig.As(ctx, &policyConfig, basetypes.ObjectAsOptions{})
+	assert.False(t, policyConfigDiags.HasError())
+	assert.False(t, policyConfig.RequirePinnedActions.ValueBool())
+	assert.True(t, policyConfig.PinnedActionsExemptions.IsNull())
+}
+
+func TestGithubRunPolicyResource_PinnedActionsRequestSerialization(t *testing.T) {
+	ctx := context.Background()
+
+	pinnedExemptions, diags := types.SetValueFrom(ctx, types.StringType, []string{"actions/*", "my-org/*"})
+	assert.False(t, diags.HasError())
+
+	policyConfig := policyConfigModel{
+		Owner:                          types.StringValue("test-org"),
+		Name:                           types.StringValue("Test Policy"),
+		EnableActionPolicy:             types.BoolValue(true),
+		AllowedActions:                 types.MapNull(types.StringType),
+		EnableHardenRunnerPolicy:       types.BoolValue(false),
+		HardenRunnerTargetLabels:       types.SetNull(types.StringType),
+		HardenRunnerCustomActions:      types.SetNull(types.StringType),
+		EnableRunsOnPolicy:             types.BoolValue(false),
+		DisallowedRunnerLabels:         types.SetNull(types.StringType),
+		EnableSecretsPolicy:            types.BoolValue(false),
+		EnableCompromisedActionsPolicy: types.BoolValue(false),
+		RequirePinnedActions:           types.BoolValue(true),
+		PinnedActionsExemptions:        pinnedExemptions,
+		IsDryRun:                       types.BoolValue(false),
+		ExemptedUsers:                  types.SetNull(types.StringType),
+	}
+
+	createRequest := stepsecurityapi.CreateRunPolicyRequest{
+		Name:     "Test Policy",
+		AllRepos: true,
+		PolicyConfig: stepsecurityapi.RunPolicyConfig{
+			Owner:                          policyConfig.Owner.ValueString(),
+			Name:                           policyConfig.Name.ValueString(),
+			EnableActionPolicy:             policyConfig.EnableActionPolicy.ValueBool(),
+			EnableRunsOnPolicy:             policyConfig.EnableRunsOnPolicy.ValueBool(),
+			EnableSecretsPolicy:            policyConfig.EnableSecretsPolicy.ValueBool(),
+			EnableCompromisedActionsPolicy: policyConfig.EnableCompromisedActionsPolicy.ValueBool(),
+			RequirePinnedActions:           policyConfig.RequirePinnedActions.ValueBool(),
+			IsDryRun:                       policyConfig.IsDryRun.ValueBool(),
+		},
+	}
+
+	if !policyConfig.PinnedActionsExemptions.IsNull() {
+		var exemptions []string
+		exemptionDiags := policyConfig.PinnedActionsExemptions.ElementsAs(ctx, &exemptions, false)
+		assert.False(t, exemptionDiags.HasError())
+		createRequest.PolicyConfig.PinnedActionsExemptions = exemptions
+	}
+
+	assert.True(t, createRequest.PolicyConfig.RequirePinnedActions)
+	assert.ElementsMatch(t, []string{"actions/*", "my-org/*"}, createRequest.PolicyConfig.PinnedActionsExemptions)
+
+	updateRequest := stepsecurityapi.UpdateRunPolicyRequest{
+		Name:     "Test Policy",
+		AllRepos: true,
+		PolicyConfig: stepsecurityapi.RunPolicyConfig{
+			Owner:                          policyConfig.Owner.ValueString(),
+			Name:                           policyConfig.Name.ValueString(),
+			EnableActionPolicy:             policyConfig.EnableActionPolicy.ValueBool(),
+			EnableRunsOnPolicy:             policyConfig.EnableRunsOnPolicy.ValueBool(),
+			EnableSecretsPolicy:            policyConfig.EnableSecretsPolicy.ValueBool(),
+			EnableCompromisedActionsPolicy: policyConfig.EnableCompromisedActionsPolicy.ValueBool(),
+			RequirePinnedActions:           policyConfig.RequirePinnedActions.ValueBool(),
+			IsDryRun:                       policyConfig.IsDryRun.ValueBool(),
+		},
+	}
+
+	if !policyConfig.PinnedActionsExemptions.IsNull() {
+		var exemptions []string
+		exemptionDiags := policyConfig.PinnedActionsExemptions.ElementsAs(ctx, &exemptions, false)
+		assert.False(t, exemptionDiags.HasError())
+		updateRequest.PolicyConfig.PinnedActionsExemptions = exemptions
+	}
+
+	assert.True(t, updateRequest.PolicyConfig.RequirePinnedActions)
+	assert.ElementsMatch(t, []string{"actions/*", "my-org/*"}, updateRequest.PolicyConfig.PinnedActionsExemptions)
+}
+
+func TestGithubRunPolicyResource_PinnedActionsRequestSerialization_NullExemptions(t *testing.T) {
+	policyConfig := policyConfigModel{
+		Owner:                          types.StringValue("test-org"),
+		Name:                           types.StringValue("Test Policy"),
+		EnableActionPolicy:             types.BoolValue(true),
+		AllowedActions:                 types.MapNull(types.StringType),
+		EnableHardenRunnerPolicy:       types.BoolValue(false),
+		HardenRunnerTargetLabels:       types.SetNull(types.StringType),
+		HardenRunnerCustomActions:      types.SetNull(types.StringType),
+		EnableRunsOnPolicy:             types.BoolValue(false),
+		DisallowedRunnerLabels:         types.SetNull(types.StringType),
+		EnableSecretsPolicy:            types.BoolValue(false),
+		EnableCompromisedActionsPolicy: types.BoolValue(false),
+		RequirePinnedActions:           types.BoolValue(true),
+		PinnedActionsExemptions:        types.SetNull(types.StringType),
+		IsDryRun:                       types.BoolValue(false),
+		ExemptedUsers:                  types.SetNull(types.StringType),
+	}
+
+	createRequest := stepsecurityapi.CreateRunPolicyRequest{
+		PolicyConfig: stepsecurityapi.RunPolicyConfig{
+			RequirePinnedActions: policyConfig.RequirePinnedActions.ValueBool(),
+		},
+	}
+
+	if !policyConfig.PinnedActionsExemptions.IsNull() {
+		t.Fatal("expected PinnedActionsExemptions to be null")
+	}
+
+	assert.True(t, createRequest.PolicyConfig.RequirePinnedActions)
+	assert.Nil(t, createRequest.PolicyConfig.PinnedActionsExemptions)
 }
 
 func TestGithubRunPolicyResource_UpdateSendsEmptyHardenRunnerSets(t *testing.T) {
@@ -593,6 +751,11 @@ func testGithubRunPolicyConfig(t *testing.T, model githubRunPolicyResourceModel)
 }
 
 func testRunPolicyConfigObjectValue(policyConfig policyConfigModel) types.Object {
+	pinnedActionsExemptions := policyConfig.PinnedActionsExemptions
+	if reflect.DeepEqual(pinnedActionsExemptions, types.Set{}) {
+		pinnedActionsExemptions = types.SetNull(types.StringType)
+	}
+
 	return types.ObjectValueMust(map[string]attr.Type{
 		"owner":                             types.StringType,
 		"name":                              types.StringType,
@@ -605,6 +768,8 @@ func testRunPolicyConfigObjectValue(policyConfig policyConfigModel) types.Object
 		"disallowed_runner_labels":          types.SetType{ElemType: types.StringType},
 		"enable_secrets_policy":             types.BoolType,
 		"enable_compromised_actions_policy": types.BoolType,
+		"require_pinned_actions":            types.BoolType,
+		"actions_to_exempt_while_pinning":   types.SetType{ElemType: types.StringType},
 		"is_dry_run":                        types.BoolType,
 		"exempted_users":                    types.SetType{ElemType: types.StringType},
 	}, map[string]attr.Value{
@@ -619,6 +784,8 @@ func testRunPolicyConfigObjectValue(policyConfig policyConfigModel) types.Object
 		"disallowed_runner_labels":          policyConfig.DisallowedRunnerLabels,
 		"enable_secrets_policy":             policyConfig.EnableSecretsPolicy,
 		"enable_compromised_actions_policy": policyConfig.EnableCompromisedActionsPolicy,
+		"require_pinned_actions":            policyConfig.RequirePinnedActions,
+		"actions_to_exempt_while_pinning":   pinnedActionsExemptions,
 		"is_dry_run":                        policyConfig.IsDryRun,
 		"exempted_users":                    policyConfig.ExemptedUsers,
 	})
@@ -656,6 +823,27 @@ resource "stepsecurity_github_run_policy" "test" {
     enable_harden_runner_policy  = true
     harden_runner_target_labels  = ["ubuntu-step-security"]
     harden_runner_custom_actions = ["my-org/harden-runner"]
+    allowed_actions = {
+      "actions/checkout" = "allow"
+    }
+  }
+}
+`, owner, name)
+}
+
+func testAccGithubRunPolicyResourceConfigWithPinning(owner, name string) string {
+	return fmt.Sprintf(`
+resource "stepsecurity_github_run_policy" "test" {
+  owner     = %[1]q
+  name      = %[2]q
+  all_repos = true
+
+  policy_config = {
+    owner                           = %[1]q
+    name                            = %[2]q
+    enable_action_policy            = true
+    require_pinned_actions          = true
+    actions_to_exempt_while_pinning = ["actions/*"]
     allowed_actions = {
       "actions/checkout" = "allow"
     }

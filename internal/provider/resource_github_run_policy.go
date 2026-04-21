@@ -68,6 +68,8 @@ type policyConfigModel struct {
 	DisallowedRunnerLabels         types.Set    `tfsdk:"disallowed_runner_labels"`
 	EnableSecretsPolicy            types.Bool   `tfsdk:"enable_secrets_policy"`
 	EnableCompromisedActionsPolicy types.Bool   `tfsdk:"enable_compromised_actions_policy"`
+	RequirePinnedActions           types.Bool   `tfsdk:"require_pinned_actions"`
+	PinnedActionsExemptions        types.Set    `tfsdk:"actions_to_exempt_while_pinning"`
 	IsDryRun                       types.Bool   `tfsdk:"is_dry_run"`
 	ExemptedUsers                  types.Set    `tfsdk:"exempted_users"`
 }
@@ -185,6 +187,17 @@ func (r *githubRunPolicyResource) Schema(_ context.Context, _ resource.SchemaReq
 						Default:             booldefault.StaticBool(false),
 						MarkdownDescription: "Whether to enable the compromised actions policy.",
 					},
+					"require_pinned_actions": schema.BoolAttribute{
+						Optional:            true,
+						Computed:            true,
+						Default:             booldefault.StaticBool(false),
+						MarkdownDescription: "Whether to require all actions to be pinned to full-length commit SHAs. Sub-feature of the allowed actions policy — only meaningful when `enable_action_policy` is true.",
+					},
+					"actions_to_exempt_while_pinning": schema.SetAttribute{
+						ElementType:         types.StringType,
+						Optional:            true,
+						MarkdownDescription: "Set of actions exempt from pinning requirements. Supports exact match (e.g., 'actions/checkout'), name-only match, and owner wildcard (e.g., 'my-org/*').",
+					},
 					"is_dry_run": schema.BoolAttribute{
 						Optional:            true,
 						Computed:            true,
@@ -266,6 +279,7 @@ func (r *githubRunPolicyResource) Create(ctx context.Context, req resource.Creat
 			EnableRunsOnPolicy:             policyConfig.EnableRunsOnPolicy.ValueBool(),
 			EnableSecretsPolicy:            policyConfig.EnableSecretsPolicy.ValueBool(),
 			EnableCompromisedActionsPolicy: policyConfig.EnableCompromisedActionsPolicy.ValueBool(),
+			RequirePinnedActions:           policyConfig.RequirePinnedActions.ValueBool(),
 			IsDryRun:                       policyConfig.IsDryRun.ValueBool(),
 		},
 	}
@@ -327,6 +341,17 @@ func (r *githubRunPolicyResource) Create(ctx context.Context, req resource.Creat
 			disallowedMap[label] = struct{}{}
 		}
 		createRequest.PolicyConfig.DisallowedRunnerLabels = disallowedMap
+	}
+
+	// Handle pinned actions exemptions set
+	if !policyConfig.PinnedActionsExemptions.IsNull() {
+		var pinnedExemptions []string
+		diags = policyConfig.PinnedActionsExemptions.ElementsAs(ctx, &pinnedExemptions, false)
+		resp.Diagnostics.Append(diags...)
+		if resp.Diagnostics.HasError() {
+			return
+		}
+		createRequest.PolicyConfig.PinnedActionsExemptions = pinnedExemptions
 	}
 
 	// Handle exempted users list
@@ -474,6 +499,7 @@ func (r *githubRunPolicyResource) Update(ctx context.Context, req resource.Updat
 			EnableRunsOnPolicy:             policyConfig.EnableRunsOnPolicy.ValueBool(),
 			EnableSecretsPolicy:            policyConfig.EnableSecretsPolicy.ValueBool(),
 			EnableCompromisedActionsPolicy: policyConfig.EnableCompromisedActionsPolicy.ValueBool(),
+			RequirePinnedActions:           policyConfig.RequirePinnedActions.ValueBool(),
 			IsDryRun:                       policyConfig.IsDryRun.ValueBool(),
 		},
 	}
@@ -535,6 +561,17 @@ func (r *githubRunPolicyResource) Update(ctx context.Context, req resource.Updat
 			disallowedMap[label] = struct{}{}
 		}
 		updateRequest.PolicyConfig.DisallowedRunnerLabels = disallowedMap
+	}
+
+	// Handle pinned actions exemptions set
+	if !policyConfig.PinnedActionsExemptions.IsNull() {
+		var pinnedExemptions []string
+		diags = policyConfig.PinnedActionsExemptions.ElementsAs(ctx, &pinnedExemptions, false)
+		resp.Diagnostics.Append(diags...)
+		if resp.Diagnostics.HasError() {
+			return
+		}
+		updateRequest.PolicyConfig.PinnedActionsExemptions = pinnedExemptions
 	}
 
 	// Handle exempted users list
@@ -696,6 +733,7 @@ func (r *githubRunPolicyResource) updateModelFromAPI(ctx context.Context, model 
 		"enable_runs_on_policy":             types.BoolValue(policy.PolicyConfig.EnableRunsOnPolicy),
 		"enable_secrets_policy":             types.BoolValue(policy.PolicyConfig.EnableSecretsPolicy),
 		"enable_compromised_actions_policy": types.BoolValue(policy.PolicyConfig.EnableCompromisedActionsPolicy),
+		"require_pinned_actions":            types.BoolValue(policy.PolicyConfig.RequirePinnedActions),
 		"is_dry_run":                        types.BoolValue(policy.PolicyConfig.IsDryRun),
 	}
 
@@ -761,6 +799,19 @@ func (r *githubRunPolicyResource) updateModelFromAPI(ctx context.Context, model 
 		policyConfigAttrs["disallowed_runner_labels"] = types.SetNull(types.StringType)
 	}
 
+	// Handle pinned actions exemptions set
+	if policy.PolicyConfig.PinnedActionsExemptions != nil {
+		pinnedExemptionsList := make([]attr.Value, len(policy.PolicyConfig.PinnedActionsExemptions))
+		for i, exemption := range policy.PolicyConfig.PinnedActionsExemptions {
+			pinnedExemptionsList[i] = types.StringValue(exemption)
+		}
+		setValue, setDiags := types.SetValue(types.StringType, pinnedExemptionsList)
+		diags.Append(setDiags...)
+		policyConfigAttrs["actions_to_exempt_while_pinning"] = setValue
+	} else {
+		policyConfigAttrs["actions_to_exempt_while_pinning"] = types.SetNull(types.StringType)
+	}
+
 	// Handle exempted users set
 	if policy.PolicyConfig.ExemptedUsers != nil {
 		exemptedUsersList := make([]attr.Value, len(policy.PolicyConfig.ExemptedUsers))
@@ -787,6 +838,8 @@ func (r *githubRunPolicyResource) updateModelFromAPI(ctx context.Context, model 
 		"disallowed_runner_labels":          types.SetType{ElemType: types.StringType},
 		"enable_secrets_policy":             types.BoolType,
 		"enable_compromised_actions_policy": types.BoolType,
+		"require_pinned_actions":            types.BoolType,
+		"actions_to_exempt_while_pinning":   types.SetType{ElemType: types.StringType},
 		"is_dry_run":                        types.BoolType,
 		"exempted_users":                    types.SetType{ElemType: types.StringType},
 	}

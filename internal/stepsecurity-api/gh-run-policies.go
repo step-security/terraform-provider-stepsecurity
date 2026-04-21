@@ -34,6 +34,8 @@ type RunPolicyConfig struct {
 	DisallowedRunnerLabels         map[string]struct{} `json:"disallowed_runner_labels,omitempty"`
 	EnableSecretsPolicy            bool                `json:"enable_secrets_policy,omitempty"`
 	EnableCompromisedActionsPolicy bool                `json:"enable_compromised_actions_policy,omitempty"`
+	RequirePinnedActions           bool                `json:"require_pinned_actions,omitempty"`
+	PinnedActionsExemptions        []string            `json:"pinned_actions_exemptions,omitempty"`
 	IsDryRun                       bool                `json:"is_dry_run,omitempty"`
 	ExemptedUsers                  []string            `json:"exempted_users,omitempty"`
 }
