@@ -36,7 +36,7 @@ func TestAccGithubRunPolicyResource(t *testing.T) {
 					resourcehelper.TestCheckResourceAttr("stepsecurity_github_run_policy.test", "all_repos", "true"),
 					resourcehelper.TestCheckResourceAttr("stepsecurity_github_run_policy.test", "policy_config.enable_action_policy", "true"),
 					resourcehelper.TestCheckResourceAttr("stepsecurity_github_run_policy.test", "policy_config.enable_harden_runner_policy", "true"),
-					resourcehelper.TestCheckTypeSetElemAttr("stepsecurity_github_run_policy.test", "policy_config.harden_runner_labels.*", "ubuntu-step-security"),
+					resourcehelper.TestCheckTypeSetElemAttr("stepsecurity_github_run_policy.test", "policy_config.harden_runner_target_labels.*", "ubuntu-step-security"),
 					resourcehelper.TestCheckTypeSetElemAttr("stepsecurity_github_run_policy.test", "policy_config.harden_runner_custom_actions.*", "my-org/harden-runner"),
 					resourcehelper.TestCheckResourceAttrSet("stepsecurity_github_run_policy.test", "policy_id"),
 					resourcehelper.TestCheckResourceAttrSet("stepsecurity_github_run_policy.test", "id"),
@@ -55,7 +55,7 @@ func TestAccGithubRunPolicyResource(t *testing.T) {
 					resourcehelper.TestCheckResourceAttr("stepsecurity_github_run_policy.test", "name", "Updated Test Policy"),
 					resourcehelper.TestCheckResourceAttr("stepsecurity_github_run_policy.test", "policy_config.enable_secrets_policy", "true"),
 					resourcehelper.TestCheckResourceAttr("stepsecurity_github_run_policy.test", "policy_config.enable_harden_runner_policy", "true"),
-					resourcehelper.TestCheckTypeSetElemAttr("stepsecurity_github_run_policy.test", "policy_config.harden_runner_labels.*", "ubuntu-step-security"),
+					resourcehelper.TestCheckTypeSetElemAttr("stepsecurity_github_run_policy.test", "policy_config.harden_runner_target_labels.*", "ubuntu-step-security"),
 					resourcehelper.TestCheckTypeSetElemAttr("stepsecurity_github_run_policy.test", "policy_config.harden_runner_custom_actions.*", "my-org/harden-runner"),
 				),
 			},
@@ -82,7 +82,7 @@ func TestGithubRunPolicyResource_UpdateModelFromAPI(t *testing.T) {
 
 	ctx := context.Background()
 	model := &githubRunPolicyResourceModel{}
-	hardenRunnerLabels := []string{"ubuntu-step-security", "linux-secure"}
+	hardenRunnerTargetLabels := []string{"ubuntu-step-security", "linux-secure"}
 	hardenRunnerCustomActions := []string{"my-org/harden-runner", "octo/harden-runner-action"}
 
 	apiResponse := &stepsecurityapi.RunPolicy{
@@ -109,7 +109,7 @@ func TestGithubRunPolicyResource_UpdateModelFromAPI(t *testing.T) {
 			DisallowedRunnerLabels: map[string]struct{}{
 				"self-hosted": {},
 			},
-			HardenRunnerLabels:        hardenRunnerLabels,
+			HardenRunnerTargetLabels:  hardenRunnerTargetLabels,
 			HardenRunnerCustomActions: hardenRunnerCustomActions,
 		},
 	}
@@ -127,7 +127,7 @@ func TestGithubRunPolicyResource_UpdateModelFromAPI(t *testing.T) {
 	diags = model.PolicyConfig.As(ctx, &policyConfig, basetypes.ObjectAsOptions{})
 	require.False(t, diags.HasError())
 	assert.True(t, policyConfig.EnableHardenRunnerPolicy.ValueBool())
-	assert.ElementsMatch(t, []string{"ubuntu-step-security", "linux-secure"}, setStrings(t, policyConfig.HardenRunnerLabels))
+	assert.ElementsMatch(t, []string{"ubuntu-step-security", "linux-secure"}, setStrings(t, policyConfig.HardenRunnerTargetLabels))
 	assert.ElementsMatch(t, []string{"my-org/harden-runner", "octo/harden-runner-action"}, setStrings(t, policyConfig.HardenRunnerCustomActions))
 }
 
@@ -152,7 +152,7 @@ func TestGithubRunPolicyResource_UpdateSendsEmptyHardenRunnerSets(t *testing.T) 
 			EnableActionPolicy:             types.BoolValue(false),
 			AllowedActions:                 types.MapNull(types.StringType),
 			EnableHardenRunnerPolicy:       types.BoolValue(true),
-			HardenRunnerLabels:             types.SetValueMust(types.StringType, testStringAttrValues(previousLabels)),
+			HardenRunnerTargetLabels:       types.SetValueMust(types.StringType, testStringAttrValues(previousLabels)),
 			HardenRunnerCustomActions:      types.SetValueMust(types.StringType, testStringAttrValues(previousActions)),
 			EnableRunsOnPolicy:             types.BoolValue(false),
 			DisallowedRunnerLabels:         types.SetNull(types.StringType),
@@ -180,7 +180,7 @@ func TestGithubRunPolicyResource_UpdateSendsEmptyHardenRunnerSets(t *testing.T) 
 			EnableActionPolicy:             types.BoolValue(false),
 			AllowedActions:                 types.MapNull(types.StringType),
 			EnableHardenRunnerPolicy:       types.BoolValue(true),
-			HardenRunnerLabels:             types.SetValueMust(types.StringType, []attr.Value{}),
+			HardenRunnerTargetLabels:       types.SetValueMust(types.StringType, []attr.Value{}),
 			HardenRunnerCustomActions:      types.SetValueMust(types.StringType, []attr.Value{}),
 			EnableRunsOnPolicy:             types.BoolValue(false),
 			DisallowedRunnerLabels:         types.SetNull(types.StringType),
@@ -204,7 +204,7 @@ func TestGithubRunPolicyResource_UpdateSendsEmptyHardenRunnerSets(t *testing.T) 
 			if req.PolicyConfig.Owner != "test-org" || req.PolicyConfig.Name != "Updated Policy" {
 				return false
 			}
-			return len(req.PolicyConfig.HardenRunnerLabels) == 0 &&
+			return len(req.PolicyConfig.HardenRunnerTargetLabels) == 0 &&
 				len(req.PolicyConfig.HardenRunnerCustomActions) == 0
 		})).
 		Return(&stepsecurityapi.RunPolicy{
@@ -222,7 +222,7 @@ func TestGithubRunPolicyResource_UpdateSendsEmptyHardenRunnerSets(t *testing.T) 
 				Name:                     "Updated Policy",
 				EnableHardenRunnerPolicy: true,
 				// agent-api uses []string with `omitempty`, so cleared values can come back omitted (nil) or as empty slice — both mean "match all jobs" under PR 7814.
-				HardenRunnerLabels:        nil,
+				HardenRunnerTargetLabels:  nil,
 				HardenRunnerCustomActions: nil,
 			},
 		}, nil).
@@ -252,9 +252,9 @@ func TestGithubRunPolicyResource_UpdateSendsEmptyHardenRunnerSets(t *testing.T) 
 	require.False(t, diags.HasError())
 
 	assert.True(t, policyConfig.EnableHardenRunnerPolicy.ValueBool())
-	assert.False(t, policyConfig.HardenRunnerLabels.IsNull())
+	assert.False(t, policyConfig.HardenRunnerTargetLabels.IsNull())
 	assert.False(t, policyConfig.HardenRunnerCustomActions.IsNull())
-	assert.Empty(t, setStrings(t, policyConfig.HardenRunnerLabels))
+	assert.Empty(t, setStrings(t, policyConfig.HardenRunnerTargetLabels))
 	assert.Empty(t, setStrings(t, policyConfig.HardenRunnerCustomActions))
 }
 
@@ -279,7 +279,7 @@ func TestGithubRunPolicyResource_UpdatePreservesUnmanagedHardenRunnerFields(t *t
 			EnableActionPolicy:             types.BoolValue(false),
 			AllowedActions:                 types.MapNull(types.StringType),
 			EnableHardenRunnerPolicy:       types.BoolValue(true),
-			HardenRunnerLabels:             types.SetValueMust(types.StringType, testStringAttrValues(previousLabels)),
+			HardenRunnerTargetLabels:       types.SetValueMust(types.StringType, testStringAttrValues(previousLabels)),
 			HardenRunnerCustomActions:      types.SetValueMust(types.StringType, testStringAttrValues(previousActions)),
 			EnableRunsOnPolicy:             types.BoolValue(false),
 			DisallowedRunnerLabels:         types.SetNull(types.StringType),
@@ -307,7 +307,7 @@ func TestGithubRunPolicyResource_UpdatePreservesUnmanagedHardenRunnerFields(t *t
 			EnableActionPolicy:             types.BoolValue(false),
 			AllowedActions:                 types.MapNull(types.StringType),
 			EnableHardenRunnerPolicy:       types.BoolValue(false),
-			HardenRunnerLabels:             types.SetNull(types.StringType),
+			HardenRunnerTargetLabels:       types.SetNull(types.StringType),
 			HardenRunnerCustomActions:      types.SetNull(types.StringType),
 			EnableRunsOnPolicy:             types.BoolValue(false),
 			DisallowedRunnerLabels:         types.SetNull(types.StringType),
@@ -335,7 +335,7 @@ func TestGithubRunPolicyResource_UpdatePreservesUnmanagedHardenRunnerFields(t *t
 			EnableActionPolicy:             types.BoolNull(),
 			AllowedActions:                 types.MapNull(types.StringType),
 			EnableHardenRunnerPolicy:       types.BoolNull(),
-			HardenRunnerLabels:             types.SetNull(types.StringType),
+			HardenRunnerTargetLabels:       types.SetNull(types.StringType),
 			HardenRunnerCustomActions:      types.SetNull(types.StringType),
 			EnableRunsOnPolicy:             types.BoolNull(),
 			DisallowedRunnerLabels:         types.SetNull(types.StringType),
@@ -359,7 +359,7 @@ func TestGithubRunPolicyResource_UpdatePreservesUnmanagedHardenRunnerFields(t *t
 			if req.PolicyConfig.Owner != "test-org" || req.PolicyConfig.Name != "Updated Policy" {
 				return false
 			}
-			return reflect.DeepEqual(req.PolicyConfig.HardenRunnerLabels, previousLabels) &&
+			return reflect.DeepEqual(req.PolicyConfig.HardenRunnerTargetLabels, previousLabels) &&
 				reflect.DeepEqual(req.PolicyConfig.HardenRunnerCustomActions, previousActions)
 		})).
 		Return(&stepsecurityapi.RunPolicy{
@@ -376,7 +376,7 @@ func TestGithubRunPolicyResource_UpdatePreservesUnmanagedHardenRunnerFields(t *t
 				Owner:                     "test-org",
 				Name:                      "Updated Policy",
 				EnableHardenRunnerPolicy:  true,
-				HardenRunnerLabels:        previousLabels,
+				HardenRunnerTargetLabels:  previousLabels,
 				HardenRunnerCustomActions: previousActions,
 			},
 		}, nil).
@@ -402,8 +402,8 @@ func TestGithubRunPolicyResource_EmptyLabelsMatchAllJobs(t *testing.T) {
 	t.Parallel()
 
 	// Documents the contract introduced in agent-api PR #7814: an empty
-	// harden_runner_labels list applies the policy to all jobs. The provider
-	// must round-trip `harden_runner_labels = []` without drift even though
+	// harden_runner_target_labels list applies the policy to all jobs. The provider
+	// must round-trip `harden_runner_target_labels = []` without drift even though
 	// the backend struct serializes the empty slice as omitted JSON.
 	ctx := context.Background()
 	now := time.Date(2024, 5, 6, 7, 8, 9, 0, time.UTC)
@@ -421,7 +421,7 @@ func TestGithubRunPolicyResource_EmptyLabelsMatchAllJobs(t *testing.T) {
 			EnableActionPolicy:             types.BoolValue(false),
 			AllowedActions:                 types.MapNull(types.StringType),
 			EnableHardenRunnerPolicy:       types.BoolValue(true),
-			HardenRunnerLabels:             types.SetValueMust(types.StringType, []attr.Value{}),
+			HardenRunnerTargetLabels:       types.SetValueMust(types.StringType, []attr.Value{}),
 			HardenRunnerCustomActions:      types.SetValueMust(types.StringType, []attr.Value{}),
 			EnableRunsOnPolicy:             types.BoolValue(false),
 			DisallowedRunnerLabels:         types.SetNull(types.StringType),
@@ -443,7 +443,7 @@ func TestGithubRunPolicyResource_EmptyLabelsMatchAllJobs(t *testing.T) {
 				return false
 			}
 			// nil and []string{} both signal "match all jobs" under PR 7814.
-			return len(req.PolicyConfig.HardenRunnerLabels) == 0 &&
+			return len(req.PolicyConfig.HardenRunnerTargetLabels) == 0 &&
 				len(req.PolicyConfig.HardenRunnerCustomActions) == 0
 		})).
 		Return(&stepsecurityapi.RunPolicy{
@@ -462,7 +462,7 @@ func TestGithubRunPolicyResource_EmptyLabelsMatchAllJobs(t *testing.T) {
 				// Backend round-trips the empty slice as omitted JSON, so the
 				// response carries nil — preservePreviousEmptySet must keep []
 				// in state to avoid spurious diffs.
-				HardenRunnerLabels:        nil,
+				HardenRunnerTargetLabels:  nil,
 				HardenRunnerCustomActions: nil,
 			},
 		}, nil).
@@ -490,9 +490,9 @@ func TestGithubRunPolicyResource_EmptyLabelsMatchAllJobs(t *testing.T) {
 	require.False(t, diags.HasError())
 
 	assert.True(t, policyConfig.EnableHardenRunnerPolicy.ValueBool())
-	assert.False(t, policyConfig.HardenRunnerLabels.IsNull(), "empty set must not drift to null")
+	assert.False(t, policyConfig.HardenRunnerTargetLabels.IsNull(), "empty set must not drift to null")
 	assert.False(t, policyConfig.HardenRunnerCustomActions.IsNull(), "empty set must not drift to null")
-	assert.Empty(t, setStrings(t, policyConfig.HardenRunnerLabels))
+	assert.Empty(t, setStrings(t, policyConfig.HardenRunnerTargetLabels))
 	assert.Empty(t, setStrings(t, policyConfig.HardenRunnerCustomActions))
 }
 
@@ -503,7 +503,7 @@ func TestGithubRunPolicyResource_ImportAllJobsPolicyLandsAsNull(t *testing.T) {
 	// policy (enabled + empty labels on the backend, arriving as nil due to
 	// JSON omitempty). On first Read, the resource has no prior config to
 	// anchor an empty set to, so state lands as null. The user's HCL must
-	// then set `harden_runner_labels = []` to reconcile on the next apply.
+	// then set `harden_runner_target_labels = []` to reconcile on the next apply.
 	//
 	// This behavior is intentional: surfacing `[]` unconditionally would
 	// break the additive-only contract, since users who omit the attribute
@@ -532,7 +532,7 @@ func TestGithubRunPolicyResource_ImportAllJobsPolicyLandsAsNull(t *testing.T) {
 			EnableHardenRunnerPolicy: true,
 			// Backend stored an empty labels list; omitempty strips it from the
 			// response, so the provider sees a nil slice.
-			HardenRunnerLabels:        nil,
+			HardenRunnerTargetLabels:  nil,
 			HardenRunnerCustomActions: nil,
 		},
 	}
@@ -549,8 +549,8 @@ func TestGithubRunPolicyResource_ImportAllJobsPolicyLandsAsNull(t *testing.T) {
 	assert.True(t, policyConfig.EnableHardenRunnerPolicy.ValueBool())
 	// Expected: null, because there is no prior config to signal that the
 	// user wants an empty-set representation. One `terraform apply` after
-	// import with `harden_runner_labels = []` in HCL reconciles the state.
-	assert.True(t, policyConfig.HardenRunnerLabels.IsNull(), "fresh Read must land as null; prior-state signal drives the empty-set preservation")
+	// import with `harden_runner_target_labels = []` in HCL reconciles the state.
+	assert.True(t, policyConfig.HardenRunnerTargetLabels.IsNull(), "fresh Read must land as null; prior-state signal drives the empty-set preservation")
 	assert.True(t, policyConfig.HardenRunnerCustomActions.IsNull())
 }
 
@@ -599,7 +599,7 @@ func testRunPolicyConfigObjectValue(policyConfig policyConfigModel) types.Object
 		"enable_action_policy":              types.BoolType,
 		"allowed_actions":                   types.MapType{ElemType: types.StringType},
 		"enable_harden_runner_policy":       types.BoolType,
-		"harden_runner_labels":              types.SetType{ElemType: types.StringType},
+		"harden_runner_target_labels":       types.SetType{ElemType: types.StringType},
 		"harden_runner_custom_actions":      types.SetType{ElemType: types.StringType},
 		"enable_runs_on_policy":             types.BoolType,
 		"disallowed_runner_labels":          types.SetType{ElemType: types.StringType},
@@ -613,7 +613,7 @@ func testRunPolicyConfigObjectValue(policyConfig policyConfigModel) types.Object
 		"enable_action_policy":              policyConfig.EnableActionPolicy,
 		"allowed_actions":                   policyConfig.AllowedActions,
 		"enable_harden_runner_policy":       policyConfig.EnableHardenRunnerPolicy,
-		"harden_runner_labels":              policyConfig.HardenRunnerLabels,
+		"harden_runner_target_labels":       policyConfig.HardenRunnerTargetLabels,
 		"harden_runner_custom_actions":      policyConfig.HardenRunnerCustomActions,
 		"enable_runs_on_policy":             policyConfig.EnableRunsOnPolicy,
 		"disallowed_runner_labels":          policyConfig.DisallowedRunnerLabels,
@@ -654,7 +654,7 @@ resource "stepsecurity_github_run_policy" "test" {
     name                         = %[2]q
     enable_action_policy         = true
     enable_harden_runner_policy  = true
-    harden_runner_labels         = ["ubuntu-step-security"]
+    harden_runner_target_labels  = ["ubuntu-step-security"]
     harden_runner_custom_actions = ["my-org/harden-runner"]
     allowed_actions = {
       "actions/checkout" = "allow"
@@ -677,7 +677,7 @@ resource "stepsecurity_github_run_policy" "test" {
     enable_action_policy         = true
     enable_harden_runner_policy  = true
     enable_secrets_policy        = true
-    harden_runner_labels         = ["ubuntu-step-security"]
+    harden_runner_target_labels  = ["ubuntu-step-security"]
     harden_runner_custom_actions = ["my-org/harden-runner"]
     allowed_actions = {
       "actions/checkout"             = "allow"

@@ -119,15 +119,14 @@ resource "stepsecurity_github_run_policy" "harden_runner_policy_targeted" {
   all_repos = true
 
   policy_config = {
-    owner                        = "my-org"
-    name                         = "Harden Runner Policy - Targeted"
-    enable_harden_runner_policy  = true
-    harden_runner_labels         = ["ubuntu-step-security", "linux-secure"]
-    harden_runner_custom_actions = ["my-org/harden-runner"]
+    owner                       = "my-org"
+    name                        = "Harden Runner Policy - Targeted"
+    enable_harden_runner_policy = true
+    harden_runner_target_labels = ["ubuntu-step-security", "linux-secure"]
   }
 }
 
-# Harden Runner Policy Example (all jobs) - Empty harden_runner_labels applies the policy to every job
+# Harden Runner Policy Example (all jobs) - Empty harden_runner_target_labels applies the policy to every job
 resource "stepsecurity_github_run_policy" "harden_runner_policy_all_jobs" {
   owner     = "my-org"
   name      = "Harden Runner Policy - All Jobs"
@@ -137,7 +136,22 @@ resource "stepsecurity_github_run_policy" "harden_runner_policy_all_jobs" {
     owner                       = "my-org"
     name                        = "Harden Runner Policy - All Jobs"
     enable_harden_runner_policy = true
-    harden_runner_labels        = []
+    harden_runner_target_labels = []
+  }
+}
+
+# Harden Runner Policy Example (custom actions) - Accepts additional Harden Runner-equivalent actions
+resource "stepsecurity_github_run_policy" "harden_runner_policy_custom_actions" {
+  owner     = "my-org"
+  name      = "Harden Runner Policy - Custom Actions"
+  all_repos = true
+
+  policy_config = {
+    owner                        = "my-org"
+    name                         = "Harden Runner Policy - Custom Actions"
+    enable_harden_runner_policy  = true
+    harden_runner_target_labels  = []
+    harden_runner_custom_actions = ["my-org/harden-runner"]
   }
 }
 

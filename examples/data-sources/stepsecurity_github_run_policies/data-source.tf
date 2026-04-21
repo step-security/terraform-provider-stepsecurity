@@ -60,7 +60,7 @@ output "harden_runner_policies" {
     {
       name                         = policy.name
       policy_id                    = policy.policy_id
-      harden_runner_labels         = policy.policy_config.harden_runner_labels
+      harden_runner_target_labels  = policy.policy_config.harden_runner_target_labels
       harden_runner_custom_actions = policy.policy_config.harden_runner_custom_actions
     }
     if policy.policy_config.enable_harden_runner_policy

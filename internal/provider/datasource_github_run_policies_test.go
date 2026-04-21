@@ -92,7 +92,7 @@ func TestGithubRunPoliciesDataSource_ReadMapsHardenRunnerFields(t *testing.T) {
 					Owner:                     "test-org",
 					Name:                      "Test Policy",
 					EnableHardenRunnerPolicy:  true,
-					HardenRunnerLabels:        labels,
+					HardenRunnerTargetLabels:  labels,
 					HardenRunnerCustomActions: customActions,
 				},
 			},
@@ -129,7 +129,7 @@ func TestGithubRunPoliciesDataSource_ReadMapsHardenRunnerFields(t *testing.T) {
 	require.False(t, diags.HasError())
 
 	assert.True(t, policyConfig.EnableHardenRunnerPolicy.ValueBool())
-	assert.ElementsMatch(t, labels, setStrings(t, policyConfig.HardenRunnerLabels))
+	assert.ElementsMatch(t, labels, setStrings(t, policyConfig.HardenRunnerTargetLabels))
 	assert.ElementsMatch(t, customActions, setStrings(t, policyConfig.HardenRunnerCustomActions))
 }
 
@@ -161,7 +161,7 @@ func TestGithubRunPoliciesDataSource_ReadEmptyLabelsSurfaceAsEmptySet(t *testing
 					Owner:                     "test-org",
 					Name:                      "All Jobs Policy",
 					EnableHardenRunnerPolicy:  true,
-					HardenRunnerLabels:        nil,
+					HardenRunnerTargetLabels:  nil,
 					HardenRunnerCustomActions: nil,
 				},
 			},
@@ -213,9 +213,9 @@ func TestGithubRunPoliciesDataSource_ReadEmptyLabelsSurfaceAsEmptySet(t *testing
 	diags = runPolicies[0].PolicyConfig.As(ctx, &enabled, basetypes.ObjectAsOptions{})
 	require.False(t, diags.HasError())
 	assert.True(t, enabled.EnableHardenRunnerPolicy.ValueBool())
-	assert.False(t, enabled.HardenRunnerLabels.IsNull(), "enabled+empty must surface as empty set, not null")
+	assert.False(t, enabled.HardenRunnerTargetLabels.IsNull(), "enabled+empty must surface as empty set, not null")
 	assert.False(t, enabled.HardenRunnerCustomActions.IsNull())
-	assert.Empty(t, setStrings(t, enabled.HardenRunnerLabels))
+	assert.Empty(t, setStrings(t, enabled.HardenRunnerTargetLabels))
 	assert.Empty(t, setStrings(t, enabled.HardenRunnerCustomActions))
 
 	// Disabled: null is the correct shape (attribute doesn't apply).
@@ -223,7 +223,7 @@ func TestGithubRunPoliciesDataSource_ReadEmptyLabelsSurfaceAsEmptySet(t *testing
 	diags = runPolicies[1].PolicyConfig.As(ctx, &disabled, basetypes.ObjectAsOptions{})
 	require.False(t, diags.HasError())
 	assert.False(t, disabled.EnableHardenRunnerPolicy.ValueBool())
-	assert.True(t, disabled.HardenRunnerLabels.IsNull())
+	assert.True(t, disabled.HardenRunnerTargetLabels.IsNull())
 	assert.True(t, disabled.HardenRunnerCustomActions.IsNull())
 }
 
@@ -248,7 +248,7 @@ type githubRunPolicyDataSourcePolicyConfigModel struct {
 	EnableActionPolicy             types.Bool   `tfsdk:"enable_action_policy"`
 	AllowedActions                 types.Map    `tfsdk:"allowed_actions"`
 	EnableHardenRunnerPolicy       types.Bool   `tfsdk:"enable_harden_runner_policy"`
-	HardenRunnerLabels             types.Set    `tfsdk:"harden_runner_labels"`
+	HardenRunnerTargetLabels       types.Set    `tfsdk:"harden_runner_target_labels"`
 	HardenRunnerCustomActions      types.Set    `tfsdk:"harden_runner_custom_actions"`
 	EnableRunsOnPolicy             types.Bool   `tfsdk:"enable_runs_on_policy"`
 	DisallowedRunnerLabels         types.Set    `tfsdk:"disallowed_runner_labels"`
@@ -300,7 +300,7 @@ func testRunPolicyDataSourceAttrTypes() map[string]attr.Type {
 			"enable_action_policy":              types.BoolType,
 			"allowed_actions":                   types.MapType{ElemType: types.StringType},
 			"enable_harden_runner_policy":       types.BoolType,
-			"harden_runner_labels":              types.SetType{ElemType: types.StringType},
+			"harden_runner_target_labels":       types.SetType{ElemType: types.StringType},
 			"harden_runner_custom_actions":      types.SetType{ElemType: types.StringType},
 			"enable_runs_on_policy":             types.BoolType,
 			"disallowed_runner_labels":          types.SetType{ElemType: types.StringType},

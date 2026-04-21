@@ -129,7 +129,7 @@ func (d *githubRunPoliciesDataSource) Schema(_ context.Context, _ datasource.Sch
 									Computed:            true,
 									MarkdownDescription: "Whether the Harden Runner policy is enabled.",
 								},
-								"harden_runner_labels": schema.SetAttribute{
+								"harden_runner_target_labels": schema.SetAttribute{
 									ElementType:         types.StringType,
 									Computed:            true,
 									MarkdownDescription: "Set of runner labels that target Harden Runner enforcement. When `enable_harden_runner_policy` is true, an empty set means the policy applies to every job; a non-empty set filters to jobs whose `runs-on` matches at least one label. When the policy is disabled, this attribute is null.",
@@ -250,18 +250,18 @@ func (d *githubRunPoliciesDataSource) Read(ctx context.Context, req datasource.R
 		// null) for empty labels so consumers can see the documented
 		// "empty = all jobs" contract even though the backend response omits
 		// the field for empty values (JSON omitempty).
-		if len(policy.PolicyConfig.HardenRunnerLabels) > 0 {
-			hardenRunnerLabelsList := make([]attr.Value, len(policy.PolicyConfig.HardenRunnerLabels))
-			for i, label := range policy.PolicyConfig.HardenRunnerLabels {
-				hardenRunnerLabelsList[i] = types.StringValue(label)
+		if len(policy.PolicyConfig.HardenRunnerTargetLabels) > 0 {
+			hardenRunnerTargetLabelsList := make([]attr.Value, len(policy.PolicyConfig.HardenRunnerTargetLabels))
+			for i, label := range policy.PolicyConfig.HardenRunnerTargetLabels {
+				hardenRunnerTargetLabelsList[i] = types.StringValue(label)
 			}
-			setValue, _ := types.SetValue(types.StringType, hardenRunnerLabelsList)
-			policyConfigAttrs["harden_runner_labels"] = setValue
+			setValue, _ := types.SetValue(types.StringType, hardenRunnerTargetLabelsList)
+			policyConfigAttrs["harden_runner_target_labels"] = setValue
 		} else if policy.PolicyConfig.EnableHardenRunnerPolicy {
 			setValue, _ := types.SetValue(types.StringType, []attr.Value{})
-			policyConfigAttrs["harden_runner_labels"] = setValue
+			policyConfigAttrs["harden_runner_target_labels"] = setValue
 		} else {
-			policyConfigAttrs["harden_runner_labels"] = types.SetNull(types.StringType)
+			policyConfigAttrs["harden_runner_target_labels"] = types.SetNull(types.StringType)
 		}
 
 		if len(policy.PolicyConfig.HardenRunnerCustomActions) > 0 {
@@ -297,7 +297,7 @@ func (d *githubRunPoliciesDataSource) Read(ctx context.Context, req datasource.R
 			"enable_action_policy":              types.BoolType,
 			"allowed_actions":                   types.MapType{ElemType: types.StringType},
 			"enable_harden_runner_policy":       types.BoolType,
-			"harden_runner_labels":              types.SetType{ElemType: types.StringType},
+			"harden_runner_target_labels":       types.SetType{ElemType: types.StringType},
 			"harden_runner_custom_actions":      types.SetType{ElemType: types.StringType},
 			"enable_runs_on_policy":             types.BoolType,
 			"disallowed_runner_labels":          types.SetType{ElemType: types.StringType},
@@ -362,7 +362,7 @@ func (d *githubRunPoliciesDataSource) Read(ctx context.Context, req datasource.R
 			"enable_action_policy":              types.BoolType,
 			"allowed_actions":                   types.MapType{ElemType: types.StringType},
 			"enable_harden_runner_policy":       types.BoolType,
-			"harden_runner_labels":              types.SetType{ElemType: types.StringType},
+			"harden_runner_target_labels":       types.SetType{ElemType: types.StringType},
 			"harden_runner_custom_actions":      types.SetType{ElemType: types.StringType},
 			"enable_runs_on_policy":             types.BoolType,
 			"disallowed_runner_labels":          types.SetType{ElemType: types.StringType},

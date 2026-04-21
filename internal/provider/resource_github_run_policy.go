@@ -62,7 +62,7 @@ type policyConfigModel struct {
 	EnableActionPolicy             types.Bool   `tfsdk:"enable_action_policy"`
 	AllowedActions                 types.Map    `tfsdk:"allowed_actions"`
 	EnableHardenRunnerPolicy       types.Bool   `tfsdk:"enable_harden_runner_policy"`
-	HardenRunnerLabels             types.Set    `tfsdk:"harden_runner_labels"`
+	HardenRunnerTargetLabels       types.Set    `tfsdk:"harden_runner_target_labels"`
 	HardenRunnerCustomActions      types.Set    `tfsdk:"harden_runner_custom_actions"`
 	EnableRunsOnPolicy             types.Bool   `tfsdk:"enable_runs_on_policy"`
 	DisallowedRunnerLabels         types.Set    `tfsdk:"disallowed_runner_labels"`
@@ -152,7 +152,7 @@ func (r *githubRunPolicyResource) Schema(_ context.Context, _ resource.SchemaReq
 						Default:             booldefault.StaticBool(false),
 						MarkdownDescription: "Whether to enable the Harden Runner policy.",
 					},
-					"harden_runner_labels": schema.SetAttribute{
+					"harden_runner_target_labels": schema.SetAttribute{
 						ElementType:         types.StringType,
 						Optional:            true,
 						MarkdownDescription: "Set of runner labels that target Harden Runner enforcement. Set to `[]` to apply the policy to every job; set a non-empty list to filter to jobs whose `runs-on` matches at least one label. Omitting the attribute leaves any existing backend value untouched (additive-only).",
@@ -292,14 +292,14 @@ func (r *githubRunPolicyResource) Create(ctx context.Context, req resource.Creat
 		createRequest.PolicyConfig.AllowedActions = allowedActions
 	}
 
-	if !policyConfig.HardenRunnerLabels.IsNull() {
-		var hardenRunnerLabels []string
-		diags = policyConfig.HardenRunnerLabels.ElementsAs(ctx, &hardenRunnerLabels, false)
+	if !policyConfig.HardenRunnerTargetLabels.IsNull() {
+		var hardenRunnerTargetLabels []string
+		diags = policyConfig.HardenRunnerTargetLabels.ElementsAs(ctx, &hardenRunnerTargetLabels, false)
 		resp.Diagnostics.Append(diags...)
 		if resp.Diagnostics.HasError() {
 			return
 		}
-		createRequest.PolicyConfig.HardenRunnerLabels = hardenRunnerLabels
+		createRequest.PolicyConfig.HardenRunnerTargetLabels = hardenRunnerTargetLabels
 	}
 
 	if !policyConfig.HardenRunnerCustomActions.IsNull() {
@@ -432,8 +432,8 @@ func (r *githubRunPolicyResource) Update(ctx context.Context, req resource.Updat
 		return
 	}
 
-	var configHardenRunnerLabels types.Set
-	diags = req.Config.GetAttribute(ctx, path.Root("policy_config").AtName("harden_runner_labels"), &configHardenRunnerLabels)
+	var configHardenRunnerTargetLabels types.Set
+	diags = req.Config.GetAttribute(ctx, path.Root("policy_config").AtName("harden_runner_target_labels"), &configHardenRunnerTargetLabels)
 	resp.Diagnostics.Append(diags...)
 	if resp.Diagnostics.HasError() {
 		return
@@ -451,9 +451,9 @@ func (r *githubRunPolicyResource) Update(ctx context.Context, req resource.Updat
 		enableHardenRunnerPolicy = statePolicyConfig.EnableHardenRunnerPolicy
 	}
 
-	hardenRunnerLabels := policyConfig.HardenRunnerLabels
-	if configHardenRunnerLabels.IsNull() || configHardenRunnerLabels.IsUnknown() {
-		hardenRunnerLabels = statePolicyConfig.HardenRunnerLabels
+	hardenRunnerTargetLabels := policyConfig.HardenRunnerTargetLabels
+	if configHardenRunnerTargetLabels.IsNull() || configHardenRunnerTargetLabels.IsUnknown() {
+		hardenRunnerTargetLabels = statePolicyConfig.HardenRunnerTargetLabels
 	}
 
 	hardenRunnerCustomActions := policyConfig.HardenRunnerCustomActions
@@ -500,14 +500,14 @@ func (r *githubRunPolicyResource) Update(ctx context.Context, req resource.Updat
 		updateRequest.PolicyConfig.AllowedActions = allowedActions
 	}
 
-	if !hardenRunnerLabels.IsNull() {
-		var hardenRunnerLabelValues []string
-		diags = hardenRunnerLabels.ElementsAs(ctx, &hardenRunnerLabelValues, false)
+	if !hardenRunnerTargetLabels.IsNull() {
+		var hardenRunnerTargetLabelValues []string
+		diags = hardenRunnerTargetLabels.ElementsAs(ctx, &hardenRunnerTargetLabelValues, false)
 		resp.Diagnostics.Append(diags...)
 		if resp.Diagnostics.HasError() {
 			return
 		}
-		updateRequest.PolicyConfig.HardenRunnerLabels = hardenRunnerLabelValues
+		updateRequest.PolicyConfig.HardenRunnerTargetLabels = hardenRunnerTargetLabelValues
 	}
 
 	if !hardenRunnerCustomActions.IsNull() {
@@ -712,22 +712,22 @@ func (r *githubRunPolicyResource) updateModelFromAPI(ctx context.Context, model 
 		policyConfigAttrs["allowed_actions"] = types.MapNull(types.StringType)
 	}
 
-	if len(policy.PolicyConfig.HardenRunnerLabels) > 0 {
-		hardenRunnerLabelsList := make([]attr.Value, len(policy.PolicyConfig.HardenRunnerLabels))
-		for i, label := range policy.PolicyConfig.HardenRunnerLabels {
-			hardenRunnerLabelsList[i] = types.StringValue(label)
+	if len(policy.PolicyConfig.HardenRunnerTargetLabels) > 0 {
+		hardenRunnerTargetLabelsList := make([]attr.Value, len(policy.PolicyConfig.HardenRunnerTargetLabels))
+		for i, label := range policy.PolicyConfig.HardenRunnerTargetLabels {
+			hardenRunnerTargetLabelsList[i] = types.StringValue(label)
 		}
-		setValue, setDiags := types.SetValue(types.StringType, hardenRunnerLabelsList)
+		setValue, setDiags := types.SetValue(types.StringType, hardenRunnerTargetLabelsList)
 		diags.Append(setDiags...)
-		policyConfigAttrs["harden_runner_labels"] = setValue
+		policyConfigAttrs["harden_runner_target_labels"] = setValue
 	} else if hasExistingPolicyConfig {
-		if preservedValue, ok := preservePreviousEmptySet(existingPolicyConfig.HardenRunnerLabels); ok {
-			policyConfigAttrs["harden_runner_labels"] = preservedValue
+		if preservedValue, ok := preservePreviousEmptySet(existingPolicyConfig.HardenRunnerTargetLabels); ok {
+			policyConfigAttrs["harden_runner_target_labels"] = preservedValue
 		} else {
-			policyConfigAttrs["harden_runner_labels"] = types.SetNull(types.StringType)
+			policyConfigAttrs["harden_runner_target_labels"] = types.SetNull(types.StringType)
 		}
 	} else {
-		policyConfigAttrs["harden_runner_labels"] = types.SetNull(types.StringType)
+		policyConfigAttrs["harden_runner_target_labels"] = types.SetNull(types.StringType)
 	}
 
 	if len(policy.PolicyConfig.HardenRunnerCustomActions) > 0 {
@@ -781,7 +781,7 @@ func (r *githubRunPolicyResource) updateModelFromAPI(ctx context.Context, model 
 		"enable_action_policy":              types.BoolType,
 		"allowed_actions":                   types.MapType{ElemType: types.StringType},
 		"enable_harden_runner_policy":       types.BoolType,
-		"harden_runner_labels":              types.SetType{ElemType: types.StringType},
+		"harden_runner_target_labels":       types.SetType{ElemType: types.StringType},
 		"harden_runner_custom_actions":      types.SetType{ElemType: types.StringType},
 		"enable_runs_on_policy":             types.BoolType,
 		"disallowed_runner_labels":          types.SetType{ElemType: types.StringType},
