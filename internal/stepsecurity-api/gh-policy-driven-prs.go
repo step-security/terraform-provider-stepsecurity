@@ -25,21 +25,23 @@ type PolicyDrivenPRPolicy struct {
 }
 
 type AutoRemdiationOptions struct {
-	CreatePR                                bool               `json:"create_pr"`
-	CreateIssue                             bool               `json:"create_issue"`
-	CreateGitHubAdvancedSecurityAlert       bool               `json:"create_github_advanced_security_alert"`
-	HardenGitHubHostedRunner                bool               `json:"harden_github_hosted_runner"`
-	PinActionsToSHA                         bool               `json:"pin_actions_to_sha"`
-	RestrictGitHubTokenPermissions          bool               `json:"restrict_github_token_permissions"`
-	SecureDockerFile                        bool               `json:"secure_docker_file"`
-	ActionsToExemptWhilePinning             []string           `json:"actions_to_exempt_while_pinning"`
-	ImagesToExemptWhilePinning              []string           `json:"images_to_exempt_while_pinning"`
-	ActionsToReplaceWithStepSecurityActions []string           `json:"actions_to_replace_with_step_security_actions"`
-	UpdatePrecommitFile                     []string           `json:"update_precommit_file,omitempty"`
-	PackageEcosystem                        []DependabotConfig `json:"package_ecosystem,omitempty"`
-	Subtractive                             *bool              `json:"subtractive,omitempty"`
-	AddWorkflows                            string             `json:"add_workflows,omitempty"`
-	ActionCommitMap                         map[string]string  `json:"action_commit_map"`
+	CreatePR                                bool                `json:"create_pr"`
+	CreateIssue                             bool                `json:"create_issue"`
+	CreateGitHubAdvancedSecurityAlert       bool                `json:"create_github_advanced_security_alert"`
+	HardenGitHubHostedRunner                bool                `json:"harden_github_hosted_runner"`
+	PinActionsToSHA                         bool                `json:"pin_actions_to_sha"`
+	RestrictGitHubTokenPermissions          bool                `json:"restrict_github_token_permissions"`
+	SecureDockerFile                        bool                `json:"secure_docker_file"`
+	ActionsToExemptWhilePinning             []string            `json:"actions_to_exempt_while_pinning"`
+	ImagesToExemptWhilePinning              []string            `json:"images_to_exempt_while_pinning"`
+	ActionsToReplaceWithStepSecurityActions []string            `json:"actions_to_replace_with_step_security_actions"`
+	ExemptedFromReplacement                 []string            `json:"exempted_from_replacement,omitempty"`
+	UpdatePrecommitFile                     []string            `json:"update_precommit_file,omitempty"`
+	PackageEcosystem                        []DependabotConfig  `json:"package_ecosystem,omitempty"`
+	Subtractive                             *bool               `json:"subtractive,omitempty"`
+	AddWorkflows                            string              `json:"add_workflows,omitempty"`
+	ActionCommitMap                         map[string]string   `json:"action_commit_map"`
+	HardenRunnerConfig                      *HardenRunnerConfig `json:"harden_runner_config,omitempty"`
 }
 
 // API request/response structures matching agent-api
@@ -62,6 +64,8 @@ type issuePRConfig struct {
 type controlSettings struct {
 	ExemptedActions                     []string                             `json:"exempted_actions,omitempty"`
 	ActionsToReplace                    map[string]string                    `json:"actions_to_replace,omitempty"`
+	ExemptedFromReplacement             []string                             `json:"exempted_from_replacement,omitempty"`
+	ReplaceAllActions                   *bool                                `json:"replace_all_actions,omitempty"`
 	UpdatePrecommitFile                 map[string]bool                      `json:"update_precommit_file,omitempty"`
 	PackageEcosystem                    []DependabotConfig                   `json:"package_ecosystem,omitempty"`
 	Subtractive                         *bool                                `json:"subtractive,omitempty"`
@@ -70,6 +74,7 @@ type controlSettings struct {
 	ApplyIssuePRConfigForAllReposFilter *ApplyIssuePRConfigForAllReposFilter `json:"apply_issue_pr_config_for_all_repos_filter,omitempty"`
 	ActionCommitMap                     map[string]string                    `json:"action_commit_map"`
 	ExemptedImages                      []string                             `json:"exempted_images,omitempty"`
+	HardenRunnerConfig                  *HardenRunnerConfig                  `json:"harden_runner_config,omitempty"`
 }
 
 type ApplyIssuePRConfigForAllReposFilter struct {
@@ -81,6 +86,13 @@ type DependabotConfig struct {
 	Interval     string `json:"interval"`
 	CoolDownYAML string `json:"cooldown_yaml,omitempty"`
 	GroupsYAML   string `json:"groups_yaml,omitempty"`
+}
+
+type HardenRunnerConfig struct {
+	Config           string   `json:"config"`
+	Subtractive      bool     `json:"subtractive"`
+	SkipHardenRunner bool     `json:"skipHardenRunner"`
+	RunnerLabels     []string `json:"runnerLabels"`
 }
 
 type featureConfigResponse struct {
@@ -117,9 +129,23 @@ func (c *APIClient) CreatePolicyDrivenPRPolicy(ctx context.Context, createReques
 	}
 
 	// Build actions to replace map
+	// If the list is exactly ["*"], treat it as replace-all instead of a literal map entry
 	actionsToReplace := make(map[string]string)
-	for _, action := range createRequest.AutoRemdiationOptions.ActionsToReplaceWithStepSecurityActions {
-		actionsToReplace[action] = ""
+	var replaceAllActions *bool
+	if len(createRequest.AutoRemdiationOptions.ActionsToReplaceWithStepSecurityActions) == 1 &&
+		createRequest.AutoRemdiationOptions.ActionsToReplaceWithStepSecurityActions[0] == "*" {
+		t := true
+		replaceAllActions = &t
+	} else {
+		for _, action := range createRequest.AutoRemdiationOptions.ActionsToReplaceWithStepSecurityActions {
+			actionsToReplace[action] = ""
+		}
+	}
+
+	// If exempted_from_replacement is set, replace_all_actions must also be true
+	if len(createRequest.AutoRemdiationOptions.ExemptedFromReplacement) > 0 {
+		t := true
+		replaceAllActions = &t
 	}
 
 	// Build control checks config
@@ -155,7 +181,8 @@ func (c *APIClient) CreatePolicyDrivenPRPolicy(ctx context.Context, createReques
 		}
 	}
 
-	if len(createRequest.AutoRemdiationOptions.ActionsToReplaceWithStepSecurityActions) > 0 {
+	if len(createRequest.AutoRemdiationOptions.ActionsToReplaceWithStepSecurityActions) > 0 ||
+		len(createRequest.AutoRemdiationOptions.ExemptedFromReplacement) > 0 {
 		controlChecksConfig["MaintainedGitHubActionsShouldBeUsed"] = issuePRConfig{
 			TriggerGithubIssue: createIssue,
 			TriggerGithubPr:    createPR,
@@ -191,12 +218,15 @@ func (c *APIClient) CreatePolicyDrivenPRPolicy(ctx context.Context, createReques
 	cs := &controlSettings{
 		ExemptedActions:                     createRequest.AutoRemdiationOptions.ActionsToExemptWhilePinning,
 		ActionsToReplace:                    actionsToReplace,
+		ExemptedFromReplacement:             createRequest.AutoRemdiationOptions.ExemptedFromReplacement,
+		ReplaceAllActions:                   replaceAllActions,
 		UpdatePrecommitFile:                 updatePrecommitFileMap,
 		PackageEcosystem:                    createRequest.AutoRemdiationOptions.PackageEcosystem,
 		Subtractive:                         createRequest.AutoRemdiationOptions.Subtractive,
 		AddWorkflows:                        createRequest.AutoRemdiationOptions.AddWorkflows,
 		ActionCommitMap:                     createRequest.AutoRemdiationOptions.ActionCommitMap,
 		ExemptedImages:                      createRequest.AutoRemdiationOptions.ImagesToExemptWhilePinning,
+		HardenRunnerConfig:                  createRequest.AutoRemdiationOptions.HardenRunnerConfig,
 		ApplyIssuePRConfigForAllRepos:       &applyToAllRepos,
 		ApplyIssuePRConfigForAllReposFilter: &createRequest.SelectedReposFilter,
 	}
@@ -395,10 +425,12 @@ func (c *APIClient) GetPolicyDrivenPRPolicy(ctx context.Context, owner string, r
 		ActionsToExemptWhilePinning:             selectedConfig.ControlSettings.ExemptedActions,
 		ImagesToExemptWhilePinning:              selectedConfig.ControlSettings.ExemptedImages,
 		ActionsToReplaceWithStepSecurityActions: actionsToReplace,
+		ExemptedFromReplacement:                 selectedConfig.ControlSettings.ExemptedFromReplacement,
 		UpdatePrecommitFile:                     updatePrecommitFiles,
 		PackageEcosystem:                        selectedConfig.ControlSettings.PackageEcosystem,
 		Subtractive:                             selectedConfig.ControlSettings.Subtractive,
 		AddWorkflows:                            selectedConfig.ControlSettings.AddWorkflows,
+		HardenRunnerConfig:                      selectedConfig.ControlSettings.HardenRunnerConfig,
 	}
 
 	// Populate SelectedReposFilter from API response
@@ -609,10 +641,12 @@ func (c *APIClient) DiscoverPolicyDrivenPRConfig(ctx context.Context, owner stri
 		ActionsToExemptWhilePinning:             selectedConfig.ControlSettings.ExemptedActions,
 		ImagesToExemptWhilePinning:              selectedConfig.ControlSettings.ExemptedImages,
 		ActionsToReplaceWithStepSecurityActions: actionsToReplace,
+		ExemptedFromReplacement:                 selectedConfig.ControlSettings.ExemptedFromReplacement,
 		UpdatePrecommitFile:                     updatePrecommitFiles,
 		PackageEcosystem:                        selectedConfig.ControlSettings.PackageEcosystem,
 		Subtractive:                             selectedConfig.ControlSettings.Subtractive,
 		AddWorkflows:                            selectedConfig.ControlSettings.AddWorkflows,
+		HardenRunnerConfig:                      selectedConfig.ControlSettings.HardenRunnerConfig,
 	}
 
 	// Populate SelectedReposFilter from API response
