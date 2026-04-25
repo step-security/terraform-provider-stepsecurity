@@ -40,6 +40,20 @@ resource "stepsecurity_github_checks" "test-organization" {
       }
     },
     {
+      control = "PyPI Package Cooldown"
+      enable  = true
+      type    = "required"
+      settings = {
+        cool_down_period                     = 4
+        packages_to_exempt_in_cooldown_check = ["my-internal-package"] # exempted package name must be as per PEP 503 normalization
+      }
+    },
+    {
+      control = "PyPI Package Compromised Updates"
+      enable  = true
+      type    = "required"
+    },
+    {
       control = "Script Injection"
       enable  = true
       type    = "optional"
@@ -64,6 +78,30 @@ resource "stepsecurity_github_checks" "test-organization" {
 import {
   to = stepsecurity_github_checks.test-organization
   id = "test-organization"
+}
+
+# github PR checks configuration with PyPI controls
+resource "stepsecurity_github_checks" "test-organization-pypi" {
+  owner = "test-organization"
+  controls = [
+    {
+      control = "PyPI Package Cooldown"
+      enable  = true
+      type    = "required"
+      settings = {
+        cool_down_period                     = 3
+        packages_to_exempt_in_cooldown_check = ["my-internal-package"]
+      }
+    },
+    {
+      control = "PyPI Package Compromised Updates"
+      enable  = true
+      type    = "required"
+    }
+  ]
+  required_checks = {
+    repos = ["*"] # applies to all repositories in the organization
+  }
 }
 ```
 
@@ -95,7 +133,7 @@ Optional:
 
 Required:
 
-- `control` (String) Control name. Available controls: NPM Package Compromised Updates, NPM Package Cooldown, PWN Request, Script Injection
+- `control` (String) Control name. Available controls: NPM Package Compromised Updates, NPM Package Cooldown, PWN Request, PyPI Package Compromised Updates, PyPI Package Cooldown, Script Injection
 - `enable` (Boolean) Whether the control is enabled
 - `type` (String) Check type where this control should run.Can only be 'required'/'optional'
 
@@ -108,8 +146,8 @@ Optional:
 
 Optional:
 
-- `cool_down_period` (Number) Cooldown period values (e.g., days). Only applicable to npm cooldown check. Default is 2 days.
-- `packages_to_exempt_in_cooldown_check` (List of String) Package names to exempt from cooldown checks.  Only applicable to npm cooldown check
+- `cool_down_period` (Number) Cooldown period values (e.g., days). Only applicable to npm/PyPI cooldown checks. Default is 2 days.
+- `packages_to_exempt_in_cooldown_check` (List of String) Package names to exempt from cooldown checks. Only applicable to npm/PyPI cooldown checks.
 
 
 

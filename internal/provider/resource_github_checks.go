@@ -98,12 +98,12 @@ func (r *githubChecksResource) Schema(_ context.Context, _ resource.SchemaReques
 									Optional:    true,
 									Computed:    true,
 									Default:     int64default.StaticInt64(2),
-									Description: "Cooldown period values (e.g., days). Only applicable to npm cooldown check. Default is 2 days.",
+									Description: "Cooldown period values (e.g., days). Only applicable to npm/PyPI cooldown checks. Default is 2 days.",
 								},
 								"packages_to_exempt_in_cooldown_check": schema.ListAttribute{
 									Optional:    true,
 									ElementType: types.StringType,
-									Description: "Package names to exempt from cooldown checks.  Only applicable to npm cooldown check",
+									Description: "Package names to exempt from cooldown checks. Only applicable to npm/PyPI cooldown checks.",
 								},
 							},
 						},
@@ -252,14 +252,16 @@ func (r *githubChecksResource) ValidateConfig(ctx context.Context, req resource.
 			)
 		}
 
-		if control.Control.ValueString() != "NPM Package Cooldown" && !control.Settings.IsNull() && !control.Settings.IsUnknown() {
+		isCooldownControl := control.Control.ValueString() == "NPM Package Cooldown" ||
+			control.Control.ValueString() == "PyPI Package Cooldown"
+		if !isCooldownControl && !control.Settings.IsNull() && !control.Settings.IsUnknown() {
 			resp.Diagnostics.AddError(
 				"can't provide settings",
 				"can't provide settings for control "+control.Control.ValueString(),
 			)
 		}
 
-		if control.Control.ValueString() == "NPM Package Cooldown" && !control.Settings.IsNull() && !control.Settings.IsUnknown() {
+		if isCooldownControl && !control.Settings.IsNull() && !control.Settings.IsUnknown() {
 			// Extract cooldown period from the object
 			if cooldownAttr := control.Settings.Attributes()["cool_down_period"]; cooldownAttr != nil {
 				if cooldownValue, ok := cooldownAttr.(types.Int64); ok {
@@ -382,7 +384,8 @@ func (r *githubChecksResource) ModifyPlan(ctx context.Context, req resource.Modi
 
 	for ind, control := range plan.Controls {
 
-		if control.Control.ValueString() == "NPM Package Cooldown" && control.Settings.IsNull() {
+		if (control.Control.ValueString() == "NPM Package Cooldown" ||
+			control.Control.ValueString() == "PyPI Package Cooldown") && control.Settings.IsNull() {
 			// Create object with default settings
 			settingsMap := map[string]attr.Value{
 				"cool_down_period":                     types.Int64Value(2),
@@ -554,7 +557,7 @@ func (r *githubChecksResource) convertToCreateRequest(plan githubChecksModel) (*
 			Enabled: control.Enable.ValueBool(),
 			Type:    control.Type.ValueString(),
 		}
-		if controlName == "NPM Package Cooldown" {
+		if controlName == "NPM Package Cooldown" || controlName == "PyPI Package Cooldown" {
 			if control.Settings.IsNull() {
 				control.Settings = types.ObjectNull(map[string]attr.Type{
 					"cool_down_period":                     types.Int64Type,
@@ -753,8 +756,8 @@ func (r *githubChecksResource) convertToState(owner string, config stepsecuritya
 			Enable:  types.BoolValue(checkConfig.Enabled),
 		}
 
-		// Handle settings for NPM Package Cooldown
-		if controlName == "NPM Package Cooldown" && checkConfig.Settings != nil {
+		// Handle settings for cooldown controls
+		if (controlName == "NPM Package Cooldown" || controlName == "PyPI Package Cooldown") && checkConfig.Settings != nil {
 			var cooldownPeriod types.Int64
 			var packagesList types.List
 

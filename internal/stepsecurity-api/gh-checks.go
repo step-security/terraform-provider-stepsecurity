@@ -9,10 +9,12 @@ import (
 
 var (
 	AvailableControls = map[string]string{
-		"NPM Package Compromised Updates": "npm_package_compromised_updates",
-		"NPM Package Cooldown":            "npm_package_recent_release_guard",
-		"PWN Request":                     "pwn_request_check",
-		"Script Injection":                "script_injection_check",
+		"NPM Package Compromised Updates":  "npm_package_compromised_updates",
+		"NPM Package Cooldown":             "npm_package_recent_release_guard",
+		"PWN Request":                      "pwn_request_check",
+		"PyPI Package Compromised Updates": "pypi_package_compromised_updates",
+		"PyPI Package Cooldown":            "pypi_package_cooldown",
+		"Script Injection":                 "script_injection_check",
 	}
 )
 
@@ -60,6 +62,10 @@ func GetControlName(control string) string {
 		return "NPM Package Cooldown"
 	case "pwn_request_check":
 		return "PWN Request"
+	case "pypi_package_compromised_updates":
+		return "PyPI Package Compromised Updates"
+	case "pypi_package_cooldown":
+		return "PyPI Package Cooldown"
 	case "script_injection_check":
 		return "Script Injection"
 	default:
