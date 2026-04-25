@@ -26,6 +26,20 @@ resource "stepsecurity_github_checks" "test-organization" {
       }
     },
     {
+      control = "PyPI Package Cooldown"
+      enable  = true
+      type    = "required"
+      settings = {
+        cool_down_period                     = 4
+        packages_to_exempt_in_cooldown_check = ["my-internal-package"] # exempted package name must be as per PEP 503 normalization
+      }
+    },
+    {
+      control = "PyPI Package Compromised Updates"
+      enable  = true
+      type    = "required"
+    },
+    {
       control = "Script Injection"
       enable  = true
       type    = "optional"
@@ -50,4 +64,28 @@ resource "stepsecurity_github_checks" "test-organization" {
 import {
   to = stepsecurity_github_checks.test-organization
   id = "test-organization"
+}
+
+# github PR checks configuration with PyPI controls
+resource "stepsecurity_github_checks" "test-organization-pypi" {
+  owner = "test-organization"
+  controls = [
+    {
+      control = "PyPI Package Cooldown"
+      enable  = true
+      type    = "required"
+      settings = {
+        cool_down_period                     = 3
+        packages_to_exempt_in_cooldown_check = ["my-internal-package"]
+      }
+    },
+    {
+      control = "PyPI Package Compromised Updates"
+      enable  = true
+      type    = "required"
+    }
+  ]
+  required_checks = {
+    repos = ["*"] # applies to all repositories in the organization
+  }
 }
