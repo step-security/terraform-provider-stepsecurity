@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -402,17 +403,19 @@ func (c *APIClient) GetPolicyDrivenPRPolicy(ctx context.Context, owner string, r
 	enabledSecureDocker := selectedConfig.ControlChecksConfig["SecureDockerFile"].TriggerGithubIssue ||
 		selectedConfig.ControlChecksConfig["SecureDockerFile"].TriggerGithubPr
 
-	// Extract actions to replace
+	// Extract actions to replace (sorted for deterministic ordering)
 	actionsToReplace := []string{}
 	for action := range selectedConfig.ControlSettings.ActionsToReplace {
 		actionsToReplace = append(actionsToReplace, action)
 	}
+	sort.Strings(actionsToReplace)
 
-	// Convert update_precommit_file from map to array
+	// Convert update_precommit_file from map to array (sorted for deterministic ordering)
 	updatePrecommitFiles := []string{}
 	for file := range selectedConfig.ControlSettings.UpdatePrecommitFile {
 		updatePrecommitFiles = append(updatePrecommitFiles, file)
 	}
+	sort.Strings(updatePrecommitFiles)
 
 	// Set policy fields - repos will be set by the caller based on state
 	policy.UseRepoLevelConfig = !isOrgLevel
@@ -619,17 +622,19 @@ func (c *APIClient) DiscoverPolicyDrivenPRConfig(ctx context.Context, owner stri
 	enabledSecureDocker := selectedConfig.ControlChecksConfig["SecureDockerFile"].TriggerGithubIssue ||
 		selectedConfig.ControlChecksConfig["SecureDockerFile"].TriggerGithubPr
 
-	// Extract actions to replace
+	// Extract actions to replace (sorted for deterministic ordering)
 	actionsToReplace := []string{}
 	for action := range selectedConfig.ControlSettings.ActionsToReplace {
 		actionsToReplace = append(actionsToReplace, action)
 	}
+	sort.Strings(actionsToReplace)
 
-	// Convert update_precommit_file from map to array
+	// Convert update_precommit_file from map to array (sorted for deterministic ordering)
 	updatePrecommitFiles := []string{}
 	for file := range selectedConfig.ControlSettings.UpdatePrecommitFile {
 		updatePrecommitFiles = append(updatePrecommitFiles, file)
 	}
+	sort.Strings(updatePrecommitFiles)
 
 	policy.SelectedRepos = selectedRepos
 	policy.UseRepoLevelConfig = !useOrgLevel
