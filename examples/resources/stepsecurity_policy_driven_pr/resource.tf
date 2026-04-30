@@ -61,6 +61,7 @@ resource "stepsecurity_policy_driven_pr" "repo_level_config" {
         interval      = "daily"
         cooldown_yaml = "default-days: 7\npackage-rules:\n  - match-package-patterns:\n      - \"*\"\n    days: 3\n"
         groups_yaml   = "production-dependencies:\n  patterns:\n    - \"*\"\n  exclude-patterns:\n    - \"@types/*\"\n"
+        options_yaml  = "day: friday\ntime: \"14:00\"\ntimezone: Europe/London\nallow:\n  - dependency-name: vue\n    dependency-type: production\nassignees:\n  - user3\n  - user4\n  - user5\ncommit-message:\n  prefix: chore\n  prefix-development: build\n  include: scope\nignore:\n  - dependency-name: moment\n    versions:\n      - \"1.x\"\nlabels:\n  - deps\n  - automated\nmilestone: 10\nopen-pull-requests-limit: 5\npull-request-branch-name:\n  separator: \"-\"\nrebase-strategy: disabled\nreviewers:\n  - platform-team\ntarget-branch: main\nversioning-strategy: lockfile-only\nregistries:\n  - npm-private\n  - github-registry\nexclude-paths:\n  - \"build/*\"\n  - \".cache/*\"\nvendor: false\ninsecure-external-code-execution: deny\nmulti-ecosystem-group: updated-group\nenable-beta-ecosystems: true\n"
       },
       {
         package  = "pip"
