@@ -88,6 +88,7 @@ type DependabotConfig struct {
 	Interval     string `json:"interval"`
 	CoolDownYAML string `json:"cooldown_yaml,omitempty"`
 	GroupsYAML   string `json:"groups_yaml,omitempty"`
+	OptionsYAML  string `json:"options_yaml,omitempty"`
 }
 
 type HardenRunnerConfig struct {
