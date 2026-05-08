@@ -194,3 +194,34 @@ func (m *MockStepSecurityClient) DeleteGitHubPRTemplate(ctx context.Context, own
 	args := m.Called(ctx, owner)
 	return args.Error(0)
 }
+
+// Custom Role methods
+func (m *MockStepSecurityClient) ListRoles(ctx context.Context) ([]Role, error) {
+	args := m.Called(ctx)
+	return args.Get(0).([]Role), args.Error(1)
+}
+
+func (m *MockStepSecurityClient) CreateRole(ctx context.Context, req CreateRoleRequest) (*Role, error) {
+	args := m.Called(ctx, req)
+	return args.Get(0).(*Role), args.Error(1)
+}
+
+func (m *MockStepSecurityClient) GetRole(ctx context.Context, roleID string) (*Role, error) {
+	args := m.Called(ctx, roleID)
+	return args.Get(0).(*Role), args.Error(1)
+}
+
+func (m *MockStepSecurityClient) UpdateRole(ctx context.Context, roleID string, req UpdateRoleRequest) (*Role, error) {
+	args := m.Called(ctx, roleID, req)
+	return args.Get(0).(*Role), args.Error(1)
+}
+
+func (m *MockStepSecurityClient) DeleteRole(ctx context.Context, roleID string) error {
+	args := m.Called(ctx, roleID)
+	return args.Error(0)
+}
+
+func (m *MockStepSecurityClient) GetPermissionCatalog(ctx context.Context) (*FeatureCatalog, error) {
+	args := m.Called(ctx)
+	return args.Get(0).(*FeatureCatalog), args.Error(1)
+}
