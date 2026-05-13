@@ -36,6 +36,40 @@ resource "stepsecurity_github_policy_store" "custom-policy" {
   ]
 }
 
+# Policy with lockdown enabled for all detections
+resource "stepsecurity_github_policy_store" "lockdown-all" {
+  owner         = "test-organization"
+  policy_name   = "lockdown-all-policy"
+  egress_policy = "block"
+  allowed_endpoints = [
+    "github.com:443",
+    "api.github.com:443",
+  ]
+
+  lockdown = {
+    enabled                   = true
+    privileged_container      = true
+    runner_worker_memory_read = true
+    reverse_shell             = true
+  }
+}
+
+# Policy with lockdown enabled for selected detections only
+resource "stepsecurity_github_policy_store" "lockdown-selective" {
+  owner         = "test-organization"
+  policy_name   = "lockdown-selective-policy"
+  egress_policy = "block"
+  allowed_endpoints = [
+    "github.com:443",
+    "api.github.com:443",
+  ]
+
+  lockdown = {
+    enabled       = true
+    reverse_shell = true
+  }
+}
+
 # For importing existing github policy store policies to terraform state
 import {
   to = stepsecurity_github_policy_store.audit-policy

@@ -33,7 +33,13 @@ type GitHubPolicyStorePolicy struct {
 	DisableTelemetry      bool               `json:"disable_telemetry"`
 	DisableSudo           bool               `json:"disable_sudo"`
 	DisableFileMonitoring bool               `json:"disable_file_monitoring"`
+	Lockdown              *LockdownConfig    `json:"lockdown,omitempty"`
 	Attachments           *PolicyAttachments `json:"attachments,omitempty"`
+}
+
+type LockdownConfig struct {
+	Enabled    bool     `json:"enabled"`
+	Detections []string `json:"detections,omitempty"` // List of detections to enable for lockdown (empty = none enabled) "Privileged-Container", "Runner-Worker-Memory-Read", "Reverse-Shell"
 }
 
 func (c *APIClient) CreateGitHubPolicyStorePolicy(ctx context.Context, policy *GitHubPolicyStorePolicy) error {
@@ -50,6 +56,7 @@ func (c *APIClient) CreateGitHubPolicyStorePolicy(ctx context.Context, policy *G
 		DisableTelemetry:      policy.DisableTelemetry,
 		DisableSudo:           policy.DisableSudo,
 		DisableFileMonitoring: policy.DisableFileMonitoring,
+		Lockdown:              policy.Lockdown,
 		// Explicitly omit Attachments for creation
 	}
 

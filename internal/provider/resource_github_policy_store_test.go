@@ -644,7 +644,7 @@ func TestGithubPolicyStoreResource_GetPolicy(t *testing.T) {
 			t.Parallel()
 
 			r := &githubPolicyStoreResource{}
-			result := r.getGitHubPolicyStorePolicy(tc.model)
+			result := r.getGitHubPolicyStorePolicy(context.Background(), tc.model)
 
 			if result.Owner != tc.expected.Owner {
 				t.Errorf("Expected Owner %s, got %s", tc.expected.Owner, result.Owner)
