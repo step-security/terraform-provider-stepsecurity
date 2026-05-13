@@ -11,6 +11,14 @@ import (
 const (
 	SourceCodeOverwritten        = "Source-Code-Overwritten"
 	AnomalousOutboundNetworkCall = "New-Outbound-Network-Call"
+	HttpsOutboundNetworkCall     = "HTTPS-Outbound-Network-Call"
+	SecretInBuildLog             = "Secret-In-Build-Log"
+	SecretInArtifact             = "Secret-In-Artifact"
+	ActionUsesImpostedCommit     = "Action-Uses-Imposter-Commit"
+	DetectionPrivilegedContainer = "Privileged-Container"
+	DetectionReverseShell        = "Reverse-Shell"
+	SuspiciousNetworkCall        = "Suspicious-Network-Call"
+	RunnerWorkerMemoryRead       = "Runner-Worker-Memory-Read"
 )
 
 type SuppressionRule struct {
