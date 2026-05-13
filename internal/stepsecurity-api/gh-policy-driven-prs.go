@@ -69,7 +69,7 @@ type controlSettings struct {
 	ReplaceByMajorTag                   *bool                                `json:"replace_by_major_tag,omitempty"`
 	ExemptedFromReplacement             []string                             `json:"exempted_from_replacement,omitempty"`
 	ReplaceAllActions                   *bool                                `json:"replace_all_actions,omitempty"`
-	LabelsToReplace                     map[string]string                    `json:"labels_to_replace,omitempty"`
+	LabelsToReplace                     map[string]string                    `json:"labels_to_replace"`
 	UpdatePrecommitFile                 map[string]bool                      `json:"update_precommit_file,omitempty"`
 	PackageEcosystem                    []DependabotConfig                   `json:"package_ecosystem,omitempty"`
 	Subtractive                         *bool                                `json:"subtractive,omitempty"`

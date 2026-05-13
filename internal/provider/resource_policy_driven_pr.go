@@ -959,6 +959,8 @@ func (r *policyDrivenPRResource) Create(ctx context.Context, req resource.Create
 		for key, value := range options.LabelsToReplace.Elements() {
 			labelsToReplace[key] = value.(types.String).ValueString()
 		}
+	} else {
+		labelsToReplace = map[string]string{}
 	}
 
 	// Automatically compute config levels based on selected_repos
@@ -1511,6 +1513,8 @@ func (r *policyDrivenPRResource) Update(ctx context.Context, req resource.Update
 		for key, value := range planOptions.LabelsToReplace.Elements() {
 			labelsToReplacePlan[key] = value.(types.String).ValueString()
 		}
+	} else {
+		labelsToReplacePlan = map[string]string{}
 	}
 
 	// Automatically compute config levels based on planRepos
