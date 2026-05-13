@@ -19,6 +19,9 @@ resource "stepsecurity_github_org_notification_settings" "test-organization" {
     slack_webhook_url = "https://hooks.slack.com/services/T00000000/B00000000/XXXXXXXXXXXXXXXXXXXXXXXX"
     teams_webhook_url = "https://outlook.office.com/webhook/00000000-0000-0000-0000-000000000000@00000000-0000-0000-0000-000000000000/IncomingWebhook/00000000000000000000000000000000"
     email             = "step-security@step-security.com"
+    # Optional: Configure Slack OAuth method for notifications
+    slack_notification_method = "oauth"        # "webhook" (default) or "oauth"
+    slack_channel_id          = "C01234567890" # Required when using OAuth method
   }
   notification_events = {
     domain_blocked                        = true
@@ -33,6 +36,9 @@ resource "stepsecurity_github_org_notification_settings" "test-organization" {
     harden_runner_config_changes_detected = true
     non_compliant_artifact_detected       = false
     run_blocked_by_policy                 = false
+    baseline_check_failures               = false
+    required_check_failures               = false
+    optional_check_failures               = false
   }
 }
 
