@@ -98,12 +98,12 @@ func (r *githubChecksResource) Schema(_ context.Context, _ resource.SchemaReques
 									Optional:    true,
 									Computed:    true,
 									Default:     int64default.StaticInt64(2),
-									Description: "Cooldown period values (e.g., days). Only applicable to npm cooldown check. Default is 2 days.",
+									Description: "Cooldown period values (e.g., days). Only applicable to npm/PyPI cooldown checks. Default is 2 days.",
 								},
 								"packages_to_exempt_in_cooldown_check": schema.ListAttribute{
 									Optional:    true,
 									ElementType: types.StringType,
-									Description: "Package names to exempt from cooldown checks.  Only applicable to npm cooldown check",
+									Description: "Package names to exempt from cooldown checks. Only applicable to npm/PyPI cooldown checks.",
 								},
 							},
 						},
@@ -210,7 +210,7 @@ func (r *githubChecksResource) ValidateConfig(ctx context.Context, req resource.
 		return
 	}
 
-	if config.Owner.ValueString() == "" {
+	if !config.Owner.IsUnknown() && !config.Owner.IsNull() && config.Owner.ValueString() == "" {
 		resp.Diagnostics.AddError(
 			"Owner is required",
 			"Owner is required to create a GitHub Checks resource",
@@ -227,6 +227,11 @@ func (r *githubChecksResource) ValidateConfig(ctx context.Context, req resource.
 	hasRequired := false
 	hasOptional := false
 	for _, control := range config.Controls {
+		// Skip validation if control attributes are unknown (e.g., when using for_each or count)
+		if control.Control.IsUnknown() || control.Type.IsUnknown() || control.Enable.IsUnknown() {
+			continue
+		}
+
 		if _, ok := stepsecurityapi.AvailableControls[control.Control.ValueString()]; !ok {
 			resp.Diagnostics.AddError(
 				"Invalid control provided",
@@ -247,14 +252,16 @@ func (r *githubChecksResource) ValidateConfig(ctx context.Context, req resource.
 			)
 		}
 
-		if control.Control.ValueString() != "NPM Package Cooldown" && !control.Settings.IsNull() {
+		isCooldownControl := control.Control.ValueString() == "NPM Package Cooldown" ||
+			control.Control.ValueString() == "PyPI Package Cooldown"
+		if !isCooldownControl && !control.Settings.IsNull() && !control.Settings.IsUnknown() {
 			resp.Diagnostics.AddError(
 				"can't provide settings",
 				"can't provide settings for control "+control.Control.ValueString(),
 			)
 		}
 
-		if control.Control.ValueString() == "NPM Package Cooldown" && !control.Settings.IsNull() {
+		if isCooldownControl && !control.Settings.IsNull() && !control.Settings.IsUnknown() {
 			// Extract cooldown period from the object
 			if cooldownAttr := control.Settings.Attributes()["cool_down_period"]; cooldownAttr != nil {
 				if cooldownValue, ok := cooldownAttr.(types.Int64); ok {
@@ -289,35 +296,38 @@ func (r *githubChecksResource) ValidateConfig(ctx context.Context, req resource.
 	isOptionalCheckAppliedForAllRepos := false
 	isBaselineCheckAppliedForAllRepos := false
 
-	if config.RequiredChecks != nil {
+	if config.RequiredChecks != nil && !config.RequiredChecks.Repos.IsUnknown() {
 		for _, repo := range config.RequiredChecks.Repos.Elements() {
-			if repo.(types.String).ValueString() == "*" {
+			repoStr, ok := repo.(types.String)
+			if ok && !repoStr.IsUnknown() && repoStr.ValueString() == "*" {
 				isRequiredCheckAppliedForAllRepos = true
 			}
 		}
 	}
-	if config.OptionalChecks != nil {
+	if config.OptionalChecks != nil && !config.OptionalChecks.Repos.IsUnknown() {
 		for _, repo := range config.OptionalChecks.Repos.Elements() {
-			if repo.(types.String).ValueString() == "*" {
+			repoStr, ok := repo.(types.String)
+			if ok && !repoStr.IsUnknown() && repoStr.ValueString() == "*" {
 				isOptionalCheckAppliedForAllRepos = true
 			}
 		}
 	}
-	if config.BaselineCheck != nil {
+	if config.BaselineCheck != nil && !config.BaselineCheck.Repos.IsUnknown() {
 		for _, repo := range config.BaselineCheck.Repos.Elements() {
-			if repo.(types.String).ValueString() == "*" {
+			repoStr, ok := repo.(types.String)
+			if ok && !repoStr.IsUnknown() && repoStr.ValueString() == "*" {
 				isBaselineCheckAppliedForAllRepos = true
 			}
 		}
 	}
 
 	if config.RequiredChecks != nil {
-		if !isRequiredCheckAppliedForAllRepos && len(config.RequiredChecks.OmitRepos.Elements()) != 0 {
+		if !config.RequiredChecks.OmitRepos.IsUnknown() && !isRequiredCheckAppliedForAllRepos && len(config.RequiredChecks.OmitRepos.Elements()) != 0 {
 			resp.Diagnostics.AddError(
 				"can't provide omit_repos for required checks without enabling it for all repos",
 				"omit_repos can only be provided when repos is set to '*'",
 			)
-		} else if isRequiredCheckAppliedForAllRepos && len(config.RequiredChecks.Repos.Elements()) != 1 {
+		} else if !config.RequiredChecks.Repos.IsUnknown() && isRequiredCheckAppliedForAllRepos && len(config.RequiredChecks.Repos.Elements()) != 1 {
 			resp.Diagnostics.AddError(
 				"can't provide additional values for repos for required checks when repos set to '*'",
 				"additional values for repos are not allowed when repos have a value '*'",
@@ -326,12 +336,12 @@ func (r *githubChecksResource) ValidateConfig(ctx context.Context, req resource.
 	}
 
 	if config.OptionalChecks != nil {
-		if !isOptionalCheckAppliedForAllRepos && len(config.OptionalChecks.OmitRepos.Elements()) != 0 {
+		if !config.OptionalChecks.OmitRepos.IsUnknown() && !isOptionalCheckAppliedForAllRepos && len(config.OptionalChecks.OmitRepos.Elements()) != 0 {
 			resp.Diagnostics.AddError(
 				"can't provide omit_repos for optional checks without enabling it for all repos",
 				"omit_repos can only be provided when repos is set to '*'",
 			)
-		} else if isOptionalCheckAppliedForAllRepos && len(config.OptionalChecks.Repos.Elements()) != 1 {
+		} else if !config.OptionalChecks.Repos.IsUnknown() && isOptionalCheckAppliedForAllRepos && len(config.OptionalChecks.Repos.Elements()) != 1 {
 			resp.Diagnostics.AddError(
 				"can't provide additional values for repos for optional checks when repos set to '*'",
 				"additional values for repos are not allowed when repos have a value '*'",
@@ -340,12 +350,12 @@ func (r *githubChecksResource) ValidateConfig(ctx context.Context, req resource.
 	}
 
 	if config.BaselineCheck != nil {
-		if !isBaselineCheckAppliedForAllRepos && len(config.BaselineCheck.OmitRepos.Elements()) != 0 {
+		if !config.BaselineCheck.OmitRepos.IsUnknown() && !isBaselineCheckAppliedForAllRepos && len(config.BaselineCheck.OmitRepos.Elements()) != 0 {
 			resp.Diagnostics.AddError(
 				"can't provide omit_repos for baseline checks without enabling it for all repos",
 				"omit_repos can only be provided when repos is set to '*'",
 			)
-		} else if isBaselineCheckAppliedForAllRepos && len(config.BaselineCheck.Repos.Elements()) != 1 {
+		} else if !config.BaselineCheck.Repos.IsUnknown() && isBaselineCheckAppliedForAllRepos && len(config.BaselineCheck.Repos.Elements()) != 1 {
 			resp.Diagnostics.AddError(
 				"can't provide additional values for repos for baseline checks when repos set to '*'",
 				"additional values for repos are not allowed when repos have a value '*'",
@@ -374,7 +384,8 @@ func (r *githubChecksResource) ModifyPlan(ctx context.Context, req resource.Modi
 
 	for ind, control := range plan.Controls {
 
-		if control.Control.ValueString() == "NPM Package Cooldown" && control.Settings.IsNull() {
+		if (control.Control.ValueString() == "NPM Package Cooldown" ||
+			control.Control.ValueString() == "PyPI Package Cooldown") && control.Settings.IsNull() {
 			// Create object with default settings
 			settingsMap := map[string]attr.Value{
 				"cool_down_period":                     types.Int64Value(2),
@@ -546,7 +557,7 @@ func (r *githubChecksResource) convertToCreateRequest(plan githubChecksModel) (*
 			Enabled: control.Enable.ValueBool(),
 			Type:    control.Type.ValueString(),
 		}
-		if controlName == "NPM Package Cooldown" {
+		if controlName == "NPM Package Cooldown" || controlName == "PyPI Package Cooldown" {
 			if control.Settings.IsNull() {
 				control.Settings = types.ObjectNull(map[string]attr.Type{
 					"cool_down_period":                     types.Int64Type,
@@ -745,8 +756,8 @@ func (r *githubChecksResource) convertToState(owner string, config stepsecuritya
 			Enable:  types.BoolValue(checkConfig.Enabled),
 		}
 
-		// Handle settings for NPM Package Cooldown
-		if controlName == "NPM Package Cooldown" && checkConfig.Settings != nil {
+		// Handle settings for cooldown controls
+		if (controlName == "NPM Package Cooldown" || controlName == "PyPI Package Cooldown") && checkConfig.Settings != nil {
 			var cooldownPeriod types.Int64
 			var packagesList types.List
 

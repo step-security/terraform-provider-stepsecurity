@@ -27,10 +27,15 @@ type RunPolicyConfig struct {
 	Name                           string              `json:"name"`
 	EnableActionPolicy             bool                `json:"enable_action_policy,omitempty"`
 	AllowedActions                 map[string]string   `json:"allowed_actions,omitempty"`
+	EnableHardenRunnerPolicy       bool                `json:"enable_harden_runner_policy,omitempty"`
+	HardenRunnerTargetLabels       []string            `json:"harden_runner_labels,omitempty"`
+	HardenRunnerCustomActions      []string            `json:"harden_runner_custom_actions,omitempty"`
 	EnableRunsOnPolicy             bool                `json:"enable_runs_on_policy,omitempty"`
 	DisallowedRunnerLabels         map[string]struct{} `json:"disallowed_runner_labels,omitempty"`
 	EnableSecretsPolicy            bool                `json:"enable_secrets_policy,omitempty"`
 	EnableCompromisedActionsPolicy bool                `json:"enable_compromised_actions_policy,omitempty"`
+	RequirePinnedActions           bool                `json:"require_pinned_actions,omitempty"`
+	PinnedActionsExemptions        []string            `json:"pinned_actions_exemptions,omitempty"`
 	IsDryRun                       bool                `json:"is_dry_run,omitempty"`
 	ExemptedUsers                  []string            `json:"exempted_users,omitempty"`
 }

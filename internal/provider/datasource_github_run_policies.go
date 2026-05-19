@@ -125,6 +125,20 @@ func (d *githubRunPoliciesDataSource) Schema(_ context.Context, _ datasource.Sch
 									Computed:            true,
 									MarkdownDescription: "Map of allowed actions and their permissions.",
 								},
+								"enable_harden_runner_policy": schema.BoolAttribute{
+									Computed:            true,
+									MarkdownDescription: "Whether the Harden Runner policy is enabled.",
+								},
+								"harden_runner_target_labels": schema.SetAttribute{
+									ElementType:         types.StringType,
+									Computed:            true,
+									MarkdownDescription: "Set of runner labels that target Harden Runner enforcement. When `enable_harden_runner_policy` is true, an empty set means the policy applies to every job; a non-empty set filters to jobs whose `runs-on` matches at least one label. When the policy is disabled, this attribute is null.",
+								},
+								"harden_runner_custom_actions": schema.SetAttribute{
+									ElementType:         types.StringType,
+									Computed:            true,
+									MarkdownDescription: "Set of custom actions accepted as Harden Runner equivalents (in addition to `step-security/harden-runner`).",
+								},
 								"enable_runs_on_policy": schema.BoolAttribute{
 									Computed:            true,
 									MarkdownDescription: "Whether the runs-on policy is enabled.",
@@ -141,6 +155,15 @@ func (d *githubRunPoliciesDataSource) Schema(_ context.Context, _ datasource.Sch
 								"enable_compromised_actions_policy": schema.BoolAttribute{
 									Computed:            true,
 									MarkdownDescription: "Whether the compromised actions policy is enabled.",
+								},
+								"require_pinned_actions": schema.BoolAttribute{
+									Computed:            true,
+									MarkdownDescription: "Whether all actions are required to be pinned to full-length commit SHAs.",
+								},
+								"actions_to_exempt_while_pinning": schema.SetAttribute{
+									ElementType:         types.StringType,
+									Computed:            true,
+									MarkdownDescription: "Set of actions exempt from pinning requirements.",
 								},
 								"is_dry_run": schema.BoolAttribute{
 									Computed:            true,
@@ -213,9 +236,11 @@ func (d *githubRunPoliciesDataSource) Read(ctx context.Context, req datasource.R
 			"owner":                             types.StringValue(policy.PolicyConfig.Owner),
 			"name":                              types.StringValue(policy.PolicyConfig.Name),
 			"enable_action_policy":              types.BoolValue(policy.PolicyConfig.EnableActionPolicy),
+			"enable_harden_runner_policy":       types.BoolValue(policy.PolicyConfig.EnableHardenRunnerPolicy),
 			"enable_runs_on_policy":             types.BoolValue(policy.PolicyConfig.EnableRunsOnPolicy),
 			"enable_secrets_policy":             types.BoolValue(policy.PolicyConfig.EnableSecretsPolicy),
 			"enable_compromised_actions_policy": types.BoolValue(policy.PolicyConfig.EnableCompromisedActionsPolicy),
+			"require_pinned_actions":            types.BoolValue(policy.PolicyConfig.RequirePinnedActions),
 			"is_dry_run":                        types.BoolValue(policy.PolicyConfig.IsDryRun),
 		}
 
@@ -231,6 +256,38 @@ func (d *githubRunPoliciesDataSource) Read(ctx context.Context, req datasource.R
 			policyConfigAttrs["allowed_actions"] = types.MapNull(types.StringType)
 		}
 
+		// When the Harden Runner policy is enabled, surface an empty set (not
+		// null) for empty labels so consumers can see the documented
+		// "empty = all jobs" contract even though the backend response omits
+		// the field for empty values (JSON omitempty).
+		if len(policy.PolicyConfig.HardenRunnerTargetLabels) > 0 {
+			hardenRunnerTargetLabelsList := make([]attr.Value, len(policy.PolicyConfig.HardenRunnerTargetLabels))
+			for i, label := range policy.PolicyConfig.HardenRunnerTargetLabels {
+				hardenRunnerTargetLabelsList[i] = types.StringValue(label)
+			}
+			setValue, _ := types.SetValue(types.StringType, hardenRunnerTargetLabelsList)
+			policyConfigAttrs["harden_runner_target_labels"] = setValue
+		} else if policy.PolicyConfig.EnableHardenRunnerPolicy {
+			setValue, _ := types.SetValue(types.StringType, []attr.Value{})
+			policyConfigAttrs["harden_runner_target_labels"] = setValue
+		} else {
+			policyConfigAttrs["harden_runner_target_labels"] = types.SetNull(types.StringType)
+		}
+
+		if len(policy.PolicyConfig.HardenRunnerCustomActions) > 0 {
+			hardenRunnerCustomActionsList := make([]attr.Value, len(policy.PolicyConfig.HardenRunnerCustomActions))
+			for i, action := range policy.PolicyConfig.HardenRunnerCustomActions {
+				hardenRunnerCustomActionsList[i] = types.StringValue(action)
+			}
+			setValue, _ := types.SetValue(types.StringType, hardenRunnerCustomActionsList)
+			policyConfigAttrs["harden_runner_custom_actions"] = setValue
+		} else if policy.PolicyConfig.EnableHardenRunnerPolicy {
+			setValue, _ := types.SetValue(types.StringType, []attr.Value{})
+			policyConfigAttrs["harden_runner_custom_actions"] = setValue
+		} else {
+			policyConfigAttrs["harden_runner_custom_actions"] = types.SetNull(types.StringType)
+		}
+
 		// Handle disallowed runner labels set
 		if policy.PolicyConfig.DisallowedRunnerLabels != nil {
 			disallowedLabelsList := make([]attr.Value, 0, len(policy.PolicyConfig.DisallowedRunnerLabels))
@@ -243,16 +300,33 @@ func (d *githubRunPoliciesDataSource) Read(ctx context.Context, req datasource.R
 			policyConfigAttrs["disallowed_runner_labels"] = types.SetNull(types.StringType)
 		}
 
+		// Handle pinned actions exemptions set
+		if policy.PolicyConfig.PinnedActionsExemptions != nil {
+			pinnedExemptionsList := make([]attr.Value, len(policy.PolicyConfig.PinnedActionsExemptions))
+			for i, exemption := range policy.PolicyConfig.PinnedActionsExemptions {
+				pinnedExemptionsList[i] = types.StringValue(exemption)
+			}
+			setValue, _ := types.SetValue(types.StringType, pinnedExemptionsList)
+			policyConfigAttrs["actions_to_exempt_while_pinning"] = setValue
+		} else {
+			policyConfigAttrs["actions_to_exempt_while_pinning"] = types.SetNull(types.StringType)
+		}
+
 		// Create the policy config object
 		policyConfigAttrTypes := map[string]attr.Type{
 			"owner":                             types.StringType,
 			"name":                              types.StringType,
 			"enable_action_policy":              types.BoolType,
 			"allowed_actions":                   types.MapType{ElemType: types.StringType},
+			"enable_harden_runner_policy":       types.BoolType,
+			"harden_runner_target_labels":       types.SetType{ElemType: types.StringType},
+			"harden_runner_custom_actions":      types.SetType{ElemType: types.StringType},
 			"enable_runs_on_policy":             types.BoolType,
 			"disallowed_runner_labels":          types.SetType{ElemType: types.StringType},
 			"enable_secrets_policy":             types.BoolType,
 			"enable_compromised_actions_policy": types.BoolType,
+			"require_pinned_actions":            types.BoolType,
+			"actions_to_exempt_while_pinning":   types.SetType{ElemType: types.StringType},
 			"is_dry_run":                        types.BoolType,
 		}
 
@@ -311,10 +385,15 @@ func (d *githubRunPoliciesDataSource) Read(ctx context.Context, req datasource.R
 			"name":                              types.StringType,
 			"enable_action_policy":              types.BoolType,
 			"allowed_actions":                   types.MapType{ElemType: types.StringType},
+			"enable_harden_runner_policy":       types.BoolType,
+			"harden_runner_target_labels":       types.SetType{ElemType: types.StringType},
+			"harden_runner_custom_actions":      types.SetType{ElemType: types.StringType},
 			"enable_runs_on_policy":             types.BoolType,
 			"disallowed_runner_labels":          types.SetType{ElemType: types.StringType},
 			"enable_secrets_policy":             types.BoolType,
 			"enable_compromised_actions_policy": types.BoolType,
+			"require_pinned_actions":            types.BoolType,
+			"actions_to_exempt_while_pinning":   types.SetType{ElemType: types.StringType},
 			"is_dry_run":                        types.BoolType,
 		}},
 	}

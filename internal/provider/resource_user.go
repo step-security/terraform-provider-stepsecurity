@@ -97,6 +97,13 @@ func (r *userResource) Schema(_ context.Context, _ resource.SchemaRequest, resp 
 				},
 				Description: "The email suffix of the user. It is used for providing access to all users with a specific email suffix.",
 			},
+			"sso_group": schema.StringAttribute{
+				Optional: true,
+				PlanModifiers: []planmodifier.String{
+					stringplanmodifier.RequiresReplace(),
+				},
+				Description: "SSO Group name through which users get access to. This is typically group name defined in SSO providers like Okta, Google Workspace, Auth0, etc.",
+			},
 			"auth_type": schema.StringAttribute{
 				Required: true,
 				PlanModifiers: []planmodifier.String{
@@ -258,6 +265,7 @@ type userModel struct {
 	Email       types.String      `tfsdk:"email"`
 	UserName    types.String      `tfsdk:"user_name"`
 	EmailSuffix types.String      `tfsdk:"email_suffix"`
+	SSOGroup    types.String      `tfsdk:"sso_group"`
 	AuthType    types.String      `tfsdk:"auth_type"`
 	Policies    []UserPolicyModel `tfsdk:"policies"`
 }
@@ -303,7 +311,7 @@ func (r *userResource) Create(ctx context.Context, req resource.CreateRequest, r
 			Scope:        policy.Scope.ValueString(),
 			Organization: policy.Organization.ValueString(),
 			Repos:        repos,
-			Group:        policy.Group.ValueString(),
+			Server:       policy.Group.ValueString(),
 			Projects:     projects,
 		})
 	}
@@ -312,6 +320,7 @@ func (r *userResource) Create(ctx context.Context, req resource.CreateRequest, r
 		"user_name":    plan.UserName.ValueString(),
 		"email":        plan.Email.ValueString(),
 		"email_suffix": plan.EmailSuffix.ValueString(),
+		"sso_group":    plan.SSOGroup.ValueString(),
 		"auth_type":    plan.AuthType.ValueString(),
 	})
 
@@ -319,6 +328,7 @@ func (r *userResource) Create(ctx context.Context, req resource.CreateRequest, r
 		Email:       plan.Email.ValueString(),
 		UserName:    plan.UserName.ValueString(),
 		EmailSuffix: plan.EmailSuffix.ValueString(),
+		SSOGroup:    plan.SSOGroup.ValueString(),
 		AuthType:    plan.AuthType.ValueString(),
 		Policies:    policies,
 	})
@@ -438,7 +448,7 @@ func (r *userResource) Update(ctx context.Context, req resource.UpdateRequest, r
 			Scope:        policy.Scope.ValueString(),
 			Organization: policy.Organization.ValueString(),
 			Repos:        repos,
-			Group:        policy.Group.ValueString(),
+			Server:       policy.Group.ValueString(),
 			Projects:     projects,
 		})
 	}
@@ -504,6 +514,7 @@ func (r *userResource) updateUserState(ctx context.Context, user *stepsecurityap
 	state.Email = getStringValue(user.Email)
 	state.UserName = getStringValue(user.UserName)
 	state.EmailSuffix = getStringValue(user.EmailSuffix)
+	state.SSOGroup = getStringValue(user.SSOGroup)
 	state.AuthType = getStringValue(user.AuthType)
 	if !r.MatchPolicies(ctx, state, user.Policies) {
 		tflog.Debug(ctx, "user policies do not match with planned state. updating state", map[string]any{
@@ -553,7 +564,7 @@ func (r *userResource) matchPolicy(planned UserPolicyModel, api stepsecurityapi.
 		planned.Role.ValueString() == api.Role &&
 		planned.Scope.ValueString() == api.Scope &&
 		planned.Organization.ValueString() == api.Organization &&
-		planned.Group.ValueString() == api.Group &&
+		planned.Group.ValueString() == api.Server &&
 		planned.Repos.Equal(types.ListValueMust(types.StringType, repos)) &&
 		planned.Projects.Equal(types.ListValueMust(types.StringType, projects))
 }
@@ -575,7 +586,7 @@ func (r *userResource) getUserPolicyModelFromPolicy(policy stepsecurityapi.UserP
 		Scope:        getStringValue(policy.Scope),
 		Organization: getStringValue(policy.Organization),
 		Repos:        types.ListValueMust(types.StringType, repos),
-		Group:        getStringValue(policy.Group),
+		Group:        getStringValue(policy.Server),
 		Projects:     types.ListValueMust(types.StringType, projects),
 	}
 }

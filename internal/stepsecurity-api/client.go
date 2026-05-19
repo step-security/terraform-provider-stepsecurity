@@ -69,6 +69,16 @@ type APIClient struct {
 	Customer   string
 }
 
+type HTTPRequestOpts func(req *http.Request)
+
+func WithHttpHeaders(headers map[string]string) HTTPRequestOpts {
+	return func(req *http.Request) {
+		for key, val := range headers {
+			req.Header.Set(key, val)
+		}
+	}
+}
+
 func NewClient(baseURL, apiKey, customer string) (Client, error) {
 	return &APIClient{
 		HTTPClient: &http.Client{},
@@ -78,9 +88,13 @@ func NewClient(baseURL, apiKey, customer string) (Client, error) {
 	}, nil
 }
 
-func (c *APIClient) do(req *http.Request) ([]byte, error) {
+func (c *APIClient) do(req *http.Request, opts ...HTTPRequestOpts) ([]byte, error) {
 	if req == nil {
 		return nil, nil
+	}
+
+	for _, opt := range opts {
+		opt(req)
 	}
 
 	req.Header.Set("Authorization", "Bearer "+c.APIKey)
@@ -112,7 +126,7 @@ func (c *APIClient) get(ctx context.Context, URI string) ([]byte, error) {
 	return c.do(req)
 }
 
-func (c *APIClient) update(ctx context.Context, URI string, payload any, method string) ([]byte, error) {
+func (c *APIClient) update(ctx context.Context, URI string, payload any, method string, opts ...HTTPRequestOpts) ([]byte, error) {
 	reqBody, err := json.Marshal(payload)
 	if err != nil {
 		return nil, fmt.Errorf("failed to marshal config: %w", err)
@@ -122,11 +136,11 @@ func (c *APIClient) update(ctx context.Context, URI string, payload any, method 
 		return nil, fmt.Errorf("failed to create request: %w", err)
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
-	return c.do(httpReq)
+	return c.do(httpReq, opts...)
 }
 
-func (c *APIClient) post(ctx context.Context, URI string, payload any) ([]byte, error) {
-	return c.update(ctx, URI, payload, "POST")
+func (c *APIClient) post(ctx context.Context, URI string, payload any, opts ...HTTPRequestOpts) ([]byte, error) {
+	return c.update(ctx, URI, payload, "POST", opts...)
 }
 
 func (c *APIClient) put(ctx context.Context, URI string, payload any) ([]byte, error) {
