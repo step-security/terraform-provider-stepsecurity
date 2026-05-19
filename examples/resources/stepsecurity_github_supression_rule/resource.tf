@@ -8,8 +8,8 @@ terraform {
 }
 
 provider "stepsecurity" {
-  api_key  = "step_83242593-2f34-4199-8087-4a802b6663ab" # can also be set as env variable STEP_SECURITY_API_KEY
-  customer = "step-integration-tests"  # can also be set as env variable STEP_SECURITY_CUSTOMER
+  api_key      = "step_83242593-2f34-4199-8087-4a802b6663ab" # can also be set as env variable STEP_SECURITY_API_KEY
+  customer     = "step-integration-tests"                    # can also be set as env variable STEP_SECURITY_CUSTOMER
   api_base_url = "https://int.api.stepsecurity.io"
 }
 
