@@ -8,9 +8,8 @@ terraform {
 }
 
 provider "stepsecurity" {
-  api_key      = "step_83242593-2f34-4199-8087-4a802b6663ab" # can also be set as env variable STEP_SECURITY_API_KEY
-  customer     = "step-integration-tests"                    # can also be set as env variable STEP_SECURITY_CUSTOMER
-  api_base_url = "https://int.api.stepsecurity.io"
+  api_key  = "xxxxxxxx" # can also be set as env variable STEP_SECURITY_API_KEY
+  customer = "abcdefg"  # can also be set as env variable STEP_SECURITY_CUSTOMER
 }
 
 # github supression rule for findings detected by stepsecurity.
@@ -29,7 +28,7 @@ provider "stepsecurity" {
 
 
 # resource "stepsecurity_github_supression_rule" "rule-2" {
-#   # Rule to ignore source code overwritten findings on specific files in 'test' job of 'test' workflow in 'test' repo 
+#   # Rule to ignore source code overwritten findings on specific files in 'test' job of 'test' workflow in 'test' repo
 #   name        = "ignore-source-code-overwritten-on-specific-files"
 #   type        = "source_code_overwritten"
 #   action      = "ignore"
@@ -43,7 +42,7 @@ provider "stepsecurity" {
 # }
 
 resource "stepsecurity_github_supression_rule" "rule-test-vamshi" {
-  # Rule to ignore source code overwritten findings on specific files in 'test' job of 'test' workflow in 'test' repo 
+  # Rule to ignore source code overwritten findings on specific files in 'test' job of 'test' workflow in 'test' repo
   name        = "test-vamshi"
   type        = "runner_worker_memory_read"
   action      = "ignore"
