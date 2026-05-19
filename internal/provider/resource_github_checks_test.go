@@ -440,6 +440,82 @@ func TestGithubChecksResource_ValidateConfig(t *testing.T) {
 			expectedError: true,
 			errorContains: "cool_down_period should be between 1 and 30",
 		},
+		{
+			name: "valid_pypi_cooldown",
+			config: githubChecksModel{
+				Owner: types.StringValue(testOwner),
+				Controls: []control{
+					{
+						Control:  types.StringValue("PyPI Package Cooldown"),
+						Enable:   types.BoolValue(true),
+						Type:     types.StringValue("required"),
+						Settings: createSettingsObject(func() *int64 { v := int64(5); return &v }(), nil),
+					},
+				},
+				RequiredChecks: &checksConfig{
+					Repos: func() types.List {
+						elements := []attr.Value{types.StringValue("*")}
+						list, _ := types.ListValue(types.StringType, elements)
+						return list
+					}(),
+				},
+			},
+			expectedError: false,
+		},
+		{
+			name: "valid_pypi_compromised_updates",
+			config: githubChecksModel{
+				Owner: types.StringValue(testOwner),
+				Controls: []control{
+					{
+						Control:  types.StringValue("PyPI Package Compromised Updates"),
+						Enable:   types.BoolValue(true),
+						Type:     types.StringValue("required"),
+						Settings: createNullSettingsObject(),
+					},
+				},
+				RequiredChecks: &checksConfig{
+					Repos: func() types.List {
+						elements := []attr.Value{types.StringValue("*")}
+						list, _ := types.ListValue(types.StringType, elements)
+						return list
+					}(),
+				},
+			},
+			expectedError: false,
+		},
+		{
+			name: "pypi_cooldown_period_out_of_range",
+			config: githubChecksModel{
+				Owner: types.StringValue(testOwner),
+				Controls: []control{
+					{
+						Control:  types.StringValue("PyPI Package Cooldown"),
+						Enable:   types.BoolValue(true),
+						Type:     types.StringValue("required"),
+						Settings: createSettingsObject(func() *int64 { v := int64(50); return &v }(), nil),
+					},
+				},
+			},
+			expectedError: true,
+			errorContains: "cool_down_period should be between 1 and 30",
+		},
+		{
+			name: "settings_provided_for_pypi_compromised_updates",
+			config: githubChecksModel{
+				Owner: types.StringValue(testOwner),
+				Controls: []control{
+					{
+						Control:  types.StringValue("PyPI Package Compromised Updates"),
+						Enable:   types.BoolValue(true),
+						Type:     types.StringValue("required"),
+						Settings: createSettingsObject(func() *int64 { v := int64(3); return &v }(), nil),
+					},
+				},
+			},
+			expectedError: true,
+			errorContains: "can't provide settings",
+		},
 	}
 
 	for _, tc := range testCases {
@@ -480,18 +556,23 @@ func TestGithubChecksResource_ValidateConfig(t *testing.T) {
 					)
 				}
 
-				if control.Control.ValueString() == "NPM Package Cooldown" {
-					// Extract cooldown period from the settings object
-					if !control.Settings.IsNull() {
-						if cooldownAttr := control.Settings.Attributes()["cool_down_period"]; cooldownAttr != nil {
-							if cooldownValue, ok := cooldownAttr.(types.Int64); ok {
-								period := cooldownValue.ValueInt64()
-								if period != 0 && (period < 1 || period > 30) {
-									mockResp.Diagnostics.AddError(
-										"cool_down_period should be between 1 and 30",
-										"cool_down_period should be between 1 and 30 for control "+control.Control.ValueString(),
-									)
-								}
+				isCooldownControl := control.Control.ValueString() == "NPM Package Cooldown" ||
+					control.Control.ValueString() == "PyPI Package Cooldown"
+				if !isCooldownControl && !control.Settings.IsNull() && !control.Settings.IsUnknown() {
+					mockResp.Diagnostics.AddError(
+						"can't provide settings",
+						"can't provide settings for control "+control.Control.ValueString(),
+					)
+				}
+				if isCooldownControl && !control.Settings.IsNull() {
+					if cooldownAttr := control.Settings.Attributes()["cool_down_period"]; cooldownAttr != nil {
+						if cooldownValue, ok := cooldownAttr.(types.Int64); ok {
+							period := cooldownValue.ValueInt64()
+							if period != 0 && (period < 1 || period > 30) {
+								mockResp.Diagnostics.AddError(
+									"cool_down_period should be between 1 and 30",
+									"cool_down_period should be between 1 and 30 for control "+control.Control.ValueString(),
+								)
 							}
 						}
 					}
@@ -728,6 +809,83 @@ func TestGithubChecksResource_ConvertToCreateRequest(t *testing.T) {
 					EnableRequiredChecksForAllNewRepos: func() *bool { b := true; return &b }(),
 					EnableOptionalChecksForAllNewRepos: func() *bool { b := false; return &b }(),
 					EnableBaselineCheckForAllNewRepos:  func() *bool { b := true; return &b }(),
+				},
+				Repos: map[string]stepsecurityapi.CheckOptions{},
+			},
+			expectError: false,
+		},
+		{
+			name: "basic_config_with_pypi_cooldown",
+			input: githubChecksModel{
+				Owner: types.StringValue("test-org"),
+				Controls: []control{
+					{
+						Control:  types.StringValue("PyPI Package Cooldown"),
+						Enable:   types.BoolValue(true),
+						Type:     types.StringValue("required"),
+						Settings: createSettingsObject(func() *int64 { v := int64(3); return &v }(), []string{"my-internal-pkg"}),
+					},
+				},
+				RequiredChecks: &checksConfig{
+					Repos: func() types.List {
+						elements := []attr.Value{types.StringValue("*")}
+						list, _ := types.ListValue(types.StringType, elements)
+						return list
+					}(),
+				},
+			},
+			expected: stepsecurityapi.GitHubPRChecksConfig{
+				ChecksConfig: stepsecurityapi.ChecksConfig{
+					Checks: map[string]stepsecurityapi.CheckConfig{
+						"pypi_package_cooldown": {
+							Enabled: true,
+							Type:    "required",
+							Settings: map[string]any{
+								"cooldown_period_in_days": int64(3),
+								"exempted_packages":       []string{"my-internal-pkg"},
+							},
+						},
+					},
+					EnableRequiredChecksForAllNewRepos: func() *bool { b := true; return &b }(),
+					EnableOptionalChecksForAllNewRepos: func() *bool { b := false; return &b }(),
+					EnableBaselineCheckForAllNewRepos:  func() *bool { b := false; return &b }(),
+				},
+				Repos: map[string]stepsecurityapi.CheckOptions{},
+			},
+			expectError: false,
+		},
+		{
+			name: "pypi_compromised_updates",
+			input: githubChecksModel{
+				Owner: types.StringValue("test-org"),
+				Controls: []control{
+					{
+						Control:  types.StringValue("PyPI Package Compromised Updates"),
+						Enable:   types.BoolValue(true),
+						Type:     types.StringValue("required"),
+						Settings: createNullSettingsObject(),
+					},
+				},
+				RequiredChecks: &checksConfig{
+					Repos: func() types.List {
+						elements := []attr.Value{types.StringValue("*")}
+						list, _ := types.ListValue(types.StringType, elements)
+						return list
+					}(),
+				},
+			},
+			expected: stepsecurityapi.GitHubPRChecksConfig{
+				ChecksConfig: stepsecurityapi.ChecksConfig{
+					Checks: map[string]stepsecurityapi.CheckConfig{
+						"pypi_package_compromised_updates": {
+							Enabled:  true,
+							Type:     "required",
+							Settings: nil,
+						},
+					},
+					EnableRequiredChecksForAllNewRepos: func() *bool { b := true; return &b }(),
+					EnableOptionalChecksForAllNewRepos: func() *bool { b := false; return &b }(),
+					EnableBaselineCheckForAllNewRepos:  func() *bool { b := false; return &b }(),
 				},
 				Repos: map[string]stepsecurityapi.CheckOptions{},
 			},
@@ -1015,6 +1173,89 @@ func TestGithubChecksResource_ConvertToState(t *testing.T) {
 					}(),
 					OmitRepos: types.ListNull(types.StringType),
 				},
+			},
+		},
+		{
+			name:  "basic_config_with_pypi_cooldown",
+			owner: "test-org",
+			input: stepsecurityapi.GitHubPRChecksConfig{
+				ChecksConfig: stepsecurityapi.ChecksConfig{
+					Checks: map[string]stepsecurityapi.CheckConfig{
+						"pypi_package_cooldown": {
+							Enabled: true,
+							Type:    "required",
+							Settings: map[string]any{
+								"cooldown_period_in_days": int64(3),
+								"exempted_packages":       []string{"my-internal-pkg"},
+							},
+						},
+					},
+					EnableRequiredChecksForAllNewRepos: func() *bool { b := true; return &b }(),
+					EnableOptionalChecksForAllNewRepos: func() *bool { b := false; return &b }(),
+					EnableBaselineCheckForAllNewRepos:  func() *bool { b := false; return &b }(),
+				},
+				Repos: map[string]stepsecurityapi.CheckOptions{},
+			},
+			expected: githubChecksModel{
+				Owner: types.StringValue("test-org"),
+				Controls: []control{
+					{
+						Control:  types.StringValue("PyPI Package Cooldown"),
+						Enable:   types.BoolValue(true),
+						Type:     types.StringValue("required"),
+						Settings: createSettingsObject(func() *int64 { v := int64(3); return &v }(), []string{"my-internal-pkg"}),
+					},
+				},
+				RequiredChecks: &checksConfig{
+					Repos: func() types.List {
+						elements := []attr.Value{types.StringValue("*")}
+						list, _ := types.ListValue(types.StringType, elements)
+						return list
+					}(),
+					OmitRepos: types.ListNull(types.StringType),
+				},
+				OptionalChecks: nil,
+				BaselineCheck:  nil,
+			},
+		},
+		{
+			name:  "pypi_compromised_updates",
+			owner: "test-org",
+			input: stepsecurityapi.GitHubPRChecksConfig{
+				ChecksConfig: stepsecurityapi.ChecksConfig{
+					Checks: map[string]stepsecurityapi.CheckConfig{
+						"pypi_package_compromised_updates": {
+							Enabled:  true,
+							Type:     "required",
+							Settings: map[string]any{},
+						},
+					},
+					EnableRequiredChecksForAllNewRepos: func() *bool { b := true; return &b }(),
+					EnableOptionalChecksForAllNewRepos: func() *bool { b := false; return &b }(),
+					EnableBaselineCheckForAllNewRepos:  func() *bool { b := false; return &b }(),
+				},
+				Repos: map[string]stepsecurityapi.CheckOptions{},
+			},
+			expected: githubChecksModel{
+				Owner: types.StringValue("test-org"),
+				Controls: []control{
+					{
+						Control:  types.StringValue("PyPI Package Compromised Updates"),
+						Enable:   types.BoolValue(true),
+						Type:     types.StringValue("required"),
+						Settings: createNullSettingsObject(),
+					},
+				},
+				RequiredChecks: &checksConfig{
+					Repos: func() types.List {
+						elements := []attr.Value{types.StringValue("*")}
+						list, _ := types.ListValue(types.StringType, elements)
+						return list
+					}(),
+					OmitRepos: types.ListNull(types.StringType),
+				},
+				OptionalChecks: nil,
+				BaselineCheck:  nil,
 			},
 		},
 		{

@@ -338,7 +338,7 @@ func TestUserModel_ConversionFromAPI(t *testing.T) {
 						Scope:        "organization",
 						Organization: "test-org",
 						Repos:        []string{"repo1", "repo2"},
-						Group:        "test-group",
+						Server:       "test-group",
 						Projects:     []string{"proj1"},
 					},
 				},
@@ -414,7 +414,7 @@ func TestUserModel_ConversionFromAPI(t *testing.T) {
 					Scope:        types.StringValue(policy.Scope),
 					Organization: types.StringValue(policy.Organization),
 					Repos:        reposList,
-					Group:        types.StringValue(policy.Group),
+					Group:        types.StringValue(policy.Server),
 					Projects:     projectsList,
 				})
 			}

@@ -14,6 +14,7 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/types"
+	"github.com/hashicorp/terraform-plugin-framework/types/basetypes"
 	stepsecurityapi "github.com/step-security/terraform-provider-stepsecurity/internal/stepsecurity-api"
 )
 
@@ -94,6 +95,36 @@ func (r *githubPolicyStoreResource) Schema(_ context.Context, _ resource.SchemaR
 				Default:     booldefault.StaticBool(false),
 				Description: "This disables file monitoring",
 			},
+			"lockdown": schema.SingleNestedAttribute{
+				Optional:    true,
+				Description: "Lockdown configuration. When enabled, stops the job if a selected detection fires.",
+				Attributes: map[string]schema.Attribute{
+					"enabled": schema.BoolAttribute{
+						Optional:    true,
+						Computed:    true,
+						Default:     booldefault.StaticBool(false),
+						Description: "Enable lockdown mode.",
+					},
+					"privileged_container": schema.BoolAttribute{
+						Optional:    true,
+						Computed:    true,
+						Default:     booldefault.StaticBool(false),
+						Description: "Trigger lockdown on Privileged-Container detection.",
+					},
+					"runner_worker_memory_read": schema.BoolAttribute{
+						Optional:    true,
+						Computed:    true,
+						Default:     booldefault.StaticBool(false),
+						Description: "Trigger lockdown on Runner-Worker-Memory-Read detection.",
+					},
+					"reverse_shell": schema.BoolAttribute{
+						Optional:    true,
+						Computed:    true,
+						Default:     booldefault.StaticBool(false),
+						Description: "Trigger lockdown on Reverse-Shell detection.",
+					},
+				},
+			},
 		},
 	}
 }
@@ -129,6 +160,14 @@ type githubPolicyStoreModel struct {
 	DisableTelemetry      types.Bool   `tfsdk:"disable_telemetry"`
 	DisableSudo           types.Bool   `tfsdk:"disable_sudo"`
 	DisableFileMonitoring types.Bool   `tfsdk:"disable_file_monitoring"`
+	Lockdown              types.Object `tfsdk:"lockdown"`
+}
+
+type lockdownConfigModel struct {
+	Enabled                types.Bool `tfsdk:"enabled"`
+	PrivilegedContainer    types.Bool `tfsdk:"privileged_container"`
+	RunnerWorkerMemoryRead types.Bool `tfsdk:"runner_worker_memory_read"`
+	ReverseShell           types.Bool `tfsdk:"reverse_shell"`
 }
 
 // ImportState implements resource.ResourceWithImportState.
@@ -176,7 +215,7 @@ func (r *githubPolicyStoreResource) Create(ctx context.Context, req resource.Cre
 		return
 	}
 
-	policy := r.getGitHubPolicyStorePolicy(plan)
+	policy := r.getGitHubPolicyStorePolicy(ctx, plan)
 	if err := r.client.CreateGitHubPolicyStorePolicy(ctx, policy); err != nil {
 		resp.Diagnostics.AddError(
 			"Failed to create policy",
@@ -243,7 +282,7 @@ func (r *githubPolicyStoreResource) Update(ctx context.Context, req resource.Upd
 		return
 	}
 
-	policy := r.getGitHubPolicyStorePolicy(plan)
+	policy := r.getGitHubPolicyStorePolicy(ctx, plan)
 	if err := r.client.CreateGitHubPolicyStorePolicy(ctx, policy); err != nil {
 		resp.Diagnostics.AddError(
 			"Failed to update policy",
@@ -314,12 +353,56 @@ func (r *githubPolicyStoreResource) updateGitHubPolicyStorePolicyState(policy *s
 	state.DisableTelemetry = types.BoolValue(policy.DisableTelemetry)
 	state.DisableSudo = types.BoolValue(policy.DisableSudo)
 	state.DisableFileMonitoring = types.BoolValue(policy.DisableFileMonitoring)
+
+	lockdownAttrTypes := map[string]attr.Type{
+		"enabled":                   types.BoolType,
+		"privileged_container":      types.BoolType,
+		"runner_worker_memory_read": types.BoolType,
+		"reverse_shell":             types.BoolType,
+	}
+	if policy.Lockdown != nil {
+		detectionSet := make(map[string]bool)
+		for _, d := range policy.Lockdown.Detections {
+			detectionSet[d] = true
+		}
+		lockdownObj, _ := types.ObjectValue(lockdownAttrTypes, map[string]attr.Value{
+			"enabled":                   types.BoolValue(policy.Lockdown.Enabled),
+			"privileged_container":      types.BoolValue(detectionSet["Privileged-Container"]),
+			"runner_worker_memory_read": types.BoolValue(detectionSet["Runner-Worker-Memory-Read"]),
+			"reverse_shell":             types.BoolValue(detectionSet["Reverse-Shell"]),
+		})
+		state.Lockdown = lockdownObj
+	} else {
+		state.Lockdown = types.ObjectNull(lockdownAttrTypes)
+	}
 }
 
-func (r *githubPolicyStoreResource) getGitHubPolicyStorePolicy(plan githubPolicyStoreModel) *stepsecurityapi.GitHubPolicyStorePolicy {
+func (r *githubPolicyStoreResource) getGitHubPolicyStorePolicy(ctx context.Context, plan githubPolicyStoreModel) *stepsecurityapi.GitHubPolicyStorePolicy {
 	var allowedEndpoints []string
 	for _, ep := range plan.AllowedEndpoints.Elements() {
 		allowedEndpoints = append(allowedEndpoints, ep.(types.String).ValueString())
+	}
+
+	var lockdownConfig *stepsecurityapi.LockdownConfig
+	if !plan.Lockdown.IsNull() && !plan.Lockdown.IsUnknown() {
+		var lm lockdownConfigModel
+		plan.Lockdown.As(ctx, &lm, basetypes.ObjectAsOptions{})
+
+		var detections []string
+		if lm.PrivilegedContainer.ValueBool() {
+			detections = append(detections, "Privileged-Container")
+		}
+		if lm.RunnerWorkerMemoryRead.ValueBool() {
+			detections = append(detections, "Runner-Worker-Memory-Read")
+		}
+		if lm.ReverseShell.ValueBool() {
+			detections = append(detections, "Reverse-Shell")
+		}
+
+		lockdownConfig = &stepsecurityapi.LockdownConfig{
+			Enabled:    lm.Enabled.ValueBool(),
+			Detections: detections,
+		}
 	}
 
 	return &stepsecurityapi.GitHubPolicyStorePolicy{
@@ -330,5 +413,6 @@ func (r *githubPolicyStoreResource) getGitHubPolicyStorePolicy(plan githubPolicy
 		DisableTelemetry:      plan.DisableTelemetry.ValueBool(),
 		DisableSudo:           plan.DisableSudo.ValueBool(),
 		DisableFileMonitoring: plan.DisableFileMonitoring.ValueBool(),
+		Lockdown:              lockdownConfig,
 	}
 }

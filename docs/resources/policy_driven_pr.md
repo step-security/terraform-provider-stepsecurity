@@ -42,6 +42,7 @@ resource "stepsecurity_policy_driven_pr" "org_level_all" {
     restrict_github_token_permissions     = false
     secure_docker_file                    = false
     actions_to_exempt_while_pinning       = ["actions/checkout", "actions/setup-node"]
+    images_to_exempt_while_pinning        = ["amazon*"]
   }
 }
 
@@ -54,21 +55,31 @@ resource "stepsecurity_policy_driven_pr" "repo_level_config" {
   owner          = "test-organization"
   selected_repos = ["test-repo-1", "test-repo-2"]
   auto_remediation_options = {
-    create_pr                                     = true
-    create_issue                                  = false
-    create_github_advanced_security_alert         = false
-    harden_github_hosted_runner                   = true
-    pin_actions_to_sha                            = true
-    restrict_github_token_permissions             = true
-    secure_docker_file                            = true
+    create_pr                             = true
+    create_issue                          = false
+    create_github_advanced_security_alert = false
+    harden_github_hosted_runner           = true
+    pin_actions_to_sha                    = true
+    restrict_github_token_permissions     = true
+    secure_docker_file                    = true
+    labels_to_replace = {
+      "ubuntu-latest-8-cores" = "ubuntu-latest"
+      "windows-latest-large"  = "windows-latest"
+    }
     actions_to_exempt_while_pinning               = ["actions/checkout", "actions/setup-node"]
-    actions_to_replace_with_step_security_actions = ["EnricoMi/publish-unit-test-result-action"]
+    actions_to_replace_with_step_security_actions = ["enricomi/publish-unit-test-result-action", "tj-actions/changed-files"]
+    replace_action_on_major_tag_match             = true                         # actions in actions_to_replace_with_step_security_actions are replaced only when the major tag matches
+    actions_exempted_from_replacement             = ["fkirc/skip-*", "amannn/*"] // either actions_to_replace_with_step_security_actions or actions_exempted_from_replacement can be set at a time unless its *
+    images_to_exempt_while_pinning                = ["amazon*"]
+
     # v2-only features (requires policy-driven PR v2 to be enabled)
     update_precommit_file = ["eslint"]
     package_ecosystem = [
       {
-        package  = "npm"
-        interval = "daily"
+        package       = "npm"
+        interval      = "daily"
+        cooldown_yaml = "default-days: 7\npackage-rules:\n  - match-package-patterns:\n      - \"*\"\n    days: 3\n"
+        groups_yaml   = "production-dependencies:\n  patterns:\n    - \"*\"\n  exclude-patterns:\n    - \"@types/*\"\n"
       },
       {
         package  = "pip"
@@ -81,6 +92,12 @@ resource "stepsecurity_policy_driven_pr" "repo_level_config" {
       "codecov/codecov-action@v4" : "5ecb98a3c6b747ed38dc09f787459979aebb39be",
       "google-github-actions/auth@v2" : "ba79af03959ebeac9769e648f473a284504d9193",
       "google-github-actions/auth@v3" : "7c6bc770dae815cd3e89ee6cdf493a5fab2cc093"
+    },
+    update_existing_configuration = true # update existing dependabot configurations
+    harden_runner_config = {
+      update_existing_configuration = false
+      config                        = "- name: Harden the runner (Audit all outbound calls)\n  uses: step-security/custom-agent@v2\n  with:\n    egress-policy: audit\n    allowed-endpoints: >\n      github.com:443\n"
+      target_runner_labels          = ["ubuntu-latest", "macos-latest"]
     }
   }
 }
@@ -106,6 +123,30 @@ resource "stepsecurity_policy_driven_pr" "org_level_with_exclusions" {
 }
 
 # ============================================================================
+# Scenario 4: Org-level config with filter
+# ============================================================================
+# Applies org-level config to all repos that match the filter
+resource "stepsecurity_policy_driven_pr" "org_level_with_exclusions" {
+  owner          = "test-organization"
+  selected_repos = ["*"]
+  selected_repos_filter = {
+    include_repos_only_with_topics = ["topic1", "topic2"]
+  }
+  auto_remediation_options = {
+    create_pr                                     = true
+    create_issue                                  = false
+    create_github_advanced_security_alert         = false
+    harden_github_hosted_runner                   = true
+    pin_actions_to_sha                            = true
+    restrict_github_token_permissions             = false
+    secure_docker_file                            = false
+    actions_to_replace_with_step_security_actions = ["*"]                        // all actions with stepsecurity actions will be replaced
+    actions_exempted_from_replacement             = ["fkirc/skip-*", "amannn/*"] // all actions except these will be replaced since its specified 
+  }
+}
+
+
+# ============================================================================
 # For importing existing policy driven pr config to terraform state
 # ============================================================================
 # This will be helpful to manage existing policy driven pr config using terraform
@@ -128,6 +169,7 @@ import {
 ### Optional
 
 - `excluded_repos` (List of String) List of repositories to exclude when selected_repos is ['*']. It restores their original configs (preserving configs from other Terraform resources) or deletes configs for repos that had none.
+- `selected_repos_filter` (Attributes) (see [below for nested schema](#nestedatt--selected_repos_filter))
 
 ### Read-Only
 
@@ -139,6 +181,7 @@ import {
 Optional:
 
 - `action_commit_map` (Map of String) Map of actions to their corresponding commit SHAs to bypass pinning
+- `actions_exempted_from_replacement` (List of String) List of actions to exempt from replacement. When set, ALL maintained actions are replaced EXCEPT those listed. Mutually exclusive with actions_to_replace_with_step_security_actions.
 - `actions_to_exempt_while_pinning` (List of String) List of actions to exempt while pinning actions to SHA. When exempted, the action will not be pinned to SHA.
 - `actions_to_replace_with_step_security_actions` (List of String) List of actions to replace with Step Security actions. When provided, the actions will be replaced with Step Security actions.
 - `add_workflows` (String) Additional workflows to add as part of policy-driven PR.
@@ -146,11 +189,26 @@ Optional:
 - `create_issue` (Boolean) Create an issue when a finding is detected.
 - `create_pr` (Boolean) Create a PR when a finding is detected.
 - `harden_github_hosted_runner` (Boolean) When enabled, this creates a PR/issue to install security agent on the GitHub-hosted runner to prevent exfiltration of credentials, monitor the build process, and detect compromised dependencies.
+- `harden_runner_config` (Attributes) Configuration for harden runner. When not provided, the default harden runner config will be applied. (see [below for nested schema](#nestedatt--auto_remediation_options--harden_runner_config))
+- `images_to_exempt_while_pinning` (List of String) List of Docker images to exempt while pinning images to SHA. When exempted, the image will not be pinned to SHA.
+- `labels_to_replace` (Map of String) Map of runner labels to replace with their alternatives (e.g., {"disallowed-label": "allowed-label"}). When specified, this creates a PR/issue to replace disallowed runner labels.
 - `package_ecosystem` (Attributes List) List of package ecosystems to enable for dependency updates. (see [below for nested schema](#nestedatt--auto_remediation_options--package_ecosystem))
 - `pin_actions_to_sha` (Boolean) When enabled, this creates a PR/issue to pin actions to SHA. GitHub's Security Hardening guide recommends pinning actions to full length commit for third party actions.
+- `replace_action_on_major_tag_match` (Boolean) When enabled, actions in actions_to_replace_with_step_security_actions are replaced only when the major tag matches. Requires actions_to_replace_with_step_security_actions to be non-empty.
 - `restrict_github_token_permissions` (Boolean) When enabled, this creates a PR/issue to restrict GitHub token permissions. GitHub's Security Hardening guide recommends restricting permissions to the minimum required
 - `secure_docker_file` (Boolean) When enabled, this creates a PR/issue to secure Dockerfile by pinning base images to SHA.
+- `update_existing_configuration` (Boolean) When enabled, dependabot will remove existing entries that are not in the package_ecosystem config.
 - `update_precommit_file` (List of String) List of pre-commit file paths to update (e.g., ['.pre-commit-config.yaml']).
+
+<a id="nestedatt--auto_remediation_options--harden_runner_config"></a>
+### Nested Schema for `auto_remediation_options.harden_runner_config`
+
+Optional:
+
+- `config` (String) YAML string configuring the harden runner.
+- `target_runner_labels` (List of String) List of runner labels to apply the harden runner config to. When non-empty, skip_harden_runner is automatically set to true internally.
+- `update_existing_configuration` (Boolean) When enabled, removes existing harden runner configurations not in the config.
+
 
 <a id="nestedatt--auto_remediation_options--package_ecosystem"></a>
 ### Nested Schema for `auto_remediation_options.package_ecosystem`
@@ -159,6 +217,20 @@ Required:
 
 - `interval` (String) Update interval (e.g., 'daily', 'weekly', 'monthly').
 - `package` (String) Package ecosystem (e.g., 'npm', 'pip', 'docker').
+
+Optional:
+
+- `cooldown_yaml` (String) YAML string configuring cooldown periods for dependency updates.
+- `groups_yaml` (String) YAML string configuring dependency update groups.
+
+
+
+<a id="nestedatt--selected_repos_filter"></a>
+### Nested Schema for `selected_repos_filter`
+
+Optional:
+
+- `include_repos_only_with_topics` (Set of String) Topics that repos should have when selected_repos is ['*'].
 
 ## Import
 

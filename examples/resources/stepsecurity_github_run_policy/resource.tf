@@ -112,6 +112,49 @@ resource "stepsecurity_github_run_policy" "runner_policy_dry_run" {
   }
 }
 
+# Harden Runner Policy Example (targeted) - Enforces Harden Runner only on jobs whose runs-on matches the listed labels
+resource "stepsecurity_github_run_policy" "harden_runner_policy_targeted" {
+  owner     = "my-org"
+  name      = "Harden Runner Policy - Targeted"
+  all_repos = true
+
+  policy_config = {
+    owner                       = "my-org"
+    name                        = "Harden Runner Policy - Targeted"
+    enable_harden_runner_policy = true
+    harden_runner_target_labels = ["ubuntu-step-security", "linux-secure"]
+  }
+}
+
+# Harden Runner Policy Example (all jobs) - Empty harden_runner_target_labels applies the policy to every job
+resource "stepsecurity_github_run_policy" "harden_runner_policy_all_jobs" {
+  owner     = "my-org"
+  name      = "Harden Runner Policy - All Jobs"
+  all_repos = true
+
+  policy_config = {
+    owner                       = "my-org"
+    name                        = "Harden Runner Policy - All Jobs"
+    enable_harden_runner_policy = true
+    harden_runner_target_labels = []
+  }
+}
+
+# Harden Runner Policy Example (custom actions) - Accepts additional Harden Runner-equivalent actions
+resource "stepsecurity_github_run_policy" "harden_runner_policy_custom_actions" {
+  owner     = "my-org"
+  name      = "Harden Runner Policy - Custom Actions"
+  all_repos = true
+
+  policy_config = {
+    owner                        = "my-org"
+    name                         = "Harden Runner Policy - Custom Actions"
+    enable_harden_runner_policy  = true
+    harden_runner_target_labels  = []
+    harden_runner_custom_actions = ["my-org/harden-runner"]
+  }
+}
+
 # Secrets Policy Example (all_orgs) - Prevents secrets from being exfiltrated across all orgs
 resource "stepsecurity_github_run_policy" "secrets_policy_all_orgs" {
   owner    = "my-org"
@@ -223,6 +266,44 @@ resource "stepsecurity_github_run_policy" "repo_specific_runner_policy" {
     name                     = "Critical Repositories Runner Policy"
     enable_runs_on_policy    = true
     disallowed_runner_labels = ["self-hosted", "windows-latest"]
+  }
+}
+
+# Allowed Actions Policy Example (all_repos, pinned actions enforcement)
+resource "stepsecurity_github_run_policy" "pinned_actions_policy" {
+  owner     = "my-org"
+  name      = "Allowed Actions Policy - Pinned Actions Enforcement"
+  all_repos = true
+
+  policy_config = {
+    owner                           = "my-org"
+    name                            = "Allowed Actions Policy - Pinned Actions Enforcement"
+    enable_action_policy            = true
+    require_pinned_actions          = true
+    actions_to_exempt_while_pinning = ["actions/*", "my-trusted-org/*"]
+    allowed_actions = {
+      "actions/checkout"            = "allow"
+      "step-security/harden-runner" = "allow"
+    }
+  }
+}
+
+# Allowed Actions Policy Example (dry_run, pinned actions enforcement)
+resource "stepsecurity_github_run_policy" "pinned_actions_policy_dry_run" {
+  owner     = "my-org"
+  name      = "Allowed Actions Policy - Pinned Actions Enforcement - Dry Run"
+  all_repos = true
+
+  policy_config = {
+    owner                  = "my-org"
+    name                   = "Allowed Actions Policy - Pinned Actions Enforcement - Dry Run"
+    enable_action_policy   = true
+    require_pinned_actions = true
+    allowed_actions = {
+      "actions/checkout"            = "allow"
+      "step-security/harden-runner" = "allow"
+    }
+    is_dry_run = true
   }
 }
 

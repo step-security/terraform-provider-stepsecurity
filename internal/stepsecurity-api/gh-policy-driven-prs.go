@@ -4,33 +4,46 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
+	"net/http"
+	"strconv"
+	"strings"
+	"time"
 
+	"github.com/hashicorp/go-uuid"
 	"github.com/hashicorp/terraform-plugin-log/tflog"
 )
 
 // PolicyDrivenPRPolicy represents the Terraform resource model
 type PolicyDrivenPRPolicy struct {
-	Owner                 string                `json:"owner"`
-	AutoRemdiationOptions AutoRemdiationOptions `json:"auto_remediation_options"`
-	SelectedRepos         []string              `json:"selected_repos"`
-	UseRepoLevelConfig    bool                  `json:"use_repo_level_config"`
-	UseOrgLevelConfig     bool                  `json:"use_org_level_config"`
+	Owner                 string                              `json:"owner"`
+	AutoRemdiationOptions AutoRemdiationOptions               `json:"auto_remediation_options"`
+	SelectedRepos         []string                            `json:"selected_repos"`
+	SelectedReposFilter   ApplyIssuePRConfigForAllReposFilter `json:"selected_repos_filter"`
+	UseRepoLevelConfig    bool                                `json:"use_repo_level_config"`
+	UseOrgLevelConfig     bool                                `json:"use_org_level_config"`
 }
 
 type AutoRemdiationOptions struct {
-	CreatePR                                bool               `json:"create_pr"`
-	CreateIssue                             bool               `json:"create_issue"`
-	CreateGitHubAdvancedSecurityAlert       bool               `json:"create_github_advanced_security_alert"`
-	HardenGitHubHostedRunner                bool               `json:"harden_github_hosted_runner"`
-	PinActionsToSHA                         bool               `json:"pin_actions_to_sha"`
-	RestrictGitHubTokenPermissions          bool               `json:"restrict_github_token_permissions"`
-	SecureDockerFile                        bool               `json:"secure_docker_file"`
-	ActionsToExemptWhilePinning             []string           `json:"actions_to_exempt_while_pinning"`
-	ActionsToReplaceWithStepSecurityActions []string           `json:"actions_to_replace_with_step_security_actions"`
-	UpdatePrecommitFile                     []string           `json:"update_precommit_file,omitempty"`
-	PackageEcosystem                        []DependabotConfig `json:"package_ecosystem,omitempty"`
-	AddWorkflows                            string             `json:"add_workflows,omitempty"`
-	ActionCommitMap                         map[string]string  `json:"action_commit_map"`
+	CreatePR                                bool                `json:"create_pr"`
+	CreateIssue                             bool                `json:"create_issue"`
+	CreateGitHubAdvancedSecurityAlert       bool                `json:"create_github_advanced_security_alert"`
+	HardenGitHubHostedRunner                bool                `json:"harden_github_hosted_runner"`
+	PinActionsToSHA                         bool                `json:"pin_actions_to_sha"`
+	RestrictGitHubTokenPermissions          bool                `json:"restrict_github_token_permissions"`
+	SecureDockerFile                        bool                `json:"secure_docker_file"`
+	ActionsToExemptWhilePinning             []string            `json:"actions_to_exempt_while_pinning"`
+	ImagesToExemptWhilePinning              []string            `json:"images_to_exempt_while_pinning"`
+	ActionsToReplaceWithStepSecurityActions []string            `json:"actions_to_replace_with_step_security_actions"`
+	ReplaceByMajorTag                       *bool               `json:"replace_by_major_tag,omitempty"`
+	ExemptedFromReplacement                 []string            `json:"exempted_from_replacement,omitempty"`
+	UpdatePrecommitFile                     []string            `json:"update_precommit_file,omitempty"`
+	PackageEcosystem                        []DependabotConfig  `json:"package_ecosystem,omitempty"`
+	Subtractive                             *bool               `json:"subtractive,omitempty"`
+	AddWorkflows                            string              `json:"add_workflows,omitempty"`
+	ActionCommitMap                         map[string]string   `json:"action_commit_map"`
+	HardenRunnerConfig                      *HardenRunnerConfig `json:"harden_runner_config,omitempty"`
+	LabelsToReplace                         map[string]string   `json:"labels_to_replace,omitempty"`
 }
 
 // API request/response structures matching agent-api
@@ -51,18 +64,39 @@ type issuePRConfig struct {
 }
 
 type controlSettings struct {
-	ExemptedActions               []string           `json:"exempted_actions,omitempty"`
-	ActionsToReplace              map[string]string  `json:"actions_to_replace,omitempty"`
-	UpdatePrecommitFile           map[string]bool    `json:"update_precommit_file,omitempty"`
-	PackageEcosystem              []DependabotConfig `json:"package_ecosystem,omitempty"`
-	AddWorkflows                  string             `json:"add_workflows,omitempty"`
-	ApplyIssuePRConfigForAllRepos *bool              `json:"apply_issue_pr_config_for_all_repos,omitempty"`
-	ActionCommitMap               map[string]string  `json:"action_commit_map"`
+	ExemptedActions                     []string                             `json:"exempted_actions,omitempty"`
+	ActionsToReplace                    map[string]string                    `json:"actions_to_replace,omitempty"`
+	ReplaceByMajorTag                   *bool                                `json:"replace_by_major_tag,omitempty"`
+	ExemptedFromReplacement             []string                             `json:"exempted_from_replacement,omitempty"`
+	ReplaceAllActions                   *bool                                `json:"replace_all_actions,omitempty"`
+	LabelsToReplace                     map[string]string                    `json:"labels_to_replace"`
+	UpdatePrecommitFile                 map[string]bool                      `json:"update_precommit_file,omitempty"`
+	PackageEcosystem                    []DependabotConfig                   `json:"package_ecosystem,omitempty"`
+	Subtractive                         *bool                                `json:"subtractive,omitempty"`
+	AddWorkflows                        string                               `json:"add_workflows,omitempty"`
+	ApplyIssuePRConfigForAllRepos       *bool                                `json:"apply_issue_pr_config_for_all_repos,omitempty"`
+	ApplyIssuePRConfigForAllReposFilter *ApplyIssuePRConfigForAllReposFilter `json:"apply_issue_pr_config_for_all_repos_filter,omitempty"`
+	ActionCommitMap                     map[string]string                    `json:"action_commit_map"`
+	ExemptedImages                      []string                             `json:"exempted_images,omitempty"`
+	HardenRunnerConfig                  *HardenRunnerConfig                  `json:"harden_runner_config,omitempty"`
+}
+
+type ApplyIssuePRConfigForAllReposFilter struct {
+	ReposTopics []string `json:"repos_topics,omitempty"`
 }
 
 type DependabotConfig struct {
-	Package  string `json:"package"`
-	Interval string `json:"interval"`
+	Package      string `json:"package"`
+	Interval     string `json:"interval"`
+	CoolDownYAML string `json:"cooldown_yaml,omitempty"`
+	GroupsYAML   string `json:"groups_yaml,omitempty"`
+}
+
+type HardenRunnerConfig struct {
+	Config           string   `json:"config"`
+	Subtractive      bool     `json:"subtractive"`
+	SkipHardenRunner bool     `json:"skipHardenRunner"`
+	RunnerLabels     []string `json:"runnerLabels"`
 }
 
 type featureConfigResponse struct {
@@ -77,6 +111,11 @@ type policyDrivenPRInternal struct {
 	TriggerGithubAlert      bool                       `json:"trigger_github_alert"`
 	TriggerPRInsteadOfIssue bool                       `json:"trigger_pr_instead_of_issue"`
 	ControlSettings         controlSettings            `json:"control_settings,omitempty"`
+}
+
+// pagedConfigResponse is the v2 envelope returned when chunk_response=true.
+type pagedConfigResponse struct {
+	Repos []featureConfigResponse `json:"repos"`
 }
 
 func (c *APIClient) CreatePolicyDrivenPRPolicy(ctx context.Context, createRequest PolicyDrivenPRPolicy) error {
@@ -94,9 +133,23 @@ func (c *APIClient) CreatePolicyDrivenPRPolicy(ctx context.Context, createReques
 	}
 
 	// Build actions to replace map
+	// If the list is exactly ["*"], treat it as replace-all instead of a literal map entry
 	actionsToReplace := make(map[string]string)
-	for _, action := range createRequest.AutoRemdiationOptions.ActionsToReplaceWithStepSecurityActions {
-		actionsToReplace[action] = ""
+	var replaceAllActions *bool
+	if len(createRequest.AutoRemdiationOptions.ActionsToReplaceWithStepSecurityActions) == 1 &&
+		createRequest.AutoRemdiationOptions.ActionsToReplaceWithStepSecurityActions[0] == "*" {
+		t := true
+		replaceAllActions = &t
+	} else {
+		for _, action := range createRequest.AutoRemdiationOptions.ActionsToReplaceWithStepSecurityActions {
+			actionsToReplace[action] = ""
+		}
+	}
+
+	// If exempted_from_replacement is set, replace_all_actions must also be true
+	if len(createRequest.AutoRemdiationOptions.ExemptedFromReplacement) > 0 {
+		t := true
+		replaceAllActions = &t
 	}
 
 	// Build control checks config
@@ -132,7 +185,15 @@ func (c *APIClient) CreatePolicyDrivenPRPolicy(ctx context.Context, createReques
 		}
 	}
 
-	if len(createRequest.AutoRemdiationOptions.ActionsToReplaceWithStepSecurityActions) > 0 {
+	if len(createRequest.AutoRemdiationOptions.LabelsToReplace) > 0 {
+		controlChecksConfig["ReplaceRunnerLabels"] = issuePRConfig{
+			TriggerGithubIssue: createIssue,
+			TriggerGithubPr:    createPR,
+		}
+	}
+
+	if len(createRequest.AutoRemdiationOptions.ActionsToReplaceWithStepSecurityActions) > 0 ||
+		len(createRequest.AutoRemdiationOptions.ExemptedFromReplacement) > 0 {
 		controlChecksConfig["MaintainedGitHubActionsShouldBeUsed"] = issuePRConfig{
 			TriggerGithubIssue: createIssue,
 			TriggerGithubPr:    createPR,
@@ -166,13 +227,21 @@ func (c *APIClient) CreatePolicyDrivenPRPolicy(ctx context.Context, createReques
 	hasWildcard := len(createRequest.SelectedRepos) == 1 && createRequest.SelectedRepos[0] == "*"
 	applyToAllRepos := createRequest.UseOrgLevelConfig && hasWildcard
 	cs := &controlSettings{
-		ExemptedActions:               createRequest.AutoRemdiationOptions.ActionsToExemptWhilePinning,
-		ActionsToReplace:              actionsToReplace,
-		UpdatePrecommitFile:           updatePrecommitFileMap,
-		PackageEcosystem:              createRequest.AutoRemdiationOptions.PackageEcosystem,
-		AddWorkflows:                  createRequest.AutoRemdiationOptions.AddWorkflows,
-		ActionCommitMap:               createRequest.AutoRemdiationOptions.ActionCommitMap,
-		ApplyIssuePRConfigForAllRepos: &applyToAllRepos,
+		ExemptedActions:                     createRequest.AutoRemdiationOptions.ActionsToExemptWhilePinning,
+		ActionsToReplace:                    actionsToReplace,
+		ReplaceByMajorTag:                   createRequest.AutoRemdiationOptions.ReplaceByMajorTag,
+		ExemptedFromReplacement:             createRequest.AutoRemdiationOptions.ExemptedFromReplacement,
+		ReplaceAllActions:                   replaceAllActions,
+		LabelsToReplace:                     createRequest.AutoRemdiationOptions.LabelsToReplace,
+		UpdatePrecommitFile:                 updatePrecommitFileMap,
+		PackageEcosystem:                    createRequest.AutoRemdiationOptions.PackageEcosystem,
+		Subtractive:                         createRequest.AutoRemdiationOptions.Subtractive,
+		AddWorkflows:                        createRequest.AutoRemdiationOptions.AddWorkflows,
+		ActionCommitMap:                     createRequest.AutoRemdiationOptions.ActionCommitMap,
+		ExemptedImages:                      createRequest.AutoRemdiationOptions.ImagesToExemptWhilePinning,
+		HardenRunnerConfig:                  createRequest.AutoRemdiationOptions.HardenRunnerConfig,
+		ApplyIssuePRConfigForAllRepos:       &applyToAllRepos,
+		ApplyIssuePRConfigForAllReposFilter: &createRequest.SelectedReposFilter,
 	}
 
 	useRepoLevel := createRequest.UseRepoLevelConfig
@@ -208,10 +277,68 @@ func (c *APIClient) CreatePolicyDrivenPRPolicy(ctx context.Context, createReques
 
 func (c *APIClient) updateConfigForRepo(ctx context.Context, owner string, repo string, config policyDrivenPRConfigOptions) error {
 	URI := fmt.Sprintf("%s/v1/github/%s/%s/policy-driven-pr/configs", c.BaseURL, owner, repo)
-	if _, err := c.post(ctx, URI, config); err != nil {
+
+	uuid, err := uuid.GenerateUUID()
+	if err != nil {
+		return fmt.Errorf("error getting async event id: %w", err)
+	}
+	httpHeaders := map[string]string{
+		"x-async-event-id": uuid,
+	}
+
+	// First attempt
+	_, err = c.post(ctx, URI, config, WithHttpHeaders(httpHeaders))
+	if err == nil {
+		return nil
+	}
+
+	// If it's not a 503, fail immediately
+	if !strings.Contains(err.Error(), "status: 503") {
 		return fmt.Errorf("failed to update config for repo: %w", err)
 	}
-	return nil
+
+	// when status = 503 retry same request until it is completed or retry count is exhausted
+	timeoutTimer := time.NewTimer(3 * time.Minute)
+	periodicTicker := time.NewTicker(10 * time.Second) // poll for every 10 seconds
+	defer func() {
+		timeoutTimer.Stop()
+		periodicTicker.Stop()
+	}()
+
+	type retryResp struct {
+		Status int    `json:"status"`
+		State  string `json:"state"` // in_progress, completed
+		Data   any    `json:"data"`
+	}
+
+	for {
+		select {
+		case <-ctx.Done():
+			return fmt.Errorf("context cancelled while retrying update config for repo: %w", ctx.Err())
+		case <-timeoutTimer.C:
+			return fmt.Errorf("timeout exceeded while updating config for repo")
+		case <-periodicTicker.C:
+			response, err1 := c.post(ctx, URI, config, WithHttpHeaders(httpHeaders))
+			if err1 != nil {
+				return fmt.Errorf("failed to update config for repo: %w", err)
+			}
+
+			var resp retryResp
+			err2 := json.Unmarshal(response, &resp)
+			if err2 != nil {
+				return fmt.Errorf("failed to update config for repo: %w", err)
+			}
+
+			if resp.State == "completed" {
+				// check if status code is not 200 and return original error
+				if resp.Status != 200 {
+					return fmt.Errorf("failed to update config for repo: %w", err)
+				}
+				return nil
+			}
+		}
+	}
+
 }
 
 func (c *APIClient) GetPolicyDrivenPRPolicy(ctx context.Context, owner string, repos []string) (*PolicyDrivenPRPolicy, error) {
@@ -236,7 +363,7 @@ func (c *APIClient) GetPolicyDrivenPRPolicy(ctx context.Context, owner string, r
 
 	if isOrgLevel {
 		// Query org-level config
-		config, err := c.getConfigForRepo(ctx, owner, "[all]")
+		config, err := c.getConfigForRepoV2(ctx, owner, "[all]")
 		if err != nil {
 			return policy, fmt.Errorf("failed to get org-level config: %w", err)
 		}
@@ -249,7 +376,7 @@ func (c *APIClient) GetPolicyDrivenPRPolicy(ctx context.Context, owner string, r
 		// Query each repo individually for repo-level config
 		// Use first repo's config as the template (all should be the same)
 		for _, repo := range repos {
-			config, err := c.getConfigForRepo(ctx, owner, repo)
+			config, err := c.getConfigForRepoV2(ctx, owner, repo)
 			if err != nil {
 				tflog.Warn(ctx, "Failed to get config for repo", map[string]interface{}{
 					"repo":  repo,
@@ -308,17 +435,29 @@ func (c *APIClient) GetPolicyDrivenPRPolicy(ctx context.Context, owner string, r
 		PinActionsToSHA:                         enabledPinning,
 		RestrictGitHubTokenPermissions:          enabledTokenPermissions,
 		SecureDockerFile:                        enabledSecureDocker,
+		LabelsToReplace:                         selectedConfig.ControlSettings.LabelsToReplace,
 		ActionsToExemptWhilePinning:             selectedConfig.ControlSettings.ExemptedActions,
+		ImagesToExemptWhilePinning:              selectedConfig.ControlSettings.ExemptedImages,
 		ActionsToReplaceWithStepSecurityActions: actionsToReplace,
+		ReplaceByMajorTag:                       selectedConfig.ControlSettings.ReplaceByMajorTag,
+		ExemptedFromReplacement:                 selectedConfig.ControlSettings.ExemptedFromReplacement,
 		UpdatePrecommitFile:                     updatePrecommitFiles,
 		PackageEcosystem:                        selectedConfig.ControlSettings.PackageEcosystem,
+		Subtractive:                             selectedConfig.ControlSettings.Subtractive,
 		AddWorkflows:                            selectedConfig.ControlSettings.AddWorkflows,
+		HardenRunnerConfig:                      selectedConfig.ControlSettings.HardenRunnerConfig,
+	}
+
+	// Populate SelectedReposFilter from API response
+	if selectedConfig.ControlSettings.ApplyIssuePRConfigForAllReposFilter != nil {
+		policy.SelectedReposFilter = *selectedConfig.ControlSettings.ApplyIssuePRConfigForAllReposFilter
 	}
 
 	return policy, nil
 }
 
-// getConfigForRepo queries a single repo's config
+// getConfigForRepo queries repo's config
+// NOTE: please don't use this function, use getConfigForRepoV2 instead
 func (c *APIClient) getConfigForRepo(ctx context.Context, owner string, repo string) (*policyDrivenPRInternal, error) {
 	URI := fmt.Sprintf("%s/v1/github/%s/%s/policy-driven-pr/configs", c.BaseURL, owner, repo)
 	respBody, err := c.get(ctx, URI)
@@ -335,8 +474,93 @@ func (c *APIClient) getConfigForRepo(ctx context.Context, owner string, repo str
 		return nil, nil
 	}
 
+	// when repos is "[all]", we may have multiple configs
+	// we need to find the config for the specific repo and return it
+	var selectedConfig *policyDrivenPRInternal
+	for _, config := range configs {
+		if config.FullRepoName == fmt.Sprintf("%s/%s", owner, repo) {
+			selectedConfig = &config.PolicyDrivenPRConfiguration
+			break
+		}
+	}
+
 	// Return the first config (should only be one for a specific repo)
-	return &configs[0].PolicyDrivenPRConfiguration, nil
+	return selectedConfig, nil
+}
+
+// getConfigForRepoV2 queries repo's config using the v2 chunked response model.
+// It sends X-Version: v2 and chunk_response=true, then follows X-Page-Token
+// pagination headers to collect all pages before searching for the target repo.
+func (c *APIClient) getConfigForRepoV2(ctx context.Context, owner string, repo string) (*policyDrivenPRInternal, error) {
+
+	configs, err := c.getConfigsV2Util(ctx, owner, repo)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get configs for repo %s: %w", repo, err)
+	}
+
+	for _, config := range configs {
+		if config.FullRepoName == fmt.Sprintf("%s/%s", owner, repo) {
+			return &config.PolicyDrivenPRConfiguration, nil
+		}
+	}
+
+	return nil, nil
+}
+
+func (c *APIClient) getConfigsV2Util(ctx context.Context, owner, repo string) ([]featureConfigResponse, error) {
+	var allConfigs []featureConfigResponse
+	pageToken := ""
+	totalPages := 1
+
+	for page := 1; page <= totalPages; page++ {
+		var uri string
+		if pageToken != "" {
+			uri = fmt.Sprintf("%s/v1/github/%s/%s/policy-driven-pr/configs?page_token=%s&chunk_page=%d",
+				c.BaseURL, owner, repo, pageToken, page)
+		} else {
+			uri = fmt.Sprintf("%s/v1/github/%s/%s/policy-driven-pr/configs?chunk_response=true", c.BaseURL, owner, repo)
+		}
+
+		req, err := http.NewRequestWithContext(ctx, "GET", uri, nil)
+		if err != nil {
+			return nil, fmt.Errorf("failed to create request: %w", err)
+		}
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("Authorization", "Bearer "+c.APIKey)
+		req.Header.Set("X-Api-Version", "v2")
+
+		res, err := c.HTTPClient.Do(req)
+		if err != nil {
+			return nil, fmt.Errorf("failed to get config for repo %s (page %d): %w", repo, page, err)
+		}
+		body, err := io.ReadAll(res.Body)
+		res.Body.Close() //nolint:errcheck
+		if err != nil {
+			return nil, fmt.Errorf("failed to read response body (page %d): %w", page, err)
+		}
+		if res.StatusCode != http.StatusOK {
+			return nil, fmt.Errorf("unexpected status %d (page %d): %s", res.StatusCode, page, body)
+		}
+
+		// On the first page, read pagination headers to know how many pages to fetch.
+		if page == 1 && res.Header.Get("X-Response-Chunked") == "true" {
+			pageToken = res.Header.Get("X-Page-Token")
+			if tp, err := strconv.Atoi(res.Header.Get("X-Total-Pages")); err == nil && tp > 1 {
+				totalPages = tp
+			}
+		}
+		tflog.Info(ctx, "Response", map[string]interface{}{
+			"page": page,
+			"body": string(body),
+		})
+
+		var pr pagedConfigResponse
+		if err := json.Unmarshal(body, &pr); err != nil {
+			return nil, fmt.Errorf("failed to unmarshal configs (page %d): %w", page, err)
+		}
+		allConfigs = append(allConfigs, pr.Repos...)
+	}
+	return allConfigs, nil
 }
 
 // DiscoverPolicyDrivenPRConfig queries [all] to discover if org-level or repo-level config exists
@@ -346,16 +570,9 @@ func (c *APIClient) DiscoverPolicyDrivenPRConfig(ctx context.Context, owner stri
 		Owner: owner,
 	}
 
-	// Query [all] to get all configs
-	URI := fmt.Sprintf("%s/v1/github/%s/%s/policy-driven-pr/configs", c.BaseURL, owner, "[all]")
-	respBody, err := c.get(ctx, URI)
+	configs, err := c.getConfigsV2Util(ctx, owner, "[all]")
 	if err != nil {
 		return policy, fmt.Errorf("failed to discover policy configs: %w", err)
-	}
-
-	var configs []featureConfigResponse
-	if err := json.Unmarshal(respBody, &configs); err != nil {
-		return policy, fmt.Errorf("failed to unmarshal configs: %w", err)
 	}
 
 	if len(configs) == 0 {
@@ -393,7 +610,7 @@ func (c *APIClient) DiscoverPolicyDrivenPRConfig(ctx context.Context, owner stri
 		// Repo-level configs exist
 		useOrgLevel = false
 		// Use first repo config as template
-		config, _ := c.getConfigForRepo(ctx, owner, repoConfigs[0])
+		config, _ := c.getConfigForRepoV2(ctx, owner, repoConfigs[0])
 		if config != nil {
 			selectedConfig = *config
 			selectedRepos = repoConfigs
@@ -436,11 +653,22 @@ func (c *APIClient) DiscoverPolicyDrivenPRConfig(ctx context.Context, owner stri
 		PinActionsToSHA:                         enabledPinning,
 		RestrictGitHubTokenPermissions:          enabledTokenPermissions,
 		SecureDockerFile:                        enabledSecureDocker,
+		LabelsToReplace:                         selectedConfig.ControlSettings.LabelsToReplace,
 		ActionsToExemptWhilePinning:             selectedConfig.ControlSettings.ExemptedActions,
+		ImagesToExemptWhilePinning:              selectedConfig.ControlSettings.ExemptedImages,
 		ActionsToReplaceWithStepSecurityActions: actionsToReplace,
+		ReplaceByMajorTag:                       selectedConfig.ControlSettings.ReplaceByMajorTag,
+		ExemptedFromReplacement:                 selectedConfig.ControlSettings.ExemptedFromReplacement,
 		UpdatePrecommitFile:                     updatePrecommitFiles,
 		PackageEcosystem:                        selectedConfig.ControlSettings.PackageEcosystem,
+		Subtractive:                             selectedConfig.ControlSettings.Subtractive,
 		AddWorkflows:                            selectedConfig.ControlSettings.AddWorkflows,
+		HardenRunnerConfig:                      selectedConfig.ControlSettings.HardenRunnerConfig,
+	}
+
+	// Populate SelectedReposFilter from API response
+	if selectedConfig.ControlSettings.ApplyIssuePRConfigForAllReposFilter != nil {
+		policy.SelectedReposFilter = *selectedConfig.ControlSettings.ApplyIssuePRConfigForAllReposFilter
 	}
 
 	return policy, nil

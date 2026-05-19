@@ -12,6 +12,7 @@ type User struct {
 	Email       string       `json:"email,omitempty"`
 	UserName    string       `json:"user_name,omitempty"`
 	EmailSuffix string       `json:"email_suffix,omitempty"`
+	SSOGroup    string       `json:"sso_groups,omitempty"`
 	Identifier  string       `json:"identifier,omitempty"`
 	AuthType    string       `json:"auth_type,omitempty"`
 	AddedAt     int64        `json:"added_at,omitempty"`
@@ -26,7 +27,7 @@ type UserPolicy struct {
 	Scope        string   `json:"scope,omitempty"`
 	Organization string   `json:"organization,omitempty"`
 	Repos        []string `json:"repos,omitempty"`
-	Group        string   `json:"group,omitempty"`
+	Server       string   `json:"server,omitempty"`
 	Projects     []string `json:"projects,omitempty"`
 }
 
@@ -34,6 +35,7 @@ type CreateUserRequest struct {
 	Email       string       `json:"email"`
 	UserName    string       `json:"user_name"`
 	EmailSuffix string       `json:"email_suffix"`
+	SSOGroup    string       `json:"sso_group"`
 	AuthType    string       `json:"auth_type"`
 	Policies    []UserPolicy `json:"policies"`
 }
@@ -47,6 +49,7 @@ type createUserRequestInternal struct {
 	Emails        []string     `json:"emails"`
 	UserNames     []string     `json:"user_names"`
 	EmailSuffixes []string     `json:"email_suffixes"`
+	SSOGroups     []string     `json:"sso_groups"`
 	Identifier    string       `json:"identifier"`
 	AuthType      string       `json:"auth_type"`
 	Policies      []UserPolicy `json:"policies"`
@@ -98,6 +101,9 @@ func (c *APIClient) CreateUser(ctx context.Context, user CreateUserRequest) (*Cr
 	}
 	if user.EmailSuffix != "" {
 		convertedUser.EmailSuffixes = []string{user.EmailSuffix}
+	}
+	if user.SSOGroup != "" {
+		convertedUser.SSOGroups = []string{user.SSOGroup}
 	}
 
 	URI := fmt.Sprintf("%s/v1/%s/users", c.BaseURL, c.Customer)
