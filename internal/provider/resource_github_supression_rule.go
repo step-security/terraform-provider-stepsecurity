@@ -165,6 +165,10 @@ func (r *githubSupressionRuleResource) Schema(_ context.Context, _ resource.Sche
 				Optional:    true,
 				Description: "The host when the type is 'https_outbound_network_call'.",
 			},
+			"github_action": schema.StringAttribute{
+				Optional:    true,
+				Description: "The GitHub Action name when the type is 'action_uses_imposter_commit'.",
+			},
 		},
 	}
 }
@@ -179,7 +183,7 @@ func (r *githubSupressionRuleResource) ValidateConfig(ctx context.Context, req r
 
 	switch rule.Type.ValueString() {
 	case "source_code_overwritten":
-		if (!rule.File.IsUnknown() && rule.File.IsNull()) || (!rule.FilePath.IsUnknown() && rule.FilePath.IsNull()) {
+		if !rule.File.IsUnknown() && rule.File.IsNull() {
 			resp.Diagnostics.AddError(
 				"File is required",
 				"File is required when type is source_code_overwritten",
@@ -287,6 +291,13 @@ func (r *githubSupressionRuleResource) ValidateConfig(ctx context.Context, req r
 				"File path is required when type is https_outbound_network_call",
 			)
 		}
+	case "action_uses_imposter_commit":
+		if rule.GithubAction.IsNull() || rule.GithubAction.IsUnknown() {
+			resp.Diagnostics.AddError(
+				"GitHub Action is required",
+				"github_action is required when type is action_uses_imposter_commit",
+			)
+		}
 	}
 }
 
@@ -312,6 +323,7 @@ type supressionRuleModel struct {
 	ArtifactName types.String `tfsdk:"artifact_name"`
 	Endpoint     types.String `tfsdk:"endpoint"`
 	Host         types.String `tfsdk:"host"`
+	GithubAction types.String `tfsdk:"github_action"`
 }
 
 type destinationModel struct {
@@ -505,7 +517,7 @@ func (r *githubSupressionRuleResource) getSuppressionRuleFromTfModel(ctx context
 
 	case "action_uses_imposter_commit":
 		id = stepsecurityapi.ActionUsesImpostedCommit
-		conditions["action"] = config.Action.ValueString()
+		conditions["action"] = config.GithubAction.ValueString()
 
 	case "runner_worker_memory_read":
 		id = stepsecurityapi.RunnerWorkerMemoryRead
@@ -574,10 +586,14 @@ func (r *githubSupressionRuleResource) updateSuppressionRuleState(ctx context.Co
 		case "job":
 			config.Job = types.StringValue(value)
 		case "file":
-			config.File = types.StringValue(value)
+			if config.Type.ValueString() == "secret_in_artifact" {
+				config.ArtifactName = types.StringValue(value)
+			} else {
+				config.File = types.StringValue(value)
+			}
 		case "file_path":
 			config.FilePath = types.StringValue(value)
-		case "process":
+		case "process", "current_exe":
 			config.Process = types.StringValue(value)
 		case "secret_type":
 			config.SecretType = types.StringValue(value)
@@ -598,8 +614,10 @@ func (r *githubSupressionRuleResource) updateSuppressionRuleState(ctx context.Co
 			)
 			config.Destination = destination
 
+		case "action":
+			config.GithubAction = types.StringValue(value)
 		case "endpoint":
-			if config.Type.ValueString() == "https_outbound_network_call" {
+			if config.Type.ValueString() == "suspicious_network_call" {
 				config.Endpoint = types.StringValue(value)
 			} else {
 				destination, _ := types.ObjectValue(

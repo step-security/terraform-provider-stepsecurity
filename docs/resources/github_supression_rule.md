@@ -22,51 +22,136 @@ terraform {
 }
 
 provider "stepsecurity" {
-  api_key  = "xxxxxxxx" # can also be set as env variable STEP_SECURITY_API_KEY
-  customer = "abcdefg"  # can also be set as env variable STEP_SECURITY_CUSTOMER
+  api_key      = "step_83242593-2f34-4199-8087-4a802b6663ab" # can also be set as env variable STEP_SECURITY_API_KEY
+  customer     = "test-org"                                  # can also be set as env variable STEP_SECURITY_CUSTOMER
+  api_base_url = "https://int.api.stepsecurity.io"
 }
 
-# github supression rule for findings detected by stepsecurity.
-# resource "stepsecurity_github_supression_rule" "rule-1" {
-#   # Rule to ignore new connections to amazon aws from any process across all repositories in customer tenant
-#   name        = "ignore-new-connections-to-amazon-aws"
-#   type        = "anomalous_outbound_network_call"
-#   action      = "ignore"
-#   description = "test"
-#   destination = {
-#     domain = "*.amazonaws.com"
-#   }
-#   process = "*"
-#   owner   = "*"
+resource "stepsecurity_github_supression_rule" "rule-secret-in-build-log" {
+  name        = "test-secret-in-build-log"
+  type        = "secret_in_build_log"
+  action      = "ignore"
+  description = "test"
+  secret_type = "private-key"
+  owner       = "test-org"
+  repo        = "*"
+  workflow    = "poc_workflow_int.yml"
+  job         = "*"
+}
+
+# resource "stepsecurity_github_supression_rule" "rule-secret-in-artifact" {
+#   name          = "test-secret-in-artifact"
+#   type          = "secret_in_artifact"
+#   action        = "ignore"
+#   description   = "test"
+#   secret_type   = "github-pat"
+#   artifact_name = "build-artifact"
+#   owner         = "*"
+#   repo          = "*"
+#   workflow      = "*"
+#   job           = "*"
 # }
 
+resource "stepsecurity_github_supression_rule" "rule-anomalous-outbound-network-call" {
+  name        = "test-anomalous-outbound-network-call"
+  type        = "anomalous_outbound_network_call"
+  action      = "ignore"
+  description = "test"
+  destination = {
+    domain = "4492e8135a9796de.example.com*"
+  }
+  process  = "*"
+  owner    = "test-org"
+  repo     = "arm-int-tests"
+  workflow = "new-poc.yml"
+  job      = "*"
+}
 
-# resource "stepsecurity_github_supression_rule" "rule-2" {
-#   # Rule to ignore source code overwritten findings on specific files in 'test' job of 'test' workflow in 'test' repo
-#   name        = "ignore-source-code-overwritten-on-specific-files"
-#   type        = "source_code_overwritten"
+# resource "stepsecurity_github_supression_rule" "rule-suspicious-network-call" {
+#   name        = "test-suspicious-network-call"
+#   type        = "suspicious_network_call"
 #   action      = "ignore"
 #   description = "test"
-#   file        = "file.txt"
-#   file_path   = "/path/to/file.txt"
+#   endpoint    = "https://example.com"
 #   owner       = "*"
-#   repo        = "test"
-#   workflow    = "test"
-#   job         = "test"
+#   repo        = "*"
+#   workflow    = "*"
+#   job         = "*"
 # }
 
-resource "stepsecurity_github_supression_rule" "rule-test-vamshi" {
-  # Rule to ignore source code overwritten findings on specific files in 'test' job of 'test' workflow in 'test' repo
-  name        = "test-vamshi"
+resource "stepsecurity_github_supression_rule" "rule-https-outbound-network-call" {
+  name        = "test-https-outbound-network-call"
+  type        = "https_outbound_network_call"
+  action      = "ignore"
+  description = "test"
+  host        = "api.github.com*"
+  file_path   = "/repos/experiments/github-actions-goat/actions/runners/registration-token"
+  owner       = "test-org"
+  repo        = "agent-bravo-test"
+  workflow    = "warp.yml"
+  job         = "*"
+}
+
+resource "stepsecurity_github_supression_rule" "rule-source-code-overwritten" {
+  name        = "test-source-code-overwritten"
+  type        = "source_code_overwritten"
+  action      = "ignore"
+  description = "test"
+  file        = "Dockerfile"
+  file_path   = "*"
+  owner       = "test-org"
+  repo        = "auto-pdpr-test-54996-5"
+  workflow    = "codeql.yml"
+  job         = "*"
+}
+
+resource "stepsecurity_github_supression_rule" "rule-action-uses-imposter-commit" {
+  name          = "test-action-uses-imposter-commit"
+  type          = "action_uses_imposter_commit"
+  action        = "ignore"
+  description   = "test"
+  github_action = "step-security/dummy-compromised-action"
+  owner         = "test-org"
+  repo          = "arm-int-tests"
+  workflow      = "poc_workflow_int.yml"
+  job           = "*"
+}
+
+resource "stepsecurity_github_supression_rule" "rule-runner-worker-memory-read" {
+  name        = "test-runner-worker-memory-read"
   type        = "runner_worker_memory_read"
   action      = "ignore"
   description = "test"
-  owner       = "*"
-  repo        = "*"
-  workflow    = "*"
-  job         = "*"
   process     = "python3"
+  owner       = "test-org"
+  repo        = "arm-int-tests"
+  workflow    = "poc_workflow_int.yml"
+  job         = "*"
 }
+
+# resource "stepsecurity_github_supression_rule" "rule-privileged-container" {
+#   name        = "test-privileged-container"
+#   type        = "privileged_container"
+#   action      = "ignore"
+#   description = "test"
+#   process     = "docker"
+#   owner       = "*"
+#   repo        = "*"
+#   workflow    = "*"
+#   job         = "*"
+# }
+
+# resource "stepsecurity_github_supression_rule" "rule-reverse-shell" {
+#   name        = "test-reverse-shell"
+#   type        = "reverse_shell"
+#   action      = "ignore"
+#   description = "test"
+#   process     = "bash"
+#   owner       = "*"
+#   repo        = "*"
+#   workflow    = "*"
+#   job         = "*"
+# }
 ```
 
 <!-- schema generated by tfplugindocs -->
@@ -87,6 +172,7 @@ resource "stepsecurity_github_supression_rule" "rule-test-vamshi" {
 - `endpoint` (String) The endpoint when the type is 'suspicious_network_call'.
 - `file` (String) The file name to ignore when the type is 'source_code_overwritten'
 - `file_path` (String) The file path to ignore when the type is 'source_code_overwritten'.
+- `github_action` (String) The GitHub Action name when the type is 'action_uses_imposter_commit'.
 - `host` (String) The host when the type is 'https_outbound_network_call'.
 - `job` (String) GitHub job name on which the rule will be applied.
 - `process` (String) The process name to ignore when the type is 'anomalous_outbound_network_call'. Can Specify the exact process name or use wildcards for process, e.g. *twingate,*,*.exe
