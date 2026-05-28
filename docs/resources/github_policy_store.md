@@ -51,6 +51,40 @@ resource "stepsecurity_github_policy_store" "custom-policy" {
   ]
 }
 
+# Policy with lockdown enabled for all detections
+resource "stepsecurity_github_policy_store" "lockdown-all" {
+  owner         = "test-organization"
+  policy_name   = "lockdown-all-policy"
+  egress_policy = "block"
+  allowed_endpoints = [
+    "github.com:443",
+    "api.github.com:443",
+  ]
+
+  lockdown = {
+    enabled                   = true
+    privileged_container      = true
+    runner_worker_memory_read = true
+    reverse_shell             = true
+  }
+}
+
+# Policy with lockdown enabled for selected detections only
+resource "stepsecurity_github_policy_store" "lockdown-selective" {
+  owner         = "test-organization"
+  policy_name   = "lockdown-selective-policy"
+  egress_policy = "block"
+  allowed_endpoints = [
+    "github.com:443",
+    "api.github.com:443",
+  ]
+
+  lockdown = {
+    enabled       = true
+    reverse_shell = true
+  }
+}
+
 # For importing existing github policy store policies to terraform state
 import {
   to = stepsecurity_github_policy_store.audit-policy
@@ -73,10 +107,21 @@ import {
 - `disable_file_monitoring` (Boolean) This disables file monitoring
 - `disable_sudo` (Boolean) This disables sudo access for HardenRunner agent
 - `disable_telemetry` (Boolean) This disables telemetry collection.
+- `lockdown` (Attributes) Lockdown configuration. When enabled, stops the job if a selected detection fires. (see [below for nested schema](#nestedatt--lockdown))
 
 ### Read-Only
 
 - `id` (String) ID of the policy store. This is combination of owner and policy name.
+
+<a id="nestedatt--lockdown"></a>
+### Nested Schema for `lockdown`
+
+Optional:
+
+- `enabled` (Boolean) Enable lockdown mode.
+- `privileged_container` (Boolean) Trigger lockdown on Privileged-Container detection.
+- `reverse_shell` (Boolean) Trigger lockdown on Reverse-Shell detection.
+- `runner_worker_memory_read` (Boolean) Trigger lockdown on Runner-Worker-Memory-Read detection.
 
 ## Import
 
