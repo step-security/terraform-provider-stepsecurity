@@ -182,6 +182,7 @@ func (p *StepSecurityProvider) DataSources(_ context.Context) []func() datasourc
 func (p *StepSecurityProvider) Resources(_ context.Context) []func() resource.Resource {
 	return []func() resource.Resource{
 		NewUserResource,
+		NewRoleResource,
 		NewGithubRepoNotificationSettingsResource,
 		NewPolicyDrivenPRResource,
 		NewGithubPolicyStoreResource,
