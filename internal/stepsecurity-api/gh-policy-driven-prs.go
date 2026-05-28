@@ -44,6 +44,7 @@ type AutoRemdiationOptions struct {
 	AddWorkflows                            string              `json:"add_workflows,omitempty"`
 	ActionCommitMap                         map[string]string   `json:"action_commit_map"`
 	HardenRunnerConfig                      *HardenRunnerConfig `json:"harden_runner_config,omitempty"`
+	LabelsToReplace                         map[string]string   `json:"labels_to_replace,omitempty"`
 }
 
 // API request/response structures matching agent-api
@@ -69,6 +70,7 @@ type controlSettings struct {
 	ReplaceByMajorTag                   *bool                                `json:"replace_by_major_tag,omitempty"`
 	ExemptedFromReplacement             []string                             `json:"exempted_from_replacement,omitempty"`
 	ReplaceAllActions                   *bool                                `json:"replace_all_actions,omitempty"`
+	LabelsToReplace                     map[string]string                    `json:"labels_to_replace"`
 	UpdatePrecommitFile                 map[string]bool                      `json:"update_precommit_file,omitempty"`
 	PackageEcosystem                    []DependabotConfig                   `json:"package_ecosystem,omitempty"`
 	Subtractive                         *bool                                `json:"subtractive,omitempty"`
@@ -184,6 +186,13 @@ func (c *APIClient) CreatePolicyDrivenPRPolicy(ctx context.Context, createReques
 		}
 	}
 
+	if len(createRequest.AutoRemdiationOptions.LabelsToReplace) > 0 {
+		controlChecksConfig["ReplaceRunnerLabels"] = issuePRConfig{
+			TriggerGithubIssue: createIssue,
+			TriggerGithubPr:    createPR,
+		}
+	}
+
 	if len(createRequest.AutoRemdiationOptions.ActionsToReplaceWithStepSecurityActions) > 0 ||
 		len(createRequest.AutoRemdiationOptions.ExemptedFromReplacement) > 0 {
 		controlChecksConfig["MaintainedGitHubActionsShouldBeUsed"] = issuePRConfig{
@@ -224,6 +233,7 @@ func (c *APIClient) CreatePolicyDrivenPRPolicy(ctx context.Context, createReques
 		ReplaceByMajorTag:                   createRequest.AutoRemdiationOptions.ReplaceByMajorTag,
 		ExemptedFromReplacement:             createRequest.AutoRemdiationOptions.ExemptedFromReplacement,
 		ReplaceAllActions:                   replaceAllActions,
+		LabelsToReplace:                     createRequest.AutoRemdiationOptions.LabelsToReplace,
 		UpdatePrecommitFile:                 updatePrecommitFileMap,
 		PackageEcosystem:                    createRequest.AutoRemdiationOptions.PackageEcosystem,
 		Subtractive:                         createRequest.AutoRemdiationOptions.Subtractive,
@@ -428,6 +438,7 @@ func (c *APIClient) GetPolicyDrivenPRPolicy(ctx context.Context, owner string, r
 		PinActionsToSHA:                         enabledPinning,
 		RestrictGitHubTokenPermissions:          enabledTokenPermissions,
 		SecureDockerFile:                        enabledSecureDocker,
+		LabelsToReplace:                         selectedConfig.ControlSettings.LabelsToReplace,
 		ActionsToExemptWhilePinning:             selectedConfig.ControlSettings.ExemptedActions,
 		ImagesToExemptWhilePinning:              selectedConfig.ControlSettings.ExemptedImages,
 		ActionsToReplaceWithStepSecurityActions: actionsToReplace,
@@ -647,6 +658,7 @@ func (c *APIClient) DiscoverPolicyDrivenPRConfig(ctx context.Context, owner stri
 		PinActionsToSHA:                         enabledPinning,
 		RestrictGitHubTokenPermissions:          enabledTokenPermissions,
 		SecureDockerFile:                        enabledSecureDocker,
+		LabelsToReplace:                         selectedConfig.ControlSettings.LabelsToReplace,
 		ActionsToExemptWhilePinning:             selectedConfig.ControlSettings.ExemptedActions,
 		ImagesToExemptWhilePinning:              selectedConfig.ControlSettings.ExemptedImages,
 		ActionsToReplaceWithStepSecurityActions: actionsToReplace,

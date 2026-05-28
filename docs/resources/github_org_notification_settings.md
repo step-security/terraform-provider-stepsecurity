@@ -33,6 +33,9 @@ resource "stepsecurity_github_org_notification_settings" "test-organization" {
     slack_webhook_url = "https://hooks.slack.com/services/T00000000/B00000000/XXXXXXXXXXXXXXXXXXXXXXXX"
     teams_webhook_url = "https://outlook.office.com/webhook/00000000-0000-0000-0000-000000000000@00000000-0000-0000-0000-000000000000/IncomingWebhook/00000000000000000000000000000000"
     email             = "step-security@step-security.com"
+    # Optional: Configure Slack OAuth method for notifications
+    slack_notification_method = "oauth"        # "webhook" (default) or "oauth"
+    slack_channel_id          = "C01234567890" # Required when using OAuth method
   }
   notification_events = {
     domain_blocked                        = true
@@ -47,6 +50,9 @@ resource "stepsecurity_github_org_notification_settings" "test-organization" {
     harden_runner_config_changes_detected = true
     non_compliant_artifact_detected       = false
     run_blocked_by_policy                 = false
+    baseline_check_failures               = false
+    required_check_failures               = false
+    optional_check_failures               = false
   }
 }
 
@@ -79,6 +85,8 @@ import {
 Optional:
 
 - `email` (String) The email address to receive notifications. If not provided, no notifications will be sent to the email address.
+- `slack_channel_id` (String) The Slack channel ID to post notifications to when using OAuth method. Required when slack_notification_method is 'oauth'.
+- `slack_notification_method` (String) The method to use for sending Slack notifications. Valid values are 'webhook' (default) or 'oauth'.
 - `slack_webhook_url` (String) The Slack webhook URL to receive notifications. If not provided, no notifications will be sent to Slack.
 - `teams_webhook_url` (String) The Microsoft Teams webhook URL to receive notifications. If not provided, no notifications will be sent to Microsoft Teams.
 
@@ -89,6 +97,7 @@ Optional:
 Optional:
 
 - `artifacts_secrets_detected` (Boolean) Notify when secrets are detected in the build artifacts
+- `baseline_check_failures` (Boolean) Notify when baseline PR checks fail
 - `domain_blocked` (Boolean) Notify when outbound traffic to a domain is blocked.
 - `file_overwrite` (Boolean) Notify when source code file is overwritten
 - `harden_runner_config_changes_detected` (Boolean) Notify when harden runner config changes are detected
@@ -96,6 +105,8 @@ Optional:
 - `imposter_commits_detected` (Boolean) Notify when imposter commits are detected
 - `new_endpoint_discovered` (Boolean) Notify when anomalous outbound call is discovered
 - `non_compliant_artifact_detected` (Boolean) Notify when non-compliant artifacts are detected
+- `optional_check_failures` (Boolean) Notify when optional PR checks fail
+- `required_check_failures` (Boolean) Notify when required PR checks fail
 - `run_blocked_by_policy` (Boolean) Notify when a run policy is blocked
 - `secrets_detected` (Boolean) Notify when secrets are detected in the build log
 - `suspicious_network_call_detected` (Boolean) Notify when suspicious network calls are detected

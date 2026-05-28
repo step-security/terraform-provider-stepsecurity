@@ -60,6 +60,14 @@ type Client interface {
 	GetGitHubPRTemplate(ctx context.Context, owner string) (*GitHubPRTemplate, error)
 	UpdateGitHubPRTemplate(ctx context.Context, owner string, template GitHubPRTemplate) error
 	DeleteGitHubPRTemplate(ctx context.Context, owner string) error
+
+	// Custom Roles
+	ListRoles(ctx context.Context) ([]Role, error)
+	CreateRole(ctx context.Context, req CreateRoleRequest) (*Role, error)
+	GetRole(ctx context.Context, roleID string) (*Role, error)
+	UpdateRole(ctx context.Context, roleID string, req UpdateRoleRequest) (*Role, error)
+	DeleteRole(ctx context.Context, roleID string) error
+	GetPermissionCatalog(ctx context.Context) (*FeatureCatalog, error)
 }
 
 type APIClient struct {
