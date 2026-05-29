@@ -225,3 +225,25 @@ func (m *MockStepSecurityClient) GetPermissionCatalog(ctx context.Context) (*Fea
 	args := m.Called(ctx)
 	return args.Get(0).(*FeatureCatalog), args.Error(1)
 }
+
+// Secure Registry Policy methods
+func (m *MockStepSecurityClient) GetRegistryControls(ctx context.Context, registry string) (*SecureRegistryControls, error) {
+	args := m.Called(ctx, registry)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).(*SecureRegistryControls), args.Error(1)
+}
+
+func (m *MockStepSecurityClient) UpsertRegistryControls(ctx context.Context, registry string, req UpsertSecureRegistryControlsRequest) (*SecureRegistryControls, error) {
+	args := m.Called(ctx, registry, req)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).(*SecureRegistryControls), args.Error(1)
+}
+
+func (m *MockStepSecurityClient) DeleteRegistryControls(ctx context.Context, registry string) error {
+	args := m.Called(ctx, registry)
+	return args.Error(0)
+}

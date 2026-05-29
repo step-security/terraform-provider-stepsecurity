@@ -68,6 +68,11 @@ type Client interface {
 	UpdateRole(ctx context.Context, roleID string, req UpdateRoleRequest) (*Role, error)
 	DeleteRole(ctx context.Context, roleID string) error
 	GetPermissionCatalog(ctx context.Context) (*FeatureCatalog, error)
+
+	// Secure Registry Policy
+	GetRegistryControls(ctx context.Context, registry string) (*SecureRegistryControls, error)
+	UpsertRegistryControls(ctx context.Context, registry string, req UpsertSecureRegistryControlsRequest) (*SecureRegistryControls, error)
+	DeleteRegistryControls(ctx context.Context, registry string) error
 }
 
 type APIClient struct {
