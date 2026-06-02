@@ -28,7 +28,8 @@ provider "stepsecurity" {
 
 # github PR checks configuration with different types of controls applied across different repositories in a github organization
 resource "stepsecurity_github_checks" "test-organization" {
-  owner = "test-organization"
+  owner              = "test-organization"
+  custom_description = "Checks created by StepSecurity. To approve failed checks, please contact secops admins user1@company.com, user2@company.com" # optional: appended to all check summaries
   controls = [
     {
       control = "NPM Package Cooldown"
@@ -116,6 +117,7 @@ resource "stepsecurity_github_checks" "test-organization-pypi" {
 
 - `baseline_check` (Attributes) Configuration for baseline check (see [below for nested schema](#nestedatt--baseline_check))
 - `controls` (Attributes List) (see [below for nested schema](#nestedatt--controls))
+- `custom_description` (String) Custom description text appended to all check summaries.
 - `optional_checks` (Attributes) Configuration for optional checks (see [below for nested schema](#nestedatt--optional_checks))
 - `required_checks` (Attributes) Configuration for required checks (see [below for nested schema](#nestedatt--required_checks))
 
