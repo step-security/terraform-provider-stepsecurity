@@ -73,6 +73,10 @@ func (r *githubChecksResource) Schema(_ context.Context, _ resource.SchemaReques
 				Required:    true,
 				Description: "Owner(organization) Name",
 			},
+			"custom_description": schema.StringAttribute{
+				Optional:    true,
+				Description: "Custom description text appended to all check summaries.",
+			},
 			"controls": schema.ListNestedAttribute{
 				Optional: true,
 				NestedObject: schema.NestedAttributeObject{
@@ -183,11 +187,12 @@ func (r *githubChecksResource) ImportState(ctx context.Context, req resource.Imp
 }
 
 type githubChecksModel struct {
-	Owner          types.String  `tfsdk:"owner"`
-	Controls       []control     `tfsdk:"controls"`
-	RequiredChecks *checksConfig `tfsdk:"required_checks"`
-	OptionalChecks *checksConfig `tfsdk:"optional_checks"`
-	BaselineCheck  *checksConfig `tfsdk:"baseline_check"`
+	Owner             types.String  `tfsdk:"owner"`
+	Controls          []control     `tfsdk:"controls"`
+	RequiredChecks    *checksConfig `tfsdk:"required_checks"`
+	OptionalChecks    *checksConfig `tfsdk:"optional_checks"`
+	BaselineCheck     *checksConfig `tfsdk:"baseline_check"`
+	CustomDescription types.String  `tfsdk:"custom_description"`
 }
 
 type checksConfig struct {
@@ -733,12 +738,20 @@ func (r *githubChecksResource) convertToCreateRequest(plan githubChecksModel) (*
 	prChecksConfig.EnableRequiredChecksForAllNewRepos = &isRequiredCheckAppliedForAllRepos
 	prChecksConfig.EnableOptionalChecksForAllNewRepos = &isOptionalCheckAppliedForAllRepos
 	prChecksConfig.Repos = repos
+	if !plan.CustomDescription.IsNull() && !plan.CustomDescription.IsUnknown() {
+		prChecksConfig.CustomDescription = plan.CustomDescription.ValueString()
+	}
 	return &prChecksConfig, nil
 }
 
 func (r *githubChecksResource) convertToState(owner string, config stepsecurityapi.GitHubPRChecksConfig) githubChecksModel {
 	model := githubChecksModel{}
 	model.Owner = types.StringValue(owner)
+	if config.CustomDescription != "" {
+		model.CustomDescription = types.StringValue(config.CustomDescription)
+	} else {
+		model.CustomDescription = types.StringNull()
+	}
 
 	// Initialize Controls as empty slice instead of nil
 	model.Controls = []control{}

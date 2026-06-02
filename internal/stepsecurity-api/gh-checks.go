@@ -24,6 +24,7 @@ type ChecksConfig struct {
 	EnableBaselineCheckForAllNewRepos  *bool                  `json:"enable_baseline_check_for_all_new_repos"`
 	EnableRequiredChecksForAllNewRepos *bool                  `json:"enable_required_checks_for_all_new_repos"`
 	EnableOptionalChecksForAllNewRepos *bool                  `json:"enable_optional_checks_for_all_new_repos"`
+	CustomDescription                  string                 `json:"custom_description"`
 }
 
 type CheckConfig struct {
@@ -145,6 +146,7 @@ func (c *APIClient) DeletePRChecksConfig(ctx context.Context, owner string) erro
 	config.ChecksConfig.EnableBaselineCheckForAllNewRepos = toPointer(false)
 	config.ChecksConfig.EnableRequiredChecksForAllNewRepos = toPointer(false)
 	config.ChecksConfig.EnableOptionalChecksForAllNewRepos = toPointer(false)
+	config.ChecksConfig.CustomDescription = ""
 
 	URI := fmt.Sprintf("%s/v1/github/%s/checks/config", c.BaseURL, owner)
 	_, err = c.put(ctx, URI, config)
