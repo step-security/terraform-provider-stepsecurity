@@ -80,6 +80,7 @@ resource "stepsecurity_policy_driven_pr" "repo_level_config" {
         interval      = "daily"
         cooldown_yaml = "default-days: 7\npackage-rules:\n  - match-package-patterns:\n      - \"*\"\n    days: 3\n"
         groups_yaml   = "production-dependencies:\n  patterns:\n    - \"*\"\n  exclude-patterns:\n    - \"@types/*\"\n"
+        options_yaml  = "labels:\n  - \"dependencies\"\nreviewers:\n  - \"security-team\"\n"
       },
       {
         package  = "pip"
@@ -222,6 +223,7 @@ Optional:
 
 - `cooldown_yaml` (String) YAML string configuring cooldown periods for dependency updates.
 - `groups_yaml` (String) YAML string configuring dependency update groups.
+- `options_yaml` (String) YAML string configuring additional dependabot options (e.g. day, time, timezone, allow, assignees, labels, ignore, reviewers, target-branch, versioning-strategy, etc.).
 
 
 

@@ -65,6 +65,7 @@ resource "stepsecurity_policy_driven_pr" "repo_level_config" {
         interval      = "daily"
         cooldown_yaml = "default-days: 7\npackage-rules:\n  - match-package-patterns:\n      - \"*\"\n    days: 3\n"
         groups_yaml   = "production-dependencies:\n  patterns:\n    - \"*\"\n  exclude-patterns:\n    - \"@types/*\"\n"
+        options_yaml  = "labels:\n  - \"dependencies\"\nreviewers:\n  - \"security-team\"\n"
       },
       {
         package  = "pip"
