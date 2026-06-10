@@ -366,6 +366,7 @@ Optional:
 
 - `actions_to_exempt_while_pinning` (Set of String) Set of actions exempt from pinning requirements. Supports exact match (e.g., 'actions/checkout'), name-only match, and owner wildcard (e.g., 'my-org/*').
 - `allowed_actions` (Map of String) Map of allowed actions and their permissions (e.g., 'actions/checkout': 'allow').
+- `bulk_secrets_only_mode` (Boolean) When enabled, the secret exfiltration policy only blocks bulk-dump patterns like toJSON(secrets); targeted references such as secrets.NPM_TOKEN are not blocked.
 - `disallowed_runner_labels` (Set of String) Set of disallowed runner labels.
 - `enable_action_policy` (Boolean) Whether to enable the action policy.
 - `enable_compromised_actions_policy` (Boolean) Whether to enable the compromised actions policy.

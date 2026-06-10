@@ -200,6 +200,7 @@ Read-Only:
 
 - `actions_to_exempt_while_pinning` (Set of String) Set of actions exempt from pinning requirements.
 - `allowed_actions` (Map of String) Map of allowed actions and their permissions.
+- `bulk_secrets_only_mode` (Boolean) When enabled, the secret exfiltration policy only blocks bulk-dump patterns like toJSON(secrets); targeted references such as secrets.NPM_TOKEN are not blocked.
 - `disallowed_runner_labels` (Set of String) Set of disallowed runner labels.
 - `enable_action_policy` (Boolean) Whether the action policy is enabled.
 - `enable_compromised_actions_policy` (Boolean) Whether the compromised actions policy is enabled.

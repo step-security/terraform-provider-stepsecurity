@@ -72,6 +72,7 @@ type policyConfigModel struct {
 	PinnedActionsExemptions        types.Set    `tfsdk:"actions_to_exempt_while_pinning"`
 	IsDryRun                       types.Bool   `tfsdk:"is_dry_run"`
 	ExemptedUsers                  types.Set    `tfsdk:"exempted_users"`
+	BulkSecretsOnlyMode            types.Bool   `tfsdk:"bulk_secrets_only_mode"`
 }
 
 // Metadata returns the resource type name.
@@ -204,6 +205,12 @@ func (r *githubRunPolicyResource) Schema(_ context.Context, _ resource.SchemaReq
 						Default:             booldefault.StaticBool(false),
 						MarkdownDescription: "Whether this policy is in dry-run mode.",
 					},
+					"bulk_secrets_only_mode": schema.BoolAttribute{
+						Optional:            true,
+						Computed:            true,
+						Default:             booldefault.StaticBool(false),
+						MarkdownDescription: "When enabled, the secret exfiltration policy only blocks bulk-dump patterns like toJSON(secrets); targeted references such as secrets.NPM_TOKEN are not blocked.",
+					},
 					"exempted_users": schema.SetAttribute{
 						ElementType:         types.StringType,
 						Optional:            true,
@@ -281,6 +288,7 @@ func (r *githubRunPolicyResource) Create(ctx context.Context, req resource.Creat
 			EnableCompromisedActionsPolicy: policyConfig.EnableCompromisedActionsPolicy.ValueBool(),
 			RequirePinnedActions:           policyConfig.RequirePinnedActions.ValueBool(),
 			IsDryRun:                       policyConfig.IsDryRun.ValueBool(),
+			BulkSecretsOnlyMode:            policyConfig.BulkSecretsOnlyMode.ValueBool(),
 		},
 	}
 
@@ -501,6 +509,7 @@ func (r *githubRunPolicyResource) Update(ctx context.Context, req resource.Updat
 			EnableCompromisedActionsPolicy: policyConfig.EnableCompromisedActionsPolicy.ValueBool(),
 			RequirePinnedActions:           policyConfig.RequirePinnedActions.ValueBool(),
 			IsDryRun:                       policyConfig.IsDryRun.ValueBool(),
+			BulkSecretsOnlyMode:            policyConfig.BulkSecretsOnlyMode.ValueBool(),
 		},
 	}
 
@@ -735,6 +744,7 @@ func (r *githubRunPolicyResource) updateModelFromAPI(ctx context.Context, model 
 		"enable_compromised_actions_policy": types.BoolValue(policy.PolicyConfig.EnableCompromisedActionsPolicy),
 		"require_pinned_actions":            types.BoolValue(policy.PolicyConfig.RequirePinnedActions),
 		"is_dry_run":                        types.BoolValue(policy.PolicyConfig.IsDryRun),
+		"bulk_secrets_only_mode":            types.BoolValue(policy.PolicyConfig.BulkSecretsOnlyMode),
 	}
 
 	// Handle allowed actions map
@@ -841,6 +851,7 @@ func (r *githubRunPolicyResource) updateModelFromAPI(ctx context.Context, model 
 		"require_pinned_actions":            types.BoolType,
 		"actions_to_exempt_while_pinning":   types.SetType{ElemType: types.StringType},
 		"is_dry_run":                        types.BoolType,
+		"bulk_secrets_only_mode":            types.BoolType,
 		"exempted_users":                    types.SetType{ElemType: types.StringType},
 	}
 
