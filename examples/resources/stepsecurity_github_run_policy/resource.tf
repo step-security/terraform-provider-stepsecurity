@@ -197,6 +197,43 @@ resource "stepsecurity_github_run_policy" "secrets_policy_dry_run" {
   }
 }
 
+# Secrets Policy Example (bulk-secrets-only mode + custom PR comment) -
+# Restricts enforcement to high-risk bulk secret-exposure attempts rather than all
+# secret references, and customizes the comment posted when a run is blocked.
+resource "stepsecurity_github_run_policy" "secrets_policy_bulk_only" {
+  owner     = "my-org"
+  name      = "Secrets Policy - Bulk Only"
+  all_repos = true
+
+  policy_config = {
+    owner                 = "my-org"
+    name                  = "Secrets Policy - Bulk Only"
+    enable_secrets_policy = true
+
+    # When true, restrict the secrets policy to high-risk bulk secret-exposure
+    # attempts instead of all secret references. See the StepSecurity
+    # run-policies documentation for details.
+    bulk_secrets_only_mode = true
+
+    exempted_users = ["dependabot[bot]", "renovate[bot]"]
+
+    # Optional: override the comment posted on the pull request when this policy
+    # blocks a run. Supported placeholders: {{workflow_run_url}}, {{policy_type}},
+    # {{policy_name}}, {{policy_details}}, {{remediation}}, {{actor}}, {{owner}},
+    # {{repo}}, {{docs_url}}. Leave unset or "" to use the built-in comment.
+    pr_comment_template = <<-EOT
+    ## {{policy_type}} Violation
+
+    [This workflow run]({{workflow_run_url}}) was blocked by the **{{policy_name}}** run policy.
+
+    {{policy_details}}
+    {{remediation}}
+
+    For more information, see [StepSecurity's documentation]({{docs_url}}).
+    EOT
+  }
+}
+
 # Compromised Actions Policy Example (all_orgs) - Blocks known compromised actions across all orgs
 resource "stepsecurity_github_run_policy" "compromised_actions_policy_all_orgs" {
   owner    = "my-org"
