@@ -51,3 +51,43 @@ import {
   to = stepsecurity_secure_registry_policy.npm_full
   id = "npm"
 }
+
+# Enable both controls for the PyPI registry
+resource "stepsecurity_secure_registry_policy" "pypi_full" {
+  registry = "pypi"
+
+  cooldown_control = {
+    enabled        = true
+    period_in_days = 7
+    exemption_list = ["requests@*", "django@1.*", "flask@3.0.3"]
+  }
+
+  compromised_packages_control = {
+    enabled = true
+  }
+}
+
+# Enable only the compromised packages control for PyPI
+resource "stepsecurity_secure_registry_policy" "pypi_compromised_only" {
+  registry = "pypi"
+
+  compromised_packages_control = {
+    enabled = true
+  }
+}
+
+# Enable only the cooldown control for PyPI with no exemptions
+resource "stepsecurity_secure_registry_policy" "pypi_cooldown_only" {
+  registry = "pypi"
+
+  cooldown_control = {
+    enabled        = true
+    period_in_days = 3
+  }
+}
+
+# For importing an existing PyPI registry policy into Terraform state
+import {
+  to = stepsecurity_secure_registry_policy.pypi_full
+  id = "pypi"
+}
