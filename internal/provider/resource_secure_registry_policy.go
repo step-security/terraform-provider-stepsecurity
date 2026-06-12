@@ -73,12 +73,12 @@ func (r *secureRegistryPolicyResource) Schema(_ context.Context, _ resource.Sche
 		Attributes: map[string]schema.Attribute{
 			"registry": schema.StringAttribute{
 				Required:            true,
-				MarkdownDescription: "The package registry to configure. Currently supported: `npm`.",
+				MarkdownDescription: "The package registry to configure. Currently supported: `npm`, `pypi`.",
 				PlanModifiers: []planmodifier.String{
 					stringplanmodifier.RequiresReplace(),
 				},
 				Validators: []validator.String{
-					stringvalidator.OneOf("npm"),
+					stringvalidator.OneOf("npm", "pypi"),
 				},
 			},
 			"cooldown_control": schema.SingleNestedAttribute{
@@ -101,7 +101,7 @@ func (r *secureRegistryPolicyResource) Schema(_ context.Context, _ resource.Sche
 					"exemption_list": schema.SetAttribute{
 						ElementType:         types.StringType,
 						Optional:            true,
-						MarkdownDescription: "Packages exempt from the cooldown period. Supports exact names, version globs (`lodash@*`), scoped wildcards (`@scope/*`), and exact versions (`react@18.2.0`). Order-insensitive — reordering entries produces no plan diff.",
+						MarkdownDescription: "Packages exempt from the cooldown period. Supports exact names, version globs (`package@*`), and exact versions (`package@1.2.3`). For npm, scoped wildcards (`@scope/*`) are also supported. Order-insensitive — reordering entries produces no plan diff.",
 					},
 				},
 			},
