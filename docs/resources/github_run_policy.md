@@ -212,6 +212,43 @@ resource "stepsecurity_github_run_policy" "secrets_policy_dry_run" {
   }
 }
 
+# Secrets Policy Example (bulk-secrets-only mode + custom PR comment) -
+# Restricts enforcement to high-risk bulk secret-exposure attempts rather than all
+# secret references, and customizes the comment posted when a run is blocked.
+resource "stepsecurity_github_run_policy" "secrets_policy_bulk_only" {
+  owner     = "my-org"
+  name      = "Secrets Policy - Bulk Only"
+  all_repos = true
+
+  policy_config = {
+    owner                 = "my-org"
+    name                  = "Secrets Policy - Bulk Only"
+    enable_secrets_policy = true
+
+    # When true, restrict the secrets policy to high-risk bulk secret-exposure
+    # attempts instead of all secret references. See the StepSecurity
+    # run-policies documentation for details.
+    bulk_secrets_only_mode = true
+
+    exempted_users = ["dependabot[bot]", "renovate[bot]"]
+
+    # Optional: override the comment posted on the pull request when this policy
+    # blocks a run. Supported placeholders: {{workflow_run_url}}, {{policy_type}},
+    # {{policy_name}}, {{policy_details}}, {{remediation}}, {{actor}}, {{owner}},
+    # {{repo}}, {{docs_url}}. Leave unset or "" to use the built-in comment.
+    pr_comment_template = <<-EOT
+    ## {{policy_type}} Violation
+
+    [This workflow run]({{workflow_run_url}}) was blocked by the **{{policy_name}}** run policy.
+
+    {{policy_details}}
+    {{remediation}}
+
+    For more information, see [StepSecurity's documentation]({{docs_url}}).
+    EOT
+  }
+}
+
 # Compromised Actions Policy Example (all_orgs) - Blocks known compromised actions across all orgs
 resource "stepsecurity_github_run_policy" "compromised_actions_policy_all_orgs" {
   owner    = "my-org"
@@ -366,6 +403,7 @@ Optional:
 
 - `actions_to_exempt_while_pinning` (Set of String) Set of actions exempt from pinning requirements. Supports exact match (e.g., 'actions/checkout'), name-only match, and owner wildcard (e.g., 'my-org/*').
 - `allowed_actions` (Map of String) Map of allowed actions and their permissions (e.g., 'actions/checkout': 'allow').
+- `bulk_secrets_only_mode` (Boolean) When enabled, the secret exfiltration policy restricts enforcement to high-risk bulk secret-exposure attempts rather than all secret references. See the StepSecurity run-policies documentation for details.
 - `disallowed_runner_labels` (Set of String) Set of disallowed runner labels.
 - `enable_action_policy` (Boolean) Whether to enable the action policy.
 - `enable_compromised_actions_policy` (Boolean) Whether to enable the compromised actions policy.
@@ -376,6 +414,7 @@ Optional:
 - `harden_runner_custom_actions` (Set of String) Set of custom actions accepted as Harden Runner equivalents (in addition to `step-security/harden-runner`).
 - `harden_runner_target_labels` (Set of String) Set of runner labels that target Harden Runner enforcement. Set to `[]` to apply the policy to every job; set a non-empty list to filter to jobs whose `runs-on` matches at least one label. Omitting the attribute leaves any existing backend value untouched (additive-only).
 - `is_dry_run` (Boolean) Whether this policy is in dry-run mode.
+- `pr_comment_template` (String) Optional custom template for the pull request comment posted when this policy blocks a run. Supports placeholder substitution; leave empty to use the default StepSecurity comment.
 - `require_pinned_actions` (Boolean) Whether to require all actions to be pinned to full-length commit SHAs. Sub-feature of the allowed actions policy — only meaningful when `enable_action_policy` is true.
 
 ## Import

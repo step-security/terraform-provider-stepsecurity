@@ -74,6 +74,8 @@ func TestGithubRunPoliciesDataSource_ReadMappingWithPinnedActions(t *testing.T) 
 		"enable_compromised_actions_policy": types.BoolValue(policy.PolicyConfig.EnableCompromisedActionsPolicy),
 		"require_pinned_actions":            types.BoolValue(policy.PolicyConfig.RequirePinnedActions),
 		"is_dry_run":                        types.BoolValue(policy.PolicyConfig.IsDryRun),
+		"bulk_secrets_only_mode":            types.BoolValue(policy.PolicyConfig.BulkSecretsOnlyMode),
+		"pr_comment_template":               types.StringValue(policy.PolicyConfig.PrCommentTemplate),
 	}
 
 	pinnedExemptionsList := make([]attr.Value, len(policy.PolicyConfig.PinnedActionsExemptions))
@@ -99,6 +101,8 @@ func TestGithubRunPoliciesDataSource_ReadMappingWithPinnedActions(t *testing.T) 
 		"require_pinned_actions":            types.BoolType,
 		"actions_to_exempt_while_pinning":   types.SetType{ElemType: types.StringType},
 		"is_dry_run":                        types.BoolType,
+		"bulk_secrets_only_mode":            types.BoolType,
+		"pr_comment_template":               types.StringType,
 	}
 
 	policyConfigObj, objDiags := types.ObjectValue(policyConfigAttrTypes, policyConfigAttrs)
@@ -326,6 +330,8 @@ type githubRunPolicyDataSourcePolicyConfigModel struct {
 	RequirePinnedActions           types.Bool   `tfsdk:"require_pinned_actions"`
 	PinnedActionsExemptions        types.Set    `tfsdk:"actions_to_exempt_while_pinning"`
 	IsDryRun                       types.Bool   `tfsdk:"is_dry_run"`
+	BulkSecretsOnlyMode            types.Bool   `tfsdk:"bulk_secrets_only_mode"`
+	PrCommentTemplate              types.String `tfsdk:"pr_comment_template"`
 }
 
 func testGithubRunPoliciesDataSourceSchema(t *testing.T) datasourceschema.Schema {
@@ -380,6 +386,8 @@ func testRunPolicyDataSourceAttrTypes() map[string]attr.Type {
 			"require_pinned_actions":            types.BoolType,
 			"actions_to_exempt_while_pinning":   types.SetType{ElemType: types.StringType},
 			"is_dry_run":                        types.BoolType,
+			"bulk_secrets_only_mode":            types.BoolType,
+			"pr_comment_template":               types.StringType,
 		}},
 	}
 }

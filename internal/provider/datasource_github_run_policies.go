@@ -169,6 +169,14 @@ func (d *githubRunPoliciesDataSource) Schema(_ context.Context, _ datasource.Sch
 									Computed:            true,
 									MarkdownDescription: "Whether this policy is in dry-run mode.",
 								},
+								"pr_comment_template": schema.StringAttribute{
+									Computed:            true,
+									MarkdownDescription: "Optional custom template for the pull request comment posted when this policy blocks a run. Supports placeholder substitution; leave empty to use the default StepSecurity comment.",
+								},
+								"bulk_secrets_only_mode": schema.BoolAttribute{
+									Computed:            true,
+									MarkdownDescription: "When enabled, the secret exfiltration policy restricts enforcement to high-risk bulk secret-exposure attempts rather than all secret references. See the StepSecurity run-policies documentation for details.",
+								},
 							},
 						},
 					},
@@ -242,6 +250,8 @@ func (d *githubRunPoliciesDataSource) Read(ctx context.Context, req datasource.R
 			"enable_compromised_actions_policy": types.BoolValue(policy.PolicyConfig.EnableCompromisedActionsPolicy),
 			"require_pinned_actions":            types.BoolValue(policy.PolicyConfig.RequirePinnedActions),
 			"is_dry_run":                        types.BoolValue(policy.PolicyConfig.IsDryRun),
+			"bulk_secrets_only_mode":            types.BoolValue(policy.PolicyConfig.BulkSecretsOnlyMode),
+			"pr_comment_template":               types.StringValue(policy.PolicyConfig.PrCommentTemplate),
 		}
 
 		// Handle allowed actions map
@@ -328,6 +338,8 @@ func (d *githubRunPoliciesDataSource) Read(ctx context.Context, req datasource.R
 			"require_pinned_actions":            types.BoolType,
 			"actions_to_exempt_while_pinning":   types.SetType{ElemType: types.StringType},
 			"is_dry_run":                        types.BoolType,
+			"bulk_secrets_only_mode":            types.BoolType,
+			"pr_comment_template":               types.StringType,
 		}
 
 		policyConfigObj, _ := types.ObjectValue(policyConfigAttrTypes, policyConfigAttrs)
@@ -395,6 +407,8 @@ func (d *githubRunPoliciesDataSource) Read(ctx context.Context, req datasource.R
 			"require_pinned_actions":            types.BoolType,
 			"actions_to_exempt_while_pinning":   types.SetType{ElemType: types.StringType},
 			"is_dry_run":                        types.BoolType,
+			"bulk_secrets_only_mode":            types.BoolType,
+			"pr_comment_template":               types.StringType,
 		}},
 	}
 

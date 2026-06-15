@@ -14,6 +14,7 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/booldefault"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
+	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringdefault"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/schema/validator"
 	"github.com/hashicorp/terraform-plugin-framework/types"
@@ -72,6 +73,8 @@ type policyConfigModel struct {
 	PinnedActionsExemptions        types.Set    `tfsdk:"actions_to_exempt_while_pinning"`
 	IsDryRun                       types.Bool   `tfsdk:"is_dry_run"`
 	ExemptedUsers                  types.Set    `tfsdk:"exempted_users"`
+	BulkSecretsOnlyMode            types.Bool   `tfsdk:"bulk_secrets_only_mode"`
+	PrCommentTemplate              types.String `tfsdk:"pr_comment_template"`
 }
 
 // Metadata returns the resource type name.
@@ -204,6 +207,18 @@ func (r *githubRunPolicyResource) Schema(_ context.Context, _ resource.SchemaReq
 						Default:             booldefault.StaticBool(false),
 						MarkdownDescription: "Whether this policy is in dry-run mode.",
 					},
+					"bulk_secrets_only_mode": schema.BoolAttribute{
+						Optional:            true,
+						Computed:            true,
+						Default:             booldefault.StaticBool(false),
+						MarkdownDescription: "When enabled, the secret exfiltration policy restricts enforcement to high-risk bulk secret-exposure attempts rather than all secret references. See the StepSecurity run-policies documentation for details.",
+					},
+					"pr_comment_template": schema.StringAttribute{
+						Optional:            true,
+						Computed:            true,
+						Default:             stringdefault.StaticString(""),
+						MarkdownDescription: "Optional custom template for the pull request comment posted when this policy blocks a run. Supports placeholder substitution; leave empty to use the default StepSecurity comment.",
+					},
 					"exempted_users": schema.SetAttribute{
 						ElementType:         types.StringType,
 						Optional:            true,
@@ -281,6 +296,8 @@ func (r *githubRunPolicyResource) Create(ctx context.Context, req resource.Creat
 			EnableCompromisedActionsPolicy: policyConfig.EnableCompromisedActionsPolicy.ValueBool(),
 			RequirePinnedActions:           policyConfig.RequirePinnedActions.ValueBool(),
 			IsDryRun:                       policyConfig.IsDryRun.ValueBool(),
+			BulkSecretsOnlyMode:            policyConfig.BulkSecretsOnlyMode.ValueBool(),
+			PrCommentTemplate:              policyConfig.PrCommentTemplate.ValueString(),
 		},
 	}
 
@@ -501,6 +518,8 @@ func (r *githubRunPolicyResource) Update(ctx context.Context, req resource.Updat
 			EnableCompromisedActionsPolicy: policyConfig.EnableCompromisedActionsPolicy.ValueBool(),
 			RequirePinnedActions:           policyConfig.RequirePinnedActions.ValueBool(),
 			IsDryRun:                       policyConfig.IsDryRun.ValueBool(),
+			BulkSecretsOnlyMode:            policyConfig.BulkSecretsOnlyMode.ValueBool(),
+			PrCommentTemplate:              policyConfig.PrCommentTemplate.ValueString(),
 		},
 	}
 
@@ -735,6 +754,8 @@ func (r *githubRunPolicyResource) updateModelFromAPI(ctx context.Context, model 
 		"enable_compromised_actions_policy": types.BoolValue(policy.PolicyConfig.EnableCompromisedActionsPolicy),
 		"require_pinned_actions":            types.BoolValue(policy.PolicyConfig.RequirePinnedActions),
 		"is_dry_run":                        types.BoolValue(policy.PolicyConfig.IsDryRun),
+		"bulk_secrets_only_mode":            types.BoolValue(policy.PolicyConfig.BulkSecretsOnlyMode),
+		"pr_comment_template":               types.StringValue(policy.PolicyConfig.PrCommentTemplate),
 	}
 
 	// Handle allowed actions map
@@ -841,6 +862,8 @@ func (r *githubRunPolicyResource) updateModelFromAPI(ctx context.Context, model 
 		"require_pinned_actions":            types.BoolType,
 		"actions_to_exempt_while_pinning":   types.SetType{ElemType: types.StringType},
 		"is_dry_run":                        types.BoolType,
+		"bulk_secrets_only_mode":            types.BoolType,
+		"pr_comment_template":               types.StringType,
 		"exempted_users":                    types.SetType{ElemType: types.StringType},
 	}
 

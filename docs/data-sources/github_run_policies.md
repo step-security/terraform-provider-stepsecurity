@@ -200,6 +200,7 @@ Read-Only:
 
 - `actions_to_exempt_while_pinning` (Set of String) Set of actions exempt from pinning requirements.
 - `allowed_actions` (Map of String) Map of allowed actions and their permissions.
+- `bulk_secrets_only_mode` (Boolean) When enabled, the secret exfiltration policy restricts enforcement to high-risk bulk secret-exposure attempts rather than all secret references. See the StepSecurity run-policies documentation for details.
 - `disallowed_runner_labels` (Set of String) Set of disallowed runner labels.
 - `enable_action_policy` (Boolean) Whether the action policy is enabled.
 - `enable_compromised_actions_policy` (Boolean) Whether the compromised actions policy is enabled.
@@ -211,4 +212,5 @@ Read-Only:
 - `is_dry_run` (Boolean) Whether this policy is in dry-run mode.
 - `name` (String) The name of the policy configuration.
 - `owner` (String) The owner of the policy configuration.
+- `pr_comment_template` (String) Optional custom template for the pull request comment posted when this policy blocks a run. Supports placeholder substitution; leave empty to use the default StepSecurity comment.
 - `require_pinned_actions` (Boolean) Whether all actions are required to be pinned to full-length commit SHAs.

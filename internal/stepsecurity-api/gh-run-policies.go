@@ -38,6 +38,8 @@ type RunPolicyConfig struct {
 	PinnedActionsExemptions        []string            `json:"pinned_actions_exemptions,omitempty"`
 	IsDryRun                       bool                `json:"is_dry_run,omitempty"`
 	ExemptedUsers                  []string            `json:"exempted_users,omitempty"`
+	BulkSecretsOnlyMode            bool                `json:"bulk_secrets_only_mode,omitempty"`
+	PrCommentTemplate              string              `json:"pr_comment_template,omitempty"`
 }
 
 type CreateRunPolicyRequest struct {

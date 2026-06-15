@@ -772,6 +772,8 @@ func testRunPolicyConfigObjectValue(policyConfig policyConfigModel) types.Object
 		"actions_to_exempt_while_pinning":   types.SetType{ElemType: types.StringType},
 		"is_dry_run":                        types.BoolType,
 		"exempted_users":                    types.SetType{ElemType: types.StringType},
+		"bulk_secrets_only_mode":            types.BoolType,
+		"pr_comment_template":               types.StringType,
 	}, map[string]attr.Value{
 		"owner":                             policyConfig.Owner,
 		"name":                              policyConfig.Name,
@@ -788,6 +790,8 @@ func testRunPolicyConfigObjectValue(policyConfig policyConfigModel) types.Object
 		"actions_to_exempt_while_pinning":   pinnedActionsExemptions,
 		"is_dry_run":                        policyConfig.IsDryRun,
 		"exempted_users":                    policyConfig.ExemptedUsers,
+		"bulk_secrets_only_mode":            policyConfig.BulkSecretsOnlyMode,
+		"pr_comment_template":               policyConfig.PrCommentTemplate,
 	})
 }
 
