@@ -90,3 +90,27 @@ resource "stepsecurity_github_checks" "test-organization-pypi" {
     repos = ["*"] # applies to all repositories in the organization
   }
 }
+
+# github PR checks configuration with Maven controls
+resource "stepsecurity_github_checks" "test-organization-maven" {
+  owner = "test-organization"
+  controls = [
+    {
+      control = "Maven Package Cooldown"
+      enable  = true
+      type    = "required"
+      settings = {
+        cool_down_period                     = 3
+        packages_to_exempt_in_cooldown_check = ["com.mycompany:internal-lib"]
+      }
+    },
+    {
+      control = "Maven Package Compromised Updates"
+      enable  = true
+      type    = "required"
+    }
+  ]
+  required_checks = {
+    repos = ["*"] # applies to all repositories in the organization
+  }
+}
