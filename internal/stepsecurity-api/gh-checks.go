@@ -9,12 +9,14 @@ import (
 
 var (
 	AvailableControls = map[string]string{
-		"NPM Package Compromised Updates":  "npm_package_compromised_updates",
-		"NPM Package Cooldown":             "npm_package_recent_release_guard",
-		"PWN Request":                      "pwn_request_check",
-		"PyPI Package Compromised Updates": "pypi_package_compromised_updates",
-		"PyPI Package Cooldown":            "pypi_package_cooldown",
-		"Script Injection":                 "script_injection_check",
+		"Maven Package Compromised Updates": "maven_package_compromised_updates",
+		"Maven Package Cooldown":            "maven_package_cooldown",
+		"NPM Package Compromised Updates":   "npm_package_compromised_updates",
+		"NPM Package Cooldown":              "npm_package_recent_release_guard",
+		"PWN Request":                       "pwn_request_check",
+		"PyPI Package Compromised Updates":  "pypi_package_compromised_updates",
+		"PyPI Package Cooldown":             "pypi_package_cooldown",
+		"Script Injection":                  "script_injection_check",
 	}
 )
 
@@ -57,6 +59,10 @@ func GetAvailableControls() []string {
 
 func GetControlName(control string) string {
 	switch control {
+	case "maven_package_compromised_updates":
+		return "Maven Package Compromised Updates"
+	case "maven_package_cooldown":
+		return "Maven Package Cooldown"
 	case "npm_package_compromised_updates":
 		return "NPM Package Compromised Updates"
 	case "npm_package_recent_release_guard":

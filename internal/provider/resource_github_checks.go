@@ -258,7 +258,8 @@ func (r *githubChecksResource) ValidateConfig(ctx context.Context, req resource.
 		}
 
 		isCooldownControl := control.Control.ValueString() == "NPM Package Cooldown" ||
-			control.Control.ValueString() == "PyPI Package Cooldown"
+			control.Control.ValueString() == "PyPI Package Cooldown" ||
+			control.Control.ValueString() == "Maven Package Cooldown"
 		if !isCooldownControl && !control.Settings.IsNull() && !control.Settings.IsUnknown() {
 			resp.Diagnostics.AddError(
 				"can't provide settings",
@@ -390,7 +391,8 @@ func (r *githubChecksResource) ModifyPlan(ctx context.Context, req resource.Modi
 	for ind, control := range plan.Controls {
 
 		if (control.Control.ValueString() == "NPM Package Cooldown" ||
-			control.Control.ValueString() == "PyPI Package Cooldown") && control.Settings.IsNull() {
+			control.Control.ValueString() == "PyPI Package Cooldown" ||
+			control.Control.ValueString() == "Maven Package Cooldown") && control.Settings.IsNull() {
 			// Create object with default settings
 			settingsMap := map[string]attr.Value{
 				"cool_down_period":                     types.Int64Value(2),
@@ -562,7 +564,7 @@ func (r *githubChecksResource) convertToCreateRequest(plan githubChecksModel) (*
 			Enabled: control.Enable.ValueBool(),
 			Type:    control.Type.ValueString(),
 		}
-		if controlName == "NPM Package Cooldown" || controlName == "PyPI Package Cooldown" {
+		if controlName == "NPM Package Cooldown" || controlName == "PyPI Package Cooldown" || controlName == "Maven Package Cooldown" {
 			if control.Settings.IsNull() {
 				control.Settings = types.ObjectNull(map[string]attr.Type{
 					"cool_down_period":                     types.Int64Type,
@@ -770,7 +772,7 @@ func (r *githubChecksResource) convertToState(owner string, config stepsecuritya
 		}
 
 		// Handle settings for cooldown controls
-		if (controlName == "NPM Package Cooldown" || controlName == "PyPI Package Cooldown") && checkConfig.Settings != nil {
+		if (controlName == "NPM Package Cooldown" || controlName == "PyPI Package Cooldown" || controlName == "Maven Package Cooldown") && checkConfig.Settings != nil {
 			var cooldownPeriod types.Int64
 			var packagesList types.List
 
