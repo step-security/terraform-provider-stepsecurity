@@ -25,7 +25,7 @@ resource "stepsecurity_developer_mdm_ide_extension_policy" "engineering_vscode" 
 }
 
 # Unassigned profile: bundles policies but is not applied to any device yet.
-# A profile may reference at most one policy per category.
+# A profile may reference at most one policy per category/target.
 resource "stepsecurity_developer_mdm_profile" "unassigned" {
   name        = "Engineering (unassigned)"
   description = "Staged profile, not yet rolled out"

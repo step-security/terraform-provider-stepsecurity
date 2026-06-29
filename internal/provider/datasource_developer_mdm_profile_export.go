@@ -34,6 +34,7 @@ type developerMDMProfileExportDataSourceModel struct {
 	ProfileID   types.String `tfsdk:"profile_id"`
 	OS          types.String `tfsdk:"os"`
 	Category    types.String `tfsdk:"category"`
+	Target      types.String `tfsdk:"target"`
 	Filename    types.String `tfsdk:"filename"`
 	ContentType types.String `tfsdk:"content_type"`
 	Content     types.String `tfsdk:"content"`
@@ -49,7 +50,7 @@ func (d *developerMDMProfileExportDataSource) Metadata(_ context.Context, req da
 // Schema defines the schema for the data source.
 func (d *developerMDMProfileExportDataSource) Schema(_ context.Context, _ datasource.SchemaRequest, resp *datasource.SchemaResponse) {
 	resp.Schema = schema.Schema{
-		MarkdownDescription: "Returns a compiled Developer MDM import artifact for a profile, category, and OS. " +
+		MarkdownDescription: "Returns a compiled Developer MDM import artifact for a profile, category, target, and OS. " +
 			"This is read-only and has no Terraform lifecycle. The `content` attribute is the decoded artifact body and " +
 			"can be passed directly to `hashicorp/local` `local_file.content` without `jsondecode` or string manipulation. " +
 			"This provider does not write files; use the `local` provider for that. On Terraform Cloud or CI, `local_file` " +
@@ -75,6 +76,14 @@ func (d *developerMDMProfileExportDataSource) Schema(_ context.Context, _ dataso
 				MarkdownDescription: "Policy category to export. Defaults to `ide_extension`.",
 				Validators: []validator.String{
 					stringvalidator.OneOf(stepsecurityapi.DeveloperMDMCategoryIDEExtension),
+				},
+			},
+			"target": schema.StringAttribute{
+				Optional:            true,
+				Computed:            true,
+				MarkdownDescription: "Policy target to export. Defaults to `vscode`; v1 supports only `vscode`.",
+				Validators: []validator.String{
+					stringvalidator.OneOf(stepsecurityapi.DeveloperMDMTargetVSCode),
 				},
 			},
 			"filename": schema.StringAttribute{
@@ -133,8 +142,12 @@ func (d *developerMDMProfileExportDataSource) Read(ctx context.Context, req data
 	if config.Category.IsNull() || config.Category.IsUnknown() || category == "" {
 		category = stepsecurityapi.DeveloperMDMCategoryIDEExtension
 	}
+	target := config.Target.ValueString()
+	if config.Target.IsNull() || config.Target.IsUnknown() || target == "" {
+		target = stepsecurityapi.DeveloperMDMTargetVSCode
+	}
 
-	artifact, err := d.client.ExportDeveloperMDMProfile(ctx, config.ProfileID.ValueString(), config.OS.ValueString(), category)
+	artifact, err := d.client.ExportDeveloperMDMProfile(ctx, config.ProfileID.ValueString(), config.OS.ValueString(), category, target)
 	if err != nil {
 		resp.Diagnostics.AddError(
 			"Error exporting Developer MDM profile",
@@ -144,6 +157,10 @@ func (d *developerMDMProfileExportDataSource) Read(ctx context.Context, req data
 	}
 
 	config.Category = types.StringValue(category)
+	if artifact.Target != "" {
+		target = artifact.Target
+	}
+	config.Target = types.StringValue(target)
 	config.Filename = types.StringValue(artifact.Filename)
 	config.ContentType = types.StringValue(artifact.ContentType)
 	config.Content = types.StringValue(artifact.Content)

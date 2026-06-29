@@ -34,7 +34,7 @@ func TestDeveloperMDMPolicyClient_CreatePolicy(t *testing.T) {
 		require.NoError(t, json.NewDecoder(r.Body).Decode(&gotBody))
 		w.WriteHeader(http.StatusCreated)
 		//nolint:errcheck
-		w.Write([]byte(`{"customer_id":"test-customer","policy_id":"p1","name":"allow","category":"ide_extension","spec_version":1,"mode":"allowlist","spec":{"rules":[{"publisher":"ms-python","name":"python","stable":true}]}}`))
+		w.Write([]byte(`{"customer_id":"test-customer","policy_id":"p1","name":"allow","category":"ide_extension","target":"vscode","spec_version":1,"mode":"allowlist","spec":{"rules":[{"publisher":"ms-python","name":"python","stable":true}]}}`))
 	}))
 	defer server.Close()
 
@@ -42,6 +42,7 @@ func TestDeveloperMDMPolicyClient_CreatePolicy(t *testing.T) {
 	req := DeveloperMDMPolicyRequest{
 		Name:        "allow",
 		Category:    DeveloperMDMCategoryIDEExtension,
+		Target:      DeveloperMDMTargetVSCode,
 		SpecVersion: DeveloperMDMSpecVersionIDEExtension,
 		Mode:        DeveloperMDMModeAllowlist,
 		Spec:        json.RawMessage(`{"rules":[{"publisher":"ms-python","name":"python","stable":true}]}`),
@@ -54,6 +55,7 @@ func TestDeveloperMDMPolicyClient_CreatePolicy(t *testing.T) {
 	assert.Equal(t, "/v1/test-customer/developer-mdm/policies", gotPath)
 	assert.Equal(t, "Bearer key", gotAuth)
 	assert.Equal(t, "ide_extension", gotBody["category"])
+	assert.Equal(t, "vscode", gotBody["target"])
 	assert.Equal(t, float64(1), gotBody["spec_version"])
 	assert.Equal(t, "allowlist", gotBody["mode"])
 	spec, ok := gotBody["spec"].(map[string]any)
@@ -64,6 +66,7 @@ func TestDeveloperMDMPolicyClient_CreatePolicy(t *testing.T) {
 
 	assert.Equal(t, "p1", got.PolicyID)
 	assert.Equal(t, "ide_extension", got.Category)
+	assert.Equal(t, "vscode", got.Target)
 }
 
 func TestDeveloperMDMPolicyClient_ListPolicies(t *testing.T) {
@@ -73,7 +76,7 @@ func TestDeveloperMDMPolicyClient_ListPolicies(t *testing.T) {
 		assert.Equal(t, http.MethodGet, r.Method)
 		assert.Equal(t, "/v1/test-customer/developer-mdm/policies", r.URL.Path)
 		//nolint:errcheck
-		w.Write([]byte(`{"policies":[{"policy_id":"p1","name":"allow","category":"ide_extension"}],"count":1}`))
+		w.Write([]byte(`{"policies":[{"policy_id":"p1","name":"allow","category":"ide_extension","target":"vscode"}],"count":1}`))
 	}))
 	defer server.Close()
 
@@ -83,6 +86,7 @@ func TestDeveloperMDMPolicyClient_ListPolicies(t *testing.T) {
 	require.Len(t, got, 1)
 	assert.Equal(t, "p1", got[0].PolicyID)
 	assert.Equal(t, "ide_extension", got[0].Category)
+	assert.Equal(t, "vscode", got[0].Target)
 }
 
 func TestDeveloperMDMPolicyClient_GetUpdateDeletePolicy(t *testing.T) {
@@ -99,7 +103,7 @@ func TestDeveloperMDMPolicyClient_GetUpdateDeletePolicy(t *testing.T) {
 			w.WriteHeader(http.StatusNoContent)
 		default:
 			//nolint:errcheck
-			w.Write([]byte(`{"policy_id":"p 1","name":"allow","category":"ide_extension","mode":"allowlist"}`))
+			w.Write([]byte(`{"policy_id":"p 1","name":"allow","category":"ide_extension","target":"vscode","mode":"allowlist"}`))
 		}
 	}))
 	defer server.Close()
@@ -112,7 +116,7 @@ func TestDeveloperMDMPolicyClient_GetUpdateDeletePolicy(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "p 1", getPolicy.PolicyID)
 
-	_, err = c.UpdateDeveloperMDMPolicy(ctx, "p 1", DeveloperMDMPolicyRequest{Name: "allow", Category: DeveloperMDMCategoryIDEExtension, SpecVersion: 1, Mode: DeveloperMDMModeAllowlist, Spec: json.RawMessage(`{"rules":[]}`)})
+	_, err = c.UpdateDeveloperMDMPolicy(ctx, "p 1", DeveloperMDMPolicyRequest{Name: "allow", Category: DeveloperMDMCategoryIDEExtension, Target: DeveloperMDMTargetVSCode, SpecVersion: 1, Mode: DeveloperMDMModeAllowlist, Spec: json.RawMessage(`{"rules":[]}`)})
 	require.NoError(t, err)
 
 	require.NoError(t, c.DeleteDeveloperMDMPolicy(ctx, "p 1"))
@@ -203,19 +207,21 @@ func TestDeveloperMDMPolicyClient_ExportProfile(t *testing.T) {
 		gotPath = r.URL.Path
 		gotQuery = r.URL.Query()
 		//nolint:errcheck
-		w.Write([]byte(`{"os":"linux","category":"ide_extension","filename":"policy.json","content_type":"application/json; charset=utf-8","content":"{\n  \"AllowedExtensions\": \"{\\\"*\\\":false}\"\n}\n","hash":"sha256:abc","notes":"Place at /etc/vscode/policy.json"}`))
+		w.Write([]byte(`{"os":"linux","category":"ide_extension","target":"vscode","filename":"policy.json","content_type":"application/json; charset=utf-8","content":"{\n  \"AllowedExtensions\": \"{\\\"*\\\":false}\"\n}\n","hash":"sha256:abc","notes":"Place at /etc/vscode/policy.json"}`))
 	}))
 	defer server.Close()
 
 	c := newTestClient(server)
-	got, err := c.ExportDeveloperMDMProfile(context.Background(), "prof1", "linux", DeveloperMDMCategoryIDEExtension)
+	got, err := c.ExportDeveloperMDMProfile(context.Background(), "prof1", "linux", DeveloperMDMCategoryIDEExtension, DeveloperMDMTargetVSCode)
 	require.NoError(t, err)
 
 	assert.Equal(t, "/v1/test-customer/developer-mdm/profiles/prof1/export", gotPath)
 	assert.Equal(t, []string{"linux"}, gotQuery["os"])
 	assert.Equal(t, []string{"ide_extension"}, gotQuery["category"])
+	assert.Equal(t, []string{"vscode"}, gotQuery["target"])
 
 	assert.Equal(t, "policy.json", got.Filename)
+	assert.Equal(t, "vscode", got.Target)
 	assert.Equal(t, "sha256:abc", got.Hash)
 	// Decoded content must contain a real newline and the literal key, not escaped sequences.
 	assert.Contains(t, got.Content, "\n")
@@ -231,11 +237,11 @@ func TestDeveloperMDMPolicyClient_Compliance(t *testing.T) {
 		case strings.Contains(r.URL.Path, "/devices/"):
 			assert.Equal(t, "/v1/test-customer/developer-mdm/devices/dev1/compliance", r.URL.Path)
 			//nolint:errcheck
-			w.Write([]byte(`{"device_id":"dev1","compliance":[{"device_id":"dev1","category":"ide_extension","state":"compliant","last_seen_at":1780000000}]}`))
+			w.Write([]byte(`{"device_id":"dev1","compliance":[{"device_id":"dev1","category":"ide_extension","target":"vscode","state":"compliant","last_seen_at":1780000000}]}`))
 		case strings.Contains(r.URL.Path, "/profiles/"):
 			assert.Equal(t, "/v1/test-customer/developer-mdm/profiles/prof1/compliance", r.URL.Path)
 			//nolint:errcheck
-			w.Write([]byte(`{"profile_id":"prof1","compliance":[{"device_id":"dev1","category":"ide_extension","profile_id":"prof1","state":"pending"}]}`))
+			w.Write([]byte(`{"profile_id":"prof1","compliance":[{"device_id":"dev1","category":"ide_extension","target":"vscode","profile_id":"prof1","state":"pending"}]}`))
 		}
 	}))
 	defer server.Close()
@@ -247,6 +253,7 @@ func TestDeveloperMDMPolicyClient_Compliance(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "dev1", dev.DeviceID)
 	require.Len(t, dev.Compliance, 1)
+	assert.Equal(t, "vscode", dev.Compliance[0].Target)
 	assert.Equal(t, "compliant", dev.Compliance[0].State)
 	assert.Equal(t, int64(1780000000), dev.Compliance[0].LastSeenAt)
 
@@ -254,5 +261,6 @@ func TestDeveloperMDMPolicyClient_Compliance(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "prof1", prof.ProfileID)
 	require.Len(t, prof.Compliance, 1)
+	assert.Equal(t, "vscode", prof.Compliance[0].Target)
 	assert.Equal(t, "pending", prof.Compliance[0].State)
 }

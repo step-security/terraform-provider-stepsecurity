@@ -20,6 +20,7 @@ import (
 var developerMDMComplianceAttrTypes = map[string]attr.Type{
 	"device_id":     types.StringType,
 	"category":      types.StringType,
+	"target":        types.StringType,
 	"profile_id":    types.StringType,
 	"state":         types.StringType,
 	"desired_hash":  types.StringType,
@@ -34,6 +35,7 @@ var developerMDMComplianceAttrTypes = map[string]attr.Type{
 type developerMDMComplianceRowModel struct {
 	DeviceID     types.String `tfsdk:"device_id"`
 	Category     types.String `tfsdk:"category"`
+	Target       types.String `tfsdk:"target"`
 	ProfileID    types.String `tfsdk:"profile_id"`
 	State        types.String `tfsdk:"state"`
 	DesiredHash  types.String `tfsdk:"desired_hash"`
@@ -54,6 +56,7 @@ func developerMDMComplianceSchemaAttribute(description string) schema.ListNested
 			Attributes: map[string]schema.Attribute{
 				"device_id":     schema.StringAttribute{Computed: true, MarkdownDescription: "Device identifier."},
 				"category":      schema.StringAttribute{Computed: true, MarkdownDescription: "Policy category, e.g. `ide_extension`."},
+				"target":        schema.StringAttribute{Computed: true, MarkdownDescription: "Policy target, e.g. `vscode`."},
 				"profile_id":    schema.StringAttribute{Computed: true, MarkdownDescription: "Profile that governs this row, if any."},
 				"state":         schema.StringAttribute{Computed: true, MarkdownDescription: "Compliance state such as `compliant`, `pending`, `drift_detected`, or `mdm_managed`."},
 				"desired_hash":  schema.StringAttribute{Computed: true, MarkdownDescription: "Backend desired policy hash."},
@@ -77,6 +80,7 @@ func developerMDMComplianceListValue(rows []stepsecurityapi.DeveloperMDMComplian
 		obj, objDiags := types.ObjectValue(developerMDMComplianceAttrTypes, map[string]attr.Value{
 			"device_id":     types.StringValue(row.DeviceID),
 			"category":      types.StringValue(row.Category),
+			"target":        types.StringValue(row.Target),
 			"profile_id":    types.StringValue(row.ProfileID),
 			"state":         types.StringValue(row.State),
 			"desired_hash":  types.StringValue(row.DesiredHash),

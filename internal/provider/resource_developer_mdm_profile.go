@@ -74,7 +74,7 @@ func (r *developerMDMProfileResource) Metadata(_ context.Context, req resource.M
 func (r *developerMDMProfileResource) Schema(_ context.Context, _ resource.SchemaRequest, resp *resource.SchemaResponse) {
 	resp.Schema = schema.Schema{
 		MarkdownDescription: "Manages a Developer MDM profile in StepSecurity. A profile bundles one or more Developer MDM " +
-			"policies and optionally assigns them to devices. The backend allows at most one policy per category per profile.",
+			"policies and optionally assigns them to devices. The backend allows at most one policy per category/target per profile.",
 		Attributes: map[string]schema.Attribute{
 			"id": schema.StringAttribute{
 				Computed:            true,
@@ -105,7 +105,7 @@ func (r *developerMDMProfileResource) Schema(_ context.Context, _ resource.Schem
 				ElementType: types.StringType,
 				Required:    true,
 				MarkdownDescription: "Set of Developer MDM policy IDs bundled by this profile. Must contain at least one ID. " +
-					"The backend allows at most one policy per category.",
+					"The backend allows at most one policy per category/target.",
 				Validators: []validator.Set{
 					setvalidator.SizeAtLeast(1),
 					setvalidator.ValueStringsAre(stringvalidator.LengthAtLeast(1)),
@@ -371,11 +371,11 @@ func validateDeveloperMDMProfile(ctx context.Context, model developerMDMProfileM
 }
 
 // validateDeveloperMDMProfilePolicyCategories loads referenced policies and rejects
-// more than one policy in the same category. The backend remains the source of truth.
+// more than one policy in the same category/target. The backend remains the source of truth.
 func validateDeveloperMDMProfilePolicyCategories(ctx context.Context, client stepsecurityapi.Client, policyIDs []string) diag.Diagnostics {
 	var diags diag.Diagnostics
 
-	categoryToPolicy := make(map[string]string)
+	categoryTargetToPolicy := make(map[string]string)
 	for _, id := range policyIDs {
 		policy, err := client.GetDeveloperMDMPolicy(ctx, id)
 		if err != nil {
@@ -386,21 +386,29 @@ func validateDeveloperMDMProfilePolicyCategories(ctx context.Context, client ste
 			)
 			continue
 		}
-		if existing, ok := categoryToPolicy[policy.Category]; ok {
+		key := developerMDMCategoryTargetKey(policy.Category, policy.Target)
+		if existing, ok := categoryTargetToPolicy[key]; ok {
 			diags.AddAttributeError(
 				path.Root("policy_ids"),
-				"At most one policy per category",
+				"At most one policy per category/target",
 				fmt.Sprintf(
-					"Policies %q and %q both have category %q. A profile may reference at most one policy per category.",
-					existing, id, policy.Category,
+					"Policies %q and %q both have category/target %q. A profile may reference at most one policy per category/target.",
+					existing, id, key,
 				),
 			)
 			continue
 		}
-		categoryToPolicy[policy.Category] = id
+		categoryTargetToPolicy[key] = id
 	}
 
 	return diags
+}
+
+func developerMDMCategoryTargetKey(category, target string) string {
+	if target == "" && category == stepsecurityapi.DeveloperMDMCategoryIDEExtension {
+		target = stepsecurityapi.DeveloperMDMTargetVSCode
+	}
+	return category + "#" + target
 }
 
 // buildDeveloperMDMProfileRequest converts the model into an API request body.

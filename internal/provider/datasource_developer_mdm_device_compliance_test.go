@@ -34,7 +34,7 @@ func TestDeveloperMDMDeviceComplianceDataSource_Read(t *testing.T) {
 	mockClient.On("GetDeveloperMDMDeviceCompliance", mock.Anything, "dev1").Return(&stepsecurityapi.DeveloperMDMDeviceComplianceResponse{
 		DeviceID: "dev1",
 		Compliance: []stepsecurityapi.DeveloperMDMComplianceView{
-			{DeviceID: "dev1", Category: "ide_extension", State: "compliant", LastSeenAt: 1780000000, Platform: "darwin"},
+			{DeviceID: "dev1", Category: "ide_extension", Target: "vscode", State: "compliant", LastSeenAt: 1780000000, Platform: "darwin"},
 		},
 	}, nil).Once()
 
@@ -63,6 +63,7 @@ func TestDeveloperMDMDeviceComplianceDataSource_Read(t *testing.T) {
 	var rows []developerMDMComplianceRowModel
 	require.False(t, got.Compliance.ElementsAs(ctx, &rows, false).HasError())
 	require.Len(t, rows, 1)
+	assert.Equal(t, "vscode", rows[0].Target.ValueString())
 	assert.Equal(t, "compliant", rows[0].State.ValueString())
 	assert.Equal(t, int64(1780000000), rows[0].LastSeenAt.ValueInt64())
 	assert.Equal(t, "darwin", rows[0].Platform.ValueString())

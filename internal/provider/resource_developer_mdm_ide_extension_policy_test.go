@@ -38,7 +38,7 @@ func TestDeveloperMDMIDEExtensionPolicyResource_Schema(t *testing.T) {
 	assert.False(t, schemaResp.Diagnostics.HasError(), "Schema() errors: %v", schemaResp.Diagnostics)
 
 	attrs := schemaResp.Schema.Attributes
-	for _, name := range []string{"id", "policy_id", "name", "description", "mode", "rules", "created_by", "created_at", "updated_by", "updated_at"} {
+	for _, name := range []string{"id", "policy_id", "name", "description", "target", "mode", "rules", "created_by", "created_at", "updated_by", "updated_at"} {
 		assert.Contains(t, attrs, name, "missing attribute %q", name)
 	}
 }
@@ -50,6 +50,7 @@ func TestDeveloperMDMIDEExtensionPolicy_BuildRequestAllowlistStable(t *testing.T
 	model := developerMDMIDEExtensionPolicyModel{
 		Name:        types.StringValue("eng"),
 		Description: types.StringValue("approved extensions"),
+		Target:      types.StringValue(stepsecurityapi.DeveloperMDMTargetVSCode),
 		Mode:        types.StringValue("allowlist"),
 		Rules: []developerMDMIDEExtensionRuleModel{
 			{
@@ -66,6 +67,7 @@ func TestDeveloperMDMIDEExtensionPolicy_BuildRequestAllowlistStable(t *testing.T
 	require.False(t, diags.HasError(), "build errors: %v", diags)
 
 	assert.Equal(t, stepsecurityapi.DeveloperMDMCategoryIDEExtension, req.Category)
+	assert.Equal(t, stepsecurityapi.DeveloperMDMTargetVSCode, req.Target)
 	assert.Equal(t, 1, req.SpecVersion)
 	assert.Equal(t, "allowlist", req.Mode)
 	assert.Equal(t, "approved extensions", req.Description)
@@ -83,8 +85,9 @@ func TestDeveloperMDMIDEExtensionPolicy_BuildRequestAllowlistVersions(t *testing
 
 	ctx := context.Background()
 	model := developerMDMIDEExtensionPolicyModel{
-		Name: types.StringValue("eng"),
-		Mode: types.StringValue("allowlist"),
+		Name:   types.StringValue("eng"),
+		Target: types.StringValue(stepsecurityapi.DeveloperMDMTargetVSCode),
+		Mode:   types.StringValue("allowlist"),
 		Rules: []developerMDMIDEExtensionRuleModel{
 			{
 				Publisher: types.StringValue("redhat"),
@@ -112,8 +115,9 @@ func TestDeveloperMDMIDEExtensionPolicy_BuildRequestBlocklist(t *testing.T) {
 
 	ctx := context.Background()
 	model := developerMDMIDEExtensionPolicyModel{
-		Name: types.StringValue("block"),
-		Mode: types.StringValue("blocklist"),
+		Name:   types.StringValue("block"),
+		Target: types.StringValue(stepsecurityapi.DeveloperMDMTargetVSCode),
+		Mode:   types.StringValue("blocklist"),
 		Rules: []developerMDMIDEExtensionRuleModel{
 			{
 				Publisher: types.StringValue("evil"),
@@ -241,6 +245,7 @@ func TestDeveloperMDMIDEExtensionPolicy_ApplyAPIToModel(t *testing.T) {
 		Name:        "eng",
 		Description: "desc",
 		Category:    "ide_extension",
+		Target:      "vscode",
 		Mode:        "allowlist",
 		SpecVersion: 1,
 		Spec:        json.RawMessage(`{"rules":[{"publisher":"ms-python","name":"python","stable":true},{"publisher":"redhat","name":"vscode-yaml","versions":["1.15.0"]}]}`),
@@ -258,6 +263,7 @@ func TestDeveloperMDMIDEExtensionPolicy_ApplyAPIToModel(t *testing.T) {
 	assert.Equal(t, "p1", model.ID.ValueString())
 	assert.Equal(t, "p1", model.PolicyID.ValueString())
 	assert.Equal(t, "eng", model.Name.ValueString())
+	assert.Equal(t, "vscode", model.Target.ValueString())
 	assert.Equal(t, "desc", model.Description.ValueString())
 	assert.Equal(t, "allowlist", model.Mode.ValueString())
 	assert.Equal(t, "user@x.io", model.CreatedBy.ValueString())

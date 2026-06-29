@@ -3,12 +3,12 @@
 page_title: "stepsecurity_developer_mdm_profile_export Data Source - stepsecurity"
 subcategory: ""
 description: |-
-  Returns a compiled Developer MDM import artifact for a profile, category, and OS. This is read-only and has no Terraform lifecycle. The content attribute is the decoded artifact body and can be passed directly to hashicorp/local local_file.content without jsondecode or string manipulation. This provider does not write files; use the local provider for that. On Terraform Cloud or CI, local_file writes to the remote runner filesystem, not the operator's machine.
+  Returns a compiled Developer MDM import artifact for a profile, category, target, and OS. This is read-only and has no Terraform lifecycle. The content attribute is the decoded artifact body and can be passed directly to hashicorp/local local_file.content without jsondecode or string manipulation. This provider does not write files; use the local provider for that. On Terraform Cloud or CI, local_file writes to the remote runner filesystem, not the operator's machine.
 ---
 
 # stepsecurity_developer_mdm_profile_export (Data Source)
 
-Returns a compiled Developer MDM import artifact for a profile, category, and OS. This is read-only and has no Terraform lifecycle. The `content` attribute is the decoded artifact body and can be passed directly to `hashicorp/local` `local_file.content` without `jsondecode` or string manipulation. This provider does not write files; use the `local` provider for that. On Terraform Cloud or CI, `local_file` writes to the remote runner filesystem, not the operator's machine.
+Returns a compiled Developer MDM import artifact for a profile, category, target, and OS. This is read-only and has no Terraform lifecycle. The `content` attribute is the decoded artifact body and can be passed directly to `hashicorp/local` `local_file.content` without `jsondecode` or string manipulation. This provider does not write files; use the `local` provider for that. On Terraform Cloud or CI, `local_file` writes to the remote runner filesystem, not the operator's machine.
 
 ## Example Usage
 
@@ -29,19 +29,23 @@ provider "stepsecurity" {
 # Export the compiled MDM artifact for each OS. This is read-only and creates
 # no remote object. `os` must be one of "windows", "macos", or "linux".
 # `category` is optional and defaults to "ide_extension".
+# `target` is optional and defaults to "vscode".
 data "stepsecurity_developer_mdm_profile_export" "windows" {
   profile_id = "f591dc70-0164-4216-9f41-1ec4d7c62226"
   os         = "windows"
+  target     = "vscode"
 }
 
 data "stepsecurity_developer_mdm_profile_export" "linux" {
   profile_id = "f591dc70-0164-4216-9f41-1ec4d7c62226"
   os         = "linux"
+  target     = "vscode"
 }
 
 data "stepsecurity_developer_mdm_profile_export" "macos" {
   profile_id = "f591dc70-0164-4216-9f41-1ec4d7c62226"
   os         = "macos"
+  target     = "vscode"
 }
 
 # The `content` attribute is the decoded artifact body. Do not `jsondecode` it.
@@ -71,6 +75,7 @@ output "linux_export_hash" {
 ### Optional
 
 - `category` (String) Policy category to export. Defaults to `ide_extension`.
+- `target` (String) Policy target to export. Defaults to `vscode`; v1 supports only `vscode`.
 
 ### Read-Only
 

@@ -64,3 +64,4 @@ Read-Only:
 - `platform` (String) Device platform, e.g. `darwin`.
 - `profile_id` (String) Profile that governs this row, if any.
 - `state` (String) Compliance state such as `compliant`, `pending`, `drift_detected`, or `mdm_managed`.
+- `target` (String) Policy target, e.g. `vscode`.

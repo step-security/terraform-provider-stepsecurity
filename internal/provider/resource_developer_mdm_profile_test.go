@@ -177,16 +177,25 @@ func TestDeveloperMDMProfile_ValidateOnePolicyPerCategory(t *testing.T) {
 
 	t.Run("rejects duplicate category", func(t *testing.T) {
 		mockClient := &stepsecurityapi.MockStepSecurityClient{}
-		mockClient.On("GetDeveloperMDMPolicy", mock.Anything, "p1").Return(&stepsecurityapi.DeveloperMDMPolicy{PolicyID: "p1", Category: "ide_extension"}, nil)
-		mockClient.On("GetDeveloperMDMPolicy", mock.Anything, "p2").Return(&stepsecurityapi.DeveloperMDMPolicy{PolicyID: "p2", Category: "ide_extension"}, nil)
+		mockClient.On("GetDeveloperMDMPolicy", mock.Anything, "p1").Return(&stepsecurityapi.DeveloperMDMPolicy{PolicyID: "p1", Category: "ide_extension", Target: "vscode"}, nil)
+		mockClient.On("GetDeveloperMDMPolicy", mock.Anything, "p2").Return(&stepsecurityapi.DeveloperMDMPolicy{PolicyID: "p2", Category: "ide_extension", Target: "vscode"}, nil)
 
 		diags := validateDeveloperMDMProfilePolicyCategories(ctx, mockClient, []string{"p1", "p2"})
-		assert.True(t, diags.HasError(), "expected duplicate ide_extension category to be rejected")
+		assert.True(t, diags.HasError(), "expected duplicate ide_extension/vscode category-target to be rejected")
+	})
+
+	t.Run("omitted target defaults to vscode for duplicate detection", func(t *testing.T) {
+		mockClient := &stepsecurityapi.MockStepSecurityClient{}
+		mockClient.On("GetDeveloperMDMPolicy", mock.Anything, "p1").Return(&stepsecurityapi.DeveloperMDMPolicy{PolicyID: "p1", Category: "ide_extension"}, nil)
+		mockClient.On("GetDeveloperMDMPolicy", mock.Anything, "p2").Return(&stepsecurityapi.DeveloperMDMPolicy{PolicyID: "p2", Category: "ide_extension", Target: "vscode"}, nil)
+
+		diags := validateDeveloperMDMProfilePolicyCategories(ctx, mockClient, []string{"p1", "p2"})
+		assert.True(t, diags.HasError(), "expected omitted target to collide with vscode")
 	})
 
 	t.Run("accepts single policy", func(t *testing.T) {
 		mockClient := &stepsecurityapi.MockStepSecurityClient{}
-		mockClient.On("GetDeveloperMDMPolicy", mock.Anything, "p1").Return(&stepsecurityapi.DeveloperMDMPolicy{PolicyID: "p1", Category: "ide_extension"}, nil)
+		mockClient.On("GetDeveloperMDMPolicy", mock.Anything, "p1").Return(&stepsecurityapi.DeveloperMDMPolicy{PolicyID: "p1", Category: "ide_extension", Target: "vscode"}, nil)
 
 		diags := validateDeveloperMDMProfilePolicyCategories(ctx, mockClient, []string{"p1"})
 		assert.False(t, diags.HasError(), "single policy should pass: %v", diags)

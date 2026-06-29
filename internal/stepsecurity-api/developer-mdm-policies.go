@@ -10,6 +10,7 @@ import (
 // Developer MDM categories, spec versions, and policy modes.
 const (
 	DeveloperMDMCategoryIDEExtension    = "ide_extension"
+	DeveloperMDMTargetVSCode            = "vscode"
 	DeveloperMDMSpecVersionIDEExtension = 1
 	DeveloperMDMModeAllowlist           = "allowlist"
 	DeveloperMDMModeBlocklist           = "blocklist"
@@ -22,6 +23,7 @@ type DeveloperMDMPolicy struct {
 	Name        string          `json:"name,omitempty"`
 	Description string          `json:"description,omitempty"`
 	Category    string          `json:"category,omitempty"`
+	Target      string          `json:"target,omitempty"`
 	SpecVersion int             `json:"spec_version,omitempty"`
 	Mode        string          `json:"mode,omitempty"`
 	Spec        json.RawMessage `json:"spec,omitempty"`
@@ -36,6 +38,7 @@ type DeveloperMDMPolicyRequest struct {
 	Name        string          `json:"name"`
 	Description string          `json:"description,omitempty"`
 	Category    string          `json:"category"`
+	Target      string          `json:"target"`
 	SpecVersion int             `json:"spec_version"`
 	Mode        string          `json:"mode"`
 	Spec        json.RawMessage `json:"spec"`
@@ -87,6 +90,7 @@ type DeveloperMDMAssignment struct {
 type DeveloperMDMExportArtifact struct {
 	OS          string `json:"os"`
 	Category    string `json:"category"`
+	Target      string `json:"target"`
 	Filename    string `json:"filename"`
 	ContentType string `json:"content_type"`
 	Content     string `json:"content"`
@@ -98,6 +102,7 @@ type DeveloperMDMExportArtifact struct {
 type DeveloperMDMComplianceView struct {
 	DeviceID     string `json:"device_id"`
 	Category     string `json:"category"`
+	Target       string `json:"target"`
 	ProfileID    string `json:"profile_id,omitempty"`
 	State        string `json:"state"`
 	DesiredHash  string `json:"desired_hash,omitempty"`
@@ -249,12 +254,15 @@ func (c *APIClient) DeleteDeveloperMDMProfile(ctx context.Context, profileID str
 // ExportDeveloperMDMProfile fetches the compiled MDM artifact for a profile.
 // The HTTP response encodes the artifact body as a JSON string; json.Unmarshal
 // decodes it so DeveloperMDMExportArtifact.Content holds the real file body.
-func (c *APIClient) ExportDeveloperMDMProfile(ctx context.Context, profileID, os, category string) (*DeveloperMDMExportArtifact, error) {
+func (c *APIClient) ExportDeveloperMDMProfile(ctx context.Context, profileID, os, category, target string) (*DeveloperMDMExportArtifact, error) {
 	uri := c.developerMDMPath("/profiles/%s/export", url.PathEscape(profileID))
 	query := url.Values{}
 	query.Set("os", os)
 	if category != "" {
 		query.Set("category", category)
+	}
+	if target != "" {
+		query.Set("target", target)
 	}
 	uri += "?" + query.Encode()
 

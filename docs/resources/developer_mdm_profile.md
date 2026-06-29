@@ -3,12 +3,12 @@
 page_title: "stepsecurity_developer_mdm_profile Resource - stepsecurity"
 subcategory: ""
 description: |-
-  Manages a Developer MDM profile in StepSecurity. A profile bundles one or more Developer MDM policies and optionally assigns them to devices. The backend allows at most one policy per category per profile.
+  Manages a Developer MDM profile in StepSecurity. A profile bundles one or more Developer MDM policies and optionally assigns them to devices. The backend allows at most one policy per category/target per profile.
 ---
 
 # stepsecurity_developer_mdm_profile (Resource)
 
-Manages a Developer MDM profile in StepSecurity. A profile bundles one or more Developer MDM policies and optionally assigns them to devices. The backend allows at most one policy per category per profile.
+Manages a Developer MDM profile in StepSecurity. A profile bundles one or more Developer MDM policies and optionally assigns them to devices. The backend allows at most one policy per category/target per profile.
 
 ## Example Usage
 
@@ -40,7 +40,7 @@ resource "stepsecurity_developer_mdm_ide_extension_policy" "engineering_vscode" 
 }
 
 # Unassigned profile: bundles policies but is not applied to any device yet.
-# A profile may reference at most one policy per category.
+# A profile may reference at most one policy per category/target.
 resource "stepsecurity_developer_mdm_profile" "unassigned" {
   name        = "Engineering (unassigned)"
   description = "Staged profile, not yet rolled out"
@@ -85,7 +85,7 @@ resource "stepsecurity_developer_mdm_profile" "specific_devices" {
 ### Required
 
 - `name` (String) The name of the profile.
-- `policy_ids` (Set of String) Set of Developer MDM policy IDs bundled by this profile. Must contain at least one ID. The backend allows at most one policy per category.
+- `policy_ids` (Set of String) Set of Developer MDM policy IDs bundled by this profile. Must contain at least one ID. The backend allows at most one policy per category/target.
 
 ### Optional
 

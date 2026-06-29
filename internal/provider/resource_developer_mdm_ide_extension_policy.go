@@ -15,6 +15,7 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/booldefault"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
+	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringdefault"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/schema/validator"
 	"github.com/hashicorp/terraform-plugin-framework/types"
@@ -57,6 +58,7 @@ type developerMDMIDEExtensionPolicyModel struct {
 	PolicyID    types.String                        `tfsdk:"policy_id"`
 	Name        types.String                        `tfsdk:"name"`
 	Description types.String                        `tfsdk:"description"`
+	Target      types.String                        `tfsdk:"target"`
 	Mode        types.String                        `tfsdk:"mode"`
 	Rules       []developerMDMIDEExtensionRuleModel `tfsdk:"rules"`
 	CreatedBy   types.String                        `tfsdk:"created_by"`
@@ -83,6 +85,7 @@ func (r *developerMDMIDEExtensionPolicyResource) Schema(_ context.Context, _ res
 	resp.Schema = schema.Schema{
 		MarkdownDescription: "Manages a Developer MDM VS Code IDE extension policy in StepSecurity. " +
 			"The policy authors allow/block intent; StepSecurity compiles and enforces it. " +
+			"Policy identity is `category + target`; this VS Code resource uses `target = vscode`. " +
 			"An empty `allowlist` blocks every extension and an empty `blocklist` allows every extension, so set `rules` deliberately.",
 		Attributes: map[string]schema.Attribute{
 			"id": schema.StringAttribute{
@@ -109,6 +112,15 @@ func (r *developerMDMIDEExtensionPolicyResource) Schema(_ context.Context, _ res
 			"description": schema.StringAttribute{
 				Optional:            true,
 				MarkdownDescription: "Optional human-readable description.",
+			},
+			"target": schema.StringAttribute{
+				Optional:            true,
+				Computed:            true,
+				Default:             stringdefault.StaticString(stepsecurityapi.DeveloperMDMTargetVSCode),
+				MarkdownDescription: "IDE target for this policy. v1 supports only `vscode`.",
+				Validators: []validator.String{
+					stringvalidator.OneOf(stepsecurityapi.DeveloperMDMTargetVSCode),
+				},
 			},
 			"mode": schema.StringAttribute{
 				Required: true,
@@ -454,10 +466,18 @@ func buildDeveloperMDMIDEExtensionPolicyRequest(ctx context.Context, model devel
 		Name:        model.Name.ValueString(),
 		Description: model.Description.ValueString(),
 		Category:    stepsecurityapi.DeveloperMDMCategoryIDEExtension,
+		Target:      developerMDMPolicyTarget(model.Target),
 		SpecVersion: stepsecurityapi.DeveloperMDMSpecVersionIDEExtension,
 		Mode:        model.Mode.ValueString(),
 		Spec:        specJSON,
 	}
+}
+
+func developerMDMPolicyTarget(target types.String) string {
+	if target.IsNull() || target.IsUnknown() || target.ValueString() == "" {
+		return stepsecurityapi.DeveloperMDMTargetVSCode
+	}
+	return target.ValueString()
 }
 
 // sortedStringSet converts a set into a deterministically sorted slice to avoid spurious diffs.
@@ -488,6 +508,11 @@ func applyDeveloperMDMPolicyToModel(ctx context.Context, policy *stepsecurityapi
 	model.ID = types.StringValue(policy.PolicyID)
 	model.PolicyID = types.StringValue(policy.PolicyID)
 	model.Name = types.StringValue(policy.Name)
+	target := policy.Target
+	if target == "" {
+		target = stepsecurityapi.DeveloperMDMTargetVSCode
+	}
+	model.Target = types.StringValue(target)
 	model.Mode = types.StringValue(policy.Mode)
 	model.CreatedBy = types.StringValue(policy.CreatedBy)
 	model.CreatedAt = types.StringValue(policy.CreatedAt)

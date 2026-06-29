@@ -89,7 +89,7 @@ type Client interface {
 	DeleteDeveloperMDMProfile(ctx context.Context, profileID string) error
 
 	// Developer MDM Export and Compliance
-	ExportDeveloperMDMProfile(ctx context.Context, profileID, os, category string) (*DeveloperMDMExportArtifact, error)
+	ExportDeveloperMDMProfile(ctx context.Context, profileID, os, category, target string) (*DeveloperMDMExportArtifact, error)
 	GetDeveloperMDMDeviceCompliance(ctx context.Context, deviceID string) (*DeveloperMDMDeviceComplianceResponse, error)
 	GetDeveloperMDMProfileCompliance(ctx context.Context, profileID string) (*DeveloperMDMProfileComplianceResponse, error)
 }

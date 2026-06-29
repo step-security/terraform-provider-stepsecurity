@@ -325,8 +325,8 @@ func (m *MockStepSecurityClient) DeleteDeveloperMDMProfile(ctx context.Context, 
 }
 
 // Developer MDM Export and Compliance methods
-func (m *MockStepSecurityClient) ExportDeveloperMDMProfile(ctx context.Context, profileID, os, category string) (*DeveloperMDMExportArtifact, error) {
-	args := m.Called(ctx, profileID, os, category)
+func (m *MockStepSecurityClient) ExportDeveloperMDMProfile(ctx context.Context, profileID, os, category, target string) (*DeveloperMDMExportArtifact, error) {
+	args := m.Called(ctx, profileID, os, category, target)
 	if args.Get(0) == nil {
 		return nil, args.Error(1)
 	}

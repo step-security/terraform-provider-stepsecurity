@@ -34,7 +34,7 @@ func TestDeveloperMDMProfileComplianceDataSource_Read(t *testing.T) {
 	mockClient.On("GetDeveloperMDMProfileCompliance", mock.Anything, "prof1").Return(&stepsecurityapi.DeveloperMDMProfileComplianceResponse{
 		ProfileID: "prof1",
 		Compliance: []stepsecurityapi.DeveloperMDMComplianceView{
-			{DeviceID: "dev1", Category: "ide_extension", ProfileID: "prof1", State: "pending"},
+			{DeviceID: "dev1", Category: "ide_extension", Target: "vscode", ProfileID: "prof1", State: "pending"},
 		},
 	}, nil).Once()
 
@@ -63,6 +63,7 @@ func TestDeveloperMDMProfileComplianceDataSource_Read(t *testing.T) {
 	var rows []developerMDMComplianceRowModel
 	require.False(t, got.Compliance.ElementsAs(ctx, &rows, false).HasError())
 	require.Len(t, rows, 1)
+	assert.Equal(t, "vscode", rows[0].Target.ValueString())
 	assert.Equal(t, "pending", rows[0].State.ValueString())
 	assert.Equal(t, "prof1", rows[0].ProfileID.ValueString())
 }

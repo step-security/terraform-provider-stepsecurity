@@ -16,6 +16,7 @@ provider "stepsecurity" {
 resource "stepsecurity_developer_mdm_ide_extension_policy" "engineering_vscode" {
   name        = "Engineering VS Code allowlist"
   description = "Only approved extensions for engineering workstations"
+  target      = "vscode"
   mode        = "allowlist"
 
   rules = [

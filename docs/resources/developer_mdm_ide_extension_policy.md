@@ -3,12 +3,12 @@
 page_title: "stepsecurity_developer_mdm_ide_extension_policy Resource - stepsecurity"
 subcategory: ""
 description: |-
-  Manages a Developer MDM VS Code IDE extension policy in StepSecurity. The policy authors allow/block intent; StepSecurity compiles and enforces it. An empty allowlist blocks every extension and an empty blocklist allows every extension, so set rules deliberately.
+  Manages a Developer MDM VS Code IDE extension policy in StepSecurity. The policy authors allow/block intent; StepSecurity compiles and enforces it. Policy identity is category + target; this VS Code resource uses target = vscode. An empty allowlist blocks every extension and an empty blocklist allows every extension, so set rules deliberately.
 ---
 
 # stepsecurity_developer_mdm_ide_extension_policy (Resource)
 
-Manages a Developer MDM VS Code IDE extension policy in StepSecurity. The policy authors allow/block intent; StepSecurity compiles and enforces it. An empty `allowlist` blocks every extension and an empty `blocklist` allows every extension, so set `rules` deliberately.
+Manages a Developer MDM VS Code IDE extension policy in StepSecurity. The policy authors allow/block intent; StepSecurity compiles and enforces it. Policy identity is `category + target`; this VS Code resource uses `target = vscode`. An empty `allowlist` blocks every extension and an empty `blocklist` allows every extension, so set `rules` deliberately.
 
 ## Example Usage
 
@@ -31,6 +31,7 @@ provider "stepsecurity" {
 resource "stepsecurity_developer_mdm_ide_extension_policy" "engineering_vscode" {
   name        = "Engineering VS Code allowlist"
   description = "Only approved extensions for engineering workstations"
+  target      = "vscode"
   mode        = "allowlist"
 
   rules = [
@@ -94,6 +95,7 @@ resource "stepsecurity_developer_mdm_ide_extension_policy" "block_all" {
 ### Optional
 
 - `description` (String) Optional human-readable description.
+- `target` (String) IDE target for this policy. v1 supports only `vscode`.
 
 ### Read-Only
 

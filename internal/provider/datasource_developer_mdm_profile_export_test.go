@@ -39,7 +39,7 @@ func TestDeveloperMDMProfileExportDataSource_Schema(t *testing.T) {
 	t.Parallel()
 
 	attrs := exportDataSourceSchema(t).Attributes
-	for _, name := range []string{"profile_id", "os", "category", "filename", "content_type", "content", "hash", "notes"} {
+	for _, name := range []string{"profile_id", "os", "category", "target", "filename", "content_type", "content", "hash", "notes"} {
 		assert.Contains(t, attrs, name, "missing attribute %q", name)
 	}
 }
@@ -49,9 +49,10 @@ func TestDeveloperMDMProfileExportDataSource_Read(t *testing.T) {
 
 	ctx := context.Background()
 	mockClient := &stepsecurityapi.MockStepSecurityClient{}
-	mockClient.On("ExportDeveloperMDMProfile", mock.Anything, "prof1", "linux", "ide_extension").Return(&stepsecurityapi.DeveloperMDMExportArtifact{
+	mockClient.On("ExportDeveloperMDMProfile", mock.Anything, "prof1", "linux", "ide_extension", "vscode").Return(&stepsecurityapi.DeveloperMDMExportArtifact{
 		OS:          "linux",
 		Category:    "ide_extension",
+		Target:      "vscode",
 		Filename:    "policy.json",
 		ContentType: "application/json; charset=utf-8",
 		Content:     "{\n  \"AllowedExtensions\": \"{\\\"*\\\":false}\"\n}\n",
@@ -64,6 +65,7 @@ func TestDeveloperMDMProfileExportDataSource_Read(t *testing.T) {
 		ProfileID: types.StringValue("prof1"),
 		OS:        types.StringValue("linux"),
 		Category:  types.StringValue("ide_extension"),
+		Target:    types.StringValue("vscode"),
 	})
 
 	d.Read(ctx, req, resp)
@@ -74,20 +76,22 @@ func TestDeveloperMDMProfileExportDataSource_Read(t *testing.T) {
 	require.False(t, resp.State.Get(ctx, &state).HasError())
 
 	assert.Equal(t, "policy.json", state.Filename.ValueString())
+	assert.Equal(t, "vscode", state.Target.ValueString())
 	assert.Equal(t, "application/json; charset=utf-8", state.ContentType.ValueString())
 	assert.Equal(t, "sha256:abc", state.Hash.ValueString())
 	assert.Equal(t, "Place at /etc/vscode/policy.json", state.Notes.ValueString())
 }
 
-func TestDeveloperMDMProfileExportDataSource_DefaultCategory(t *testing.T) {
+func TestDeveloperMDMProfileExportDataSource_DefaultCategoryAndTarget(t *testing.T) {
 	t.Parallel()
 
 	ctx := context.Background()
 	mockClient := &stepsecurityapi.MockStepSecurityClient{}
-	// Null category must resolve to ide_extension before calling the API.
-	mockClient.On("ExportDeveloperMDMProfile", mock.Anything, "prof1", "macos", "ide_extension").Return(&stepsecurityapi.DeveloperMDMExportArtifact{
+	// Null category and target must resolve before calling the API.
+	mockClient.On("ExportDeveloperMDMProfile", mock.Anything, "prof1", "macos", "ide_extension", "vscode").Return(&stepsecurityapi.DeveloperMDMExportArtifact{
 		OS:       "macos",
 		Category: "ide_extension",
+		Target:   "vscode",
 		Filename: "policy.mobileconfig",
 	}, nil).Once()
 
@@ -96,6 +100,7 @@ func TestDeveloperMDMProfileExportDataSource_DefaultCategory(t *testing.T) {
 		ProfileID: types.StringValue("prof1"),
 		OS:        types.StringValue("macos"),
 		Category:  types.StringNull(),
+		Target:    types.StringNull(),
 	})
 
 	d.Read(ctx, req, resp)
@@ -105,6 +110,7 @@ func TestDeveloperMDMProfileExportDataSource_DefaultCategory(t *testing.T) {
 	var state developerMDMProfileExportDataSourceModel
 	require.False(t, resp.State.Get(ctx, &state).HasError())
 	assert.Equal(t, "ide_extension", state.Category.ValueString())
+	assert.Equal(t, "vscode", state.Target.ValueString())
 }
 
 func TestDeveloperMDMProfileExportDataSource_ContentIsDecodedArtifact(t *testing.T) {
@@ -115,9 +121,10 @@ func TestDeveloperMDMProfileExportDataSource_ContentIsDecodedArtifact(t *testing
 	decoded := "{\n  \"AllowedExtensions\": \"{\\\"*\\\":false}\"\n}\n"
 
 	mockClient := &stepsecurityapi.MockStepSecurityClient{}
-	mockClient.On("ExportDeveloperMDMProfile", mock.Anything, "prof1", "linux", "ide_extension").Return(&stepsecurityapi.DeveloperMDMExportArtifact{
+	mockClient.On("ExportDeveloperMDMProfile", mock.Anything, "prof1", "linux", "ide_extension", "vscode").Return(&stepsecurityapi.DeveloperMDMExportArtifact{
 		OS:       "linux",
 		Category: "ide_extension",
+		Target:   "vscode",
 		Filename: "policy.json",
 		Content:  decoded,
 	}, nil).Once()
@@ -127,6 +134,7 @@ func TestDeveloperMDMProfileExportDataSource_ContentIsDecodedArtifact(t *testing
 		ProfileID: types.StringValue("prof1"),
 		OS:        types.StringValue("linux"),
 		Category:  types.StringValue("ide_extension"),
+		Target:    types.StringValue("vscode"),
 	})
 
 	d.Read(ctx, req, resp)
@@ -158,6 +166,7 @@ func TestAccDeveloperMDMProfileExportDataSource(t *testing.T) {
 					resourcehelper.TestCheckResourceAttrSet(dsName, "hash"),
 					resourcehelper.TestCheckResourceAttrSet(dsName, "content"),
 					resourcehelper.TestCheckResourceAttr(dsName, "category", "ide_extension"),
+					resourcehelper.TestCheckResourceAttr(dsName, "target", "vscode"),
 					// The decoded Linux artifact contains the literal AllowedExtensions key,
 					// not escaped \n sequences from the raw HTTP JSON response.
 					resourcehelper.TestMatchResourceAttr(dsName, "content", regexp.MustCompile(`"AllowedExtensions"`)),
