@@ -20,8 +20,7 @@ resource "stepsecurity_developer_mdm_ide_extension_policy" "engineering_vscode" 
   ]
 }
 
-# Bundle one or more policies and assign them. Omit `assignment` to leave the
-# profile unassigned; see the schema for the all_devices / device_ids options.
+# Bundles one or more policies into a profile and assigns it to all devices.
 resource "stepsecurity_developer_mdm_profile" "engineering" {
   name        = "Engineering"
   description = "Approved IDE extensions for engineering"

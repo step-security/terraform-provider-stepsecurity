@@ -83,9 +83,8 @@ func (r *developerMDMIDEExtensionPolicyResource) Metadata(_ context.Context, req
 // Schema defines the schema for the resource.
 func (r *developerMDMIDEExtensionPolicyResource) Schema(_ context.Context, _ resource.SchemaRequest, resp *resource.SchemaResponse) {
 	resp.Schema = schema.Schema{
-		MarkdownDescription: "Manages a Developer MDM VS Code IDE extension policy in StepSecurity. " +
-			"The policy authors allow/block intent; StepSecurity compiles and enforces it. " +
-			"Policy identity is `category + target`; this VS Code resource uses `target = vscode`. " +
+		MarkdownDescription: "Manages a Developer MDM VS Code extension policy in StepSecurity. " +
+			"The policy declares allow/block intent for VS Code extensions; StepSecurity compiles and enforces it on managed devices. " +
 			"An empty `allowlist` blocks every extension and an empty `blocklist` allows every extension, so set `rules` deliberately.",
 		Attributes: map[string]schema.Attribute{
 			"id": schema.StringAttribute{
@@ -117,7 +116,7 @@ func (r *developerMDMIDEExtensionPolicyResource) Schema(_ context.Context, _ res
 				Optional:            true,
 				Computed:            true,
 				Default:             stringdefault.StaticString(stepsecurityapi.DeveloperMDMTargetVSCode),
-				MarkdownDescription: "IDE target for this policy. v1 supports only `vscode`.",
+				MarkdownDescription: "IDE target for this policy. Defaults to `vscode`.",
 				Validators: []validator.String{
 					stringvalidator.OneOf(stepsecurityapi.DeveloperMDMTargetVSCode),
 				},

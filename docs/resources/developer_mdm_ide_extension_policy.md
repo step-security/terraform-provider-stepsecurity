@@ -3,12 +3,12 @@
 page_title: "stepsecurity_developer_mdm_ide_extension_policy Resource - stepsecurity"
 subcategory: ""
 description: |-
-  Manages a Developer MDM VS Code IDE extension policy in StepSecurity. The policy authors allow/block intent; StepSecurity compiles and enforces it. Policy identity is category + target; this VS Code resource uses target = vscode. An empty allowlist blocks every extension and an empty blocklist allows every extension, so set rules deliberately.
+  Manages a Developer MDM VS Code extension policy in StepSecurity. The policy declares allow/block intent for VS Code extensions; StepSecurity compiles and enforces it on managed devices. An empty allowlist blocks every extension and an empty blocklist allows every extension, so set rules deliberately.
 ---
 
 # stepsecurity_developer_mdm_ide_extension_policy (Resource)
 
-Manages a Developer MDM VS Code IDE extension policy in StepSecurity. The policy authors allow/block intent; StepSecurity compiles and enforces it. Policy identity is `category + target`; this VS Code resource uses `target = vscode`. An empty `allowlist` blocks every extension and an empty `blocklist` allows every extension, so set `rules` deliberately.
+Manages a Developer MDM VS Code extension policy in StepSecurity. The policy declares allow/block intent for VS Code extensions; StepSecurity compiles and enforces it on managed devices. An empty `allowlist` blocks every extension and an empty `blocklist` allows every extension, so set `rules` deliberately.
 
 ## Example Usage
 
@@ -26,8 +26,7 @@ provider "stepsecurity" {
   customer = "abcdefg"  # can also be set as env variable STEP_SECURITY_CUSTOMER
 }
 
-# Allowlist: permit only the listed extensions, block everything else.
-# (Use mode = "blocklist" to invert. See the schema for rule semantics.)
+# Allowlist permitting only the listed VS Code extensions; everything else is blocked.
 resource "stepsecurity_developer_mdm_ide_extension_policy" "engineering_vscode" {
   name        = "Engineering VS Code allowlist"
   description = "Only approved extensions for engineering workstations"
@@ -53,7 +52,7 @@ resource "stepsecurity_developer_mdm_ide_extension_policy" "engineering_vscode" 
 ### Optional
 
 - `description` (String) Optional human-readable description.
-- `target` (String) IDE target for this policy. v1 supports only `vscode`.
+- `target` (String) IDE target for this policy. Defaults to `vscode`.
 
 ### Read-Only
 

@@ -11,8 +11,7 @@ provider "stepsecurity" {
   customer = "abcdefg"  # can also be set as env variable STEP_SECURITY_CUSTOMER
 }
 
-# Allowlist: permit only the listed extensions, block everything else.
-# (Use mode = "blocklist" to invert. See the schema for rule semantics.)
+# Allowlist permitting only the listed VS Code extensions; everything else is blocked.
 resource "stepsecurity_developer_mdm_ide_extension_policy" "engineering_vscode" {
   name        = "Engineering VS Code allowlist"
   description = "Only approved extensions for engineering workstations"

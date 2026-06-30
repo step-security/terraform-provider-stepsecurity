@@ -26,15 +26,14 @@ provider "stepsecurity" {
   customer = "abcdefg"  # can also be set as env variable STEP_SECURITY_CUSTOMER
 }
 
-# Read-only: compile a profile's import artifact for an OS. Creates no remote
-# object. `os` is windows | macos | linux; category/target default per schema.
+# Compiles the import artifact for a profile on macOS. This is a read-only
+# data source and creates no remote object.
 data "stepsecurity_developer_mdm_profile_export" "macos" {
   profile_id = "f591dc70-0164-4216-9f41-1ec4d7c62226"
   os         = "macos"
 }
 
-# `content` is the decoded artifact body — pass it straight to local_file.content
-# (do not jsondecode). filename, content_type, and hash are also exported.
+# `content` is the decoded artifact body; pass it directly to local_file.content.
 output "export_filename" {
   value = data.stepsecurity_developer_mdm_profile_export.macos.filename
 }
@@ -51,7 +50,7 @@ output "export_filename" {
 ### Optional
 
 - `category` (String) Policy category to export. Defaults to `ide_extension`.
-- `target` (String) Policy target to export. Defaults to `vscode`; v1 supports only `vscode`.
+- `target` (String) Policy target to export. Defaults to `vscode`.
 
 ### Read-Only
 

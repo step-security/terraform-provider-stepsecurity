@@ -81,7 +81,7 @@ func (d *developerMDMProfileExportDataSource) Schema(_ context.Context, _ dataso
 			"target": schema.StringAttribute{
 				Optional:            true,
 				Computed:            true,
-				MarkdownDescription: "Policy target to export. Defaults to `vscode`; v1 supports only `vscode`.",
+				MarkdownDescription: "Policy target to export. Defaults to `vscode`.",
 				Validators: []validator.String{
 					stringvalidator.OneOf(stepsecurityapi.DeveloperMDMTargetVSCode),
 				},
