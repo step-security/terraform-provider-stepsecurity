@@ -309,11 +309,27 @@ func (r *developerMDMProfileResource) ImportState(ctx context.Context, req resou
 	resource.ImportStatePassthroughID(ctx, path.Root("profile_id"), req, resp)
 }
 
+// setFullyKnown reports whether a set and all of its elements are known.
+// ElementsAs cannot decode unknown elements into Go strings, so element-level
+// validation must wait until apply, when references such as another resource's
+// computed id have resolved.
+func setFullyKnown(s types.Set) bool {
+	if s.IsNull() || s.IsUnknown() {
+		return false
+	}
+	for _, e := range s.Elements() {
+		if e.IsUnknown() {
+			return false
+		}
+	}
+	return true
+}
+
 // validateDeveloperMDMProfile enforces local profile invariants mirrored from the backend.
 func validateDeveloperMDMProfile(ctx context.Context, model developerMDMProfileModel) diag.Diagnostics {
 	var diags diag.Diagnostics
 
-	if !model.PolicyIDs.IsUnknown() {
+	if setFullyKnown(model.PolicyIDs) {
 		var policyIDs []string
 		diags.Append(model.PolicyIDs.ElementsAs(ctx, &policyIDs, false)...)
 		if len(policyIDs) == 0 {
@@ -345,7 +361,7 @@ func validateDeveloperMDMProfile(ctx context.Context, model developerMDMProfileM
 	}
 
 	var deviceIDs []string
-	if !assignment.DeviceIDs.IsNull() && !assignment.DeviceIDs.IsUnknown() {
+	if setFullyKnown(assignment.DeviceIDs) {
 		diags.Append(assignment.DeviceIDs.ElementsAs(ctx, &deviceIDs, false)...)
 	}
 

@@ -28,6 +28,50 @@ func assignmentObject(t *testing.T, allDevices bool, deviceIDs types.Set) types.
 	return obj
 }
 
+// TestDeveloperMDMProfile_ValidateDefersUnknownPolicyIDs guards the common case
+// where policy_ids (or device_ids) references another resource's computed id:
+// the set is known but its elements are unknown at plan time. Element-level
+// validation must defer to apply rather than fail to decode the unknown value.
+func TestDeveloperMDMProfile_ValidateDefersUnknownPolicyIDs(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+
+	unknownSet, diags := types.SetValue(types.StringType, []attr.Value{types.StringUnknown()})
+	require.False(t, diags.HasError())
+
+	t.Run("unknown policy_ids element defers", func(t *testing.T) {
+		t.Parallel()
+		model := developerMDMProfileModel{
+			PolicyIDs:  unknownSet,
+			Assignment: types.ObjectNull(developerMDMAssignmentAttrTypes),
+		}
+		d := validateDeveloperMDMProfile(ctx, model)
+		assert.False(t, d.HasError(), "unknown policy_ids must defer, got: %v", d)
+	})
+
+	t.Run("known empty policy_ids still rejected", func(t *testing.T) {
+		t.Parallel()
+		empty, diags := types.SetValue(types.StringType, []attr.Value{})
+		require.False(t, diags.HasError())
+		model := developerMDMProfileModel{
+			PolicyIDs:  empty,
+			Assignment: types.ObjectNull(developerMDMAssignmentAttrTypes),
+		}
+		d := validateDeveloperMDMProfile(ctx, model)
+		assert.True(t, d.HasError(), "empty policy_ids must error")
+	})
+
+	t.Run("unknown device_ids element defers", func(t *testing.T) {
+		t.Parallel()
+		model := developerMDMProfileModel{
+			PolicyIDs:  stringSet(t, "p1"),
+			Assignment: assignmentObject(t, false, unknownSet),
+		}
+		d := validateDeveloperMDMProfile(ctx, model)
+		assert.False(t, d.HasError(), "unknown device_ids must defer, got: %v", d)
+	})
+}
+
 func TestDeveloperMDMProfileResource_Schema(t *testing.T) {
 	t.Parallel()
 
