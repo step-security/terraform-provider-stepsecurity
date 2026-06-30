@@ -16,29 +16,15 @@ resource "stepsecurity_developer_mdm_ide_extension_policy" "engineering_vscode" 
   mode = "allowlist"
 
   rules = [
-    {
-      publisher = "ms-python"
-      name      = "python"
-      stable    = true
-    },
+    { publisher = "ms-python", name = "python", stable = true },
   ]
 }
 
-# Unassigned profile: bundles policies but is not applied to any device yet.
-# A profile may reference at most one policy per category/target.
-resource "stepsecurity_developer_mdm_profile" "unassigned" {
-  name        = "Engineering (unassigned)"
-  description = "Staged profile, not yet rolled out"
-
-  policy_ids = [
-    stepsecurity_developer_mdm_ide_extension_policy.engineering_vscode.policy_id,
-  ]
-}
-
-# All-devices assignment: applies to all current and future devices,
-# unless a device-specific profile overrides a device.
-resource "stepsecurity_developer_mdm_profile" "all_devices" {
-  name = "Engineering (all devices)"
+# Bundle one or more policies and assign them. Omit `assignment` to leave the
+# profile unassigned; see the schema for the all_devices / device_ids options.
+resource "stepsecurity_developer_mdm_profile" "engineering" {
+  name        = "Engineering"
+  description = "Approved IDE extensions for engineering"
 
   policy_ids = [
     stepsecurity_developer_mdm_ide_extension_policy.engineering_vscode.policy_id,
@@ -46,19 +32,5 @@ resource "stepsecurity_developer_mdm_profile" "all_devices" {
 
   assignment = {
     all_devices = true
-  }
-}
-
-# Device-specific assignment: applies only to the listed device IDs.
-# `device_ids` cannot be combined with `all_devices = true`.
-resource "stepsecurity_developer_mdm_profile" "specific_devices" {
-  name = "Engineering (specific devices)"
-
-  policy_ids = [
-    stepsecurity_developer_mdm_ide_extension_policy.engineering_vscode.policy_id,
-  ]
-
-  assignment = {
-    device_ids = ["device-1", "device-2"]
   }
 }
