@@ -167,6 +167,11 @@ func (r *policyDrivenPRResource) Schema(_ context.Context, _ resource.SchemaRequ
 							),
 						),
 					},
+					"custom_actions_to_replace": schema.MapAttribute{
+						ElementType: types.StringType,
+						Optional:    true,
+						Description: "Map of actions to replace with custom replacements. Keys are the original action names, values are the replacement action names chosen by the customer.",
+					},
 					"replace_action_on_major_tag_match": schema.BoolAttribute{
 						Optional:    true,
 						Computed:    true,
@@ -454,6 +459,17 @@ func (r *policyDrivenPRResource) ImportState(ctx context.Context, req resource.I
 		actionCommitMapValue = types.MapNull(types.StringType)
 	}
 
+	var customActionsToReplaceValue types.Map
+	if len(policy.AutoRemdiationOptions.CustomActionsToReplace) > 0 {
+		mapElements := make(map[string]attr.Value)
+		for key, value := range policy.AutoRemdiationOptions.CustomActionsToReplace {
+			mapElements[key] = types.StringValue(value)
+		}
+		customActionsToReplaceValue, _ = types.MapValue(types.StringType, mapElements)
+	} else {
+		customActionsToReplaceValue = types.MapNull(types.StringType)
+	}
+
 	var labelsToReplaceValue types.Map
 	if len(policy.AutoRemdiationOptions.LabelsToReplace) > 0 {
 		mapElements := make(map[string]attr.Value)
@@ -478,6 +494,7 @@ func (r *policyDrivenPRResource) ImportState(ctx context.Context, req resource.I
 			"actions_to_exempt_while_pinning":               types.ListType{ElemType: types.StringType},
 			"images_to_exempt_while_pinning":                types.ListType{ElemType: types.StringType},
 			"actions_to_replace_with_step_security_actions": types.ListType{ElemType: types.StringType},
+			"custom_actions_to_replace":                     types.MapType{ElemType: types.StringType},
 			"replace_action_on_major_tag_match":             types.BoolType,
 			"actions_exempted_from_replacement":             types.ListType{ElemType: types.StringType},
 			"update_precommit_file":                         types.ListType{ElemType: types.StringType},
@@ -512,6 +529,7 @@ func (r *policyDrivenPRResource) ImportState(ctx context.Context, req resource.I
 			"actions_to_exempt_while_pinning":               exemptList,
 			"images_to_exempt_while_pinning":                exemptImagesList,
 			"actions_to_replace_with_step_security_actions": replaceList,
+			"custom_actions_to_replace":                     customActionsToReplaceValue,
 			"replace_action_on_major_tag_match": types.BoolValue(func() bool {
 				if policy.AutoRemdiationOptions.ReplaceByMajorTag != nil {
 					return *policy.AutoRemdiationOptions.ReplaceByMajorTag
@@ -591,6 +609,7 @@ type autoRemdiationOptionsModel struct {
 	ActionsToExemptWhilePinning             types.List   `tfsdk:"actions_to_exempt_while_pinning"`
 	ImagesToExemptWhilePinning              types.List   `tfsdk:"images_to_exempt_while_pinning"`
 	ActionsToReplaceWithStepSecurityActions types.List   `tfsdk:"actions_to_replace_with_step_security_actions"`
+	CustomActionsToReplace                  types.Map    `tfsdk:"custom_actions_to_replace"`
 	ReplaceByMajorTag                       types.Bool   `tfsdk:"replace_action_on_major_tag_match"`
 	ExemptedFromReplacement                 types.List   `tfsdk:"actions_exempted_from_replacement"`
 	UpdatePrecommitFile                     types.List   `tfsdk:"update_precommit_file"`
@@ -953,6 +972,14 @@ func (r *policyDrivenPRResource) Create(ctx context.Context, req resource.Create
 		}
 	}
 
+	var customActionsToReplace map[string]string
+	if !options.CustomActionsToReplace.IsNull() && !options.CustomActionsToReplace.IsUnknown() {
+		customActionsToReplace = make(map[string]string)
+		for key, value := range options.CustomActionsToReplace.Elements() {
+			customActionsToReplace[key] = value.(types.String).ValueString()
+		}
+	}
+
 	var labelsToReplace map[string]string
 	if !options.LabelsToReplace.IsNull() {
 		labelsToReplace = make(map[string]string)
@@ -1014,6 +1041,7 @@ func (r *policyDrivenPRResource) Create(ctx context.Context, req resource.Create
 			ActionsToExemptWhilePinning:             actionsToExempt,
 			ImagesToExemptWhilePinning:              imagesToExempt,
 			ActionsToReplaceWithStepSecurityActions: actionsToReplace,
+			CustomActionsToReplace:                  customActionsToReplace,
 			ReplaceByMajorTag:                       replaceByMajorTag,
 			ExemptedFromReplacement:                 exemptedFromReplacement,
 			UpdatePrecommitFile:                     updatePrecommitFile,
@@ -1507,6 +1535,14 @@ func (r *policyDrivenPRResource) Update(ctx context.Context, req resource.Update
 		actionCommitMapPlan = map[string]string{}
 	}
 
+	var customActionsToReplacePlan map[string]string
+	if !planOptions.CustomActionsToReplace.IsNull() && !planOptions.CustomActionsToReplace.IsUnknown() {
+		customActionsToReplacePlan = make(map[string]string)
+		for key, value := range planOptions.CustomActionsToReplace.Elements() {
+			customActionsToReplacePlan[key] = value.(types.String).ValueString()
+		}
+	}
+
 	var labelsToReplacePlan map[string]string
 	if !planOptions.LabelsToReplace.IsNull() {
 		labelsToReplacePlan = make(map[string]string)
@@ -1567,6 +1603,7 @@ func (r *policyDrivenPRResource) Update(ctx context.Context, req resource.Update
 			ActionsToExemptWhilePinning:             actionsToExempt,
 			ImagesToExemptWhilePinning:              imagesToExempt,
 			ActionsToReplaceWithStepSecurityActions: actionsToReplace,
+			CustomActionsToReplace:                  customActionsToReplacePlan,
 			ReplaceByMajorTag:                       replaceByMajorTagUpdate,
 			ExemptedFromReplacement:                 exemptedFromReplacementUpdate,
 			UpdatePrecommitFile:                     updatePrecommitFilePlan,
@@ -1794,6 +1831,17 @@ func (r *policyDrivenPRResource) updatePolicyDrivenPRState(ctx context.Context, 
 		actionCommitMapValue = types.MapNull(types.StringType)
 	}
 
+	var customActionsToReplaceValue types.Map
+	if len(stepSecurityPolicy.AutoRemdiationOptions.CustomActionsToReplace) > 0 {
+		mapElements := make(map[string]attr.Value)
+		for key, value := range stepSecurityPolicy.AutoRemdiationOptions.CustomActionsToReplace {
+			mapElements[key] = types.StringValue(value)
+		}
+		customActionsToReplaceValue, _ = types.MapValue(types.StringType, mapElements)
+	} else {
+		customActionsToReplaceValue = types.MapNull(types.StringType)
+	}
+
 	var labelsToReplaceValue types.Map
 	if len(stepSecurityPolicy.AutoRemdiationOptions.LabelsToReplace) > 0 {
 		mapElements := make(map[string]attr.Value)
@@ -1818,6 +1866,7 @@ func (r *policyDrivenPRResource) updatePolicyDrivenPRState(ctx context.Context, 
 			"actions_to_exempt_while_pinning":               types.ListType{ElemType: types.StringType},
 			"images_to_exempt_while_pinning":                types.ListType{ElemType: types.StringType},
 			"actions_to_replace_with_step_security_actions": types.ListType{ElemType: types.StringType},
+			"custom_actions_to_replace":                     types.MapType{ElemType: types.StringType},
 			"replace_action_on_major_tag_match":             types.BoolType,
 			"actions_exempted_from_replacement":             types.ListType{ElemType: types.StringType},
 			"update_precommit_file":                         types.ListType{ElemType: types.StringType},
@@ -1852,6 +1901,7 @@ func (r *policyDrivenPRResource) updatePolicyDrivenPRState(ctx context.Context, 
 			"actions_to_exempt_while_pinning":               exemptList,
 			"images_to_exempt_while_pinning":                exemptImagesList,
 			"actions_to_replace_with_step_security_actions": replaceList,
+			"custom_actions_to_replace":                     customActionsToReplaceValue,
 			"replace_action_on_major_tag_match": types.BoolValue(func() bool {
 				if stepSecurityPolicy.AutoRemdiationOptions.ReplaceByMajorTag != nil {
 					return *stepSecurityPolicy.AutoRemdiationOptions.ReplaceByMajorTag
