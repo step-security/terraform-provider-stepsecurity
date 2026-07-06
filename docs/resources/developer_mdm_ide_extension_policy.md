@@ -76,3 +76,18 @@ Optional:
 - `name` (String) VS Code extension name segment (e.g. `python`). Omit to target the whole publisher. No `*` or spaces.
 - `stable` (Boolean) Allowlist only. Allow the extension's stable channel. Mutually exclusive with `versions`.
 - `versions` (Set of String) Allowlist only. Requires `name`. Exact `major.minor.patch` versions, with optional `@platform` suffix. Mutually exclusive with `stable`. Do not use the literal `stable`; set `stable = true` instead.
+
+## Import
+
+Import is supported using the following syntax:
+
+The [`terraform import` command](https://developer.hashicorp.com/terraform/cli/commands/import) can be used, for example:
+
+```shell
+#!/bin/bash
+
+# Developer MDM IDE extension policies can be imported using the policy ID.
+# Format: <policy_id>
+
+terraform import stepsecurity_developer_mdm_ide_extension_policy.engineering_vscode POLICY_ID
+```

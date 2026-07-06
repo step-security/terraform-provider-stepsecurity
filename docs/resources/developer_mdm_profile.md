@@ -79,3 +79,18 @@ Optional:
 
 - `all_devices` (Boolean) Assign all current and future devices, unless a device-specific profile overrides a device.
 - `device_ids` (Set of String) Explicit device IDs. Cannot be set when `all_devices = true`.
+
+## Import
+
+Import is supported using the following syntax:
+
+The [`terraform import` command](https://developer.hashicorp.com/terraform/cli/commands/import) can be used, for example:
+
+```shell
+#!/bin/bash
+
+# Developer MDM profiles can be imported using the profile ID.
+# Format: <profile_id>
+
+terraform import stepsecurity_developer_mdm_profile.engineering PROFILE_ID
+```
