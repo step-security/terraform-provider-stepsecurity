@@ -18,8 +18,8 @@ resource "stepsecurity_developer_mdm_ide_extension_policy" "engineering_vscode" 
   mode        = "allowlist"
 
   rules = [
-    { publisher = "ms-python", name = "python", stable = true },           # stable channel
-    { publisher = "github" },                                              # whole publisher
-    { publisher = "redhat", name = "vscode-yaml", versions = ["1.15.0"] }, # pinned version
+    { publisher = "ms-python", name = "python", stable = true, comment = "Approved for the data-science org" }, # stable channel
+    { publisher = "github" },                                                                                   # whole publisher
+    { publisher = "redhat", name = "vscode-yaml", versions = ["1.15.0"] },                                      # pinned version
   ]
 }

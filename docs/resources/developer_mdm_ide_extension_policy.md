@@ -33,9 +33,9 @@ resource "stepsecurity_developer_mdm_ide_extension_policy" "engineering_vscode" 
   mode        = "allowlist"
 
   rules = [
-    { publisher = "ms-python", name = "python", stable = true },           # stable channel
-    { publisher = "github" },                                              # whole publisher
-    { publisher = "redhat", name = "vscode-yaml", versions = ["1.15.0"] }, # pinned version
+    { publisher = "ms-python", name = "python", stable = true, comment = "Approved for the data-science org" }, # stable channel
+    { publisher = "github" },                                                                                   # whole publisher
+    { publisher = "redhat", name = "vscode-yaml", versions = ["1.15.0"] },                                      # pinned version
   ]
 }
 ```
@@ -72,6 +72,7 @@ Required:
 
 Optional:
 
+- `comment` (String) Optional free-text justification for this rule, recorded for compliance review. Descriptive only: it does not affect which extensions are allowed or blocked. Omit to leave unset; when set, 1 to 512 characters.
 - `name` (String) VS Code extension name segment (e.g. `python`). Omit to target the whole publisher. No `*` or spaces.
 - `stable` (Boolean) Allowlist only. Allow the extension's stable channel. Mutually exclusive with `versions`.
 - `versions` (Set of String) Allowlist only. Requires `name`. Exact `major.minor.patch` versions, with optional `@platform` suffix. Mutually exclusive with `stable`. Do not use the literal `stable`; set `stable = true` instead.

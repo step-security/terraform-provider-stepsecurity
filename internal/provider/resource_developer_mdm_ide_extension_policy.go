@@ -73,6 +73,7 @@ type developerMDMIDEExtensionRuleModel struct {
 	Name      types.String `tfsdk:"name"`
 	Versions  types.Set    `tfsdk:"versions"`
 	Stable    types.Bool   `tfsdk:"stable"`
+	Comment   types.String `tfsdk:"comment"`
 }
 
 // Metadata returns the resource type name.
@@ -160,6 +161,15 @@ func (r *developerMDMIDEExtensionPolicyResource) Schema(_ context.Context, _ res
 							Computed:            true,
 							Default:             booldefault.StaticBool(false),
 							MarkdownDescription: "Allowlist only. Allow the extension's stable channel. Mutually exclusive with `versions`.",
+						},
+						"comment": schema.StringAttribute{
+							Optional: true,
+							MarkdownDescription: "Optional free-text justification for this rule, recorded for " +
+								"compliance review. Descriptive only: it does not affect which extensions " +
+								"are allowed or blocked. Omit to leave unset; when set, 1 to 512 characters.",
+							Validators: []validator.String{
+								stringvalidator.UTF8LengthBetween(1, 512),
+							},
 						},
 					},
 				},
@@ -451,6 +461,7 @@ func buildDeveloperMDMIDEExtensionPolicyRequest(ctx context.Context, model devel
 			Name:      r.Name.ValueString(),
 			Versions:  sortedStringSet(ctx, r.Versions, diags),
 			Stable:    r.Stable.ValueBool(),
+			Comment:   r.Comment.ValueString(),
 		}
 		rules = append(rules, rule)
 	}
@@ -553,6 +564,11 @@ func applyDeveloperMDMPolicyToModel(ctx context.Context, policy *stepsecurityapi
 			rule.Versions = setValue
 		} else {
 			rule.Versions = types.SetNull(types.StringType)
+		}
+		if r.Comment != "" {
+			rule.Comment = types.StringValue(r.Comment)
+		} else {
+			rule.Comment = types.StringNull()
 		}
 		rules = append(rules, rule)
 	}

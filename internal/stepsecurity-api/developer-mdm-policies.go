@@ -55,6 +55,7 @@ type DeveloperMDMIDEExtensionRule struct {
 	Name      string   `json:"name,omitempty"`
 	Versions  []string `json:"versions,omitempty"`
 	Stable    bool     `json:"stable,omitempty"`
+	Comment   string   `json:"comment,omitempty"`
 }
 
 // DeveloperMDMProfile is the backend representation of a Developer MDM profile.

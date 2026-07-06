@@ -4,11 +4,15 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"testing"
 
 	"github.com/hashicorp/terraform-plugin-framework/attr"
 	"github.com/hashicorp/terraform-plugin-framework/diag"
+	"github.com/hashicorp/terraform-plugin-framework/path"
 	fwresource "github.com/hashicorp/terraform-plugin-framework/resource"
+	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
+	"github.com/hashicorp/terraform-plugin-framework/schema/validator"
 	"github.com/hashicorp/terraform-plugin-framework/types"
 	resourcehelper "github.com/hashicorp/terraform-plugin-testing/helper/resource"
 	"github.com/stretchr/testify/assert"
@@ -58,6 +62,7 @@ func TestDeveloperMDMIDEExtensionPolicy_BuildRequestAllowlistStable(t *testing.T
 				Name:      types.StringValue("python"),
 				Versions:  types.SetNull(types.StringType),
 				Stable:    types.BoolValue(true),
+				Comment:   types.StringValue("approved per SEC-1234"),
 			},
 		},
 	}
@@ -78,6 +83,7 @@ func TestDeveloperMDMIDEExtensionPolicy_BuildRequestAllowlistStable(t *testing.T
 	assert.Equal(t, "ms-python", spec.Rules[0].Publisher)
 	assert.True(t, spec.Rules[0].Stable)
 	assert.Empty(t, spec.Rules[0].Versions)
+	assert.Equal(t, "approved per SEC-1234", spec.Rules[0].Comment)
 }
 
 func TestDeveloperMDMIDEExtensionPolicy_BuildRequestAllowlistVersions(t *testing.T) {
@@ -248,7 +254,7 @@ func TestDeveloperMDMIDEExtensionPolicy_ApplyAPIToModel(t *testing.T) {
 		Target:      "vscode",
 		Mode:        "allowlist",
 		SpecVersion: 1,
-		Spec:        json.RawMessage(`{"rules":[{"publisher":"ms-python","name":"python","stable":true},{"publisher":"redhat","name":"vscode-yaml","versions":["1.15.0"]}]}`),
+		Spec:        json.RawMessage(`{"rules":[{"publisher":"ms-python","name":"python","stable":true,"comment":"approved per SEC-1234"},{"publisher":"redhat","name":"vscode-yaml","versions":["1.15.0"]}]}`),
 		CreatedBy:   "user@x.io",
 		CreatedAt:   "2026-06-29T00:00:00Z",
 		UpdatedBy:   "user@x.io",
@@ -273,11 +279,55 @@ func TestDeveloperMDMIDEExtensionPolicy_ApplyAPIToModel(t *testing.T) {
 	assert.Equal(t, "ms-python", model.Rules[0].Publisher.ValueString())
 	assert.True(t, model.Rules[0].Stable.ValueBool())
 	assert.True(t, model.Rules[0].Versions.IsNull())
+	assert.Equal(t, "approved per SEC-1234", model.Rules[0].Comment.ValueString())
 	assert.Equal(t, "redhat", model.Rules[1].Publisher.ValueString())
+	// Rule 1 carries no comment in the API response, so it reads back as null.
+	assert.True(t, model.Rules[1].Comment.IsNull())
 
 	var versions []string
 	model.Rules[1].Versions.ElementsAs(ctx, &versions, false)
 	assert.Equal(t, []string{"1.15.0"}, versions)
+}
+
+// TestDeveloperMDMIDEExtensionPolicy_CommentLengthValidator exercises the schema
+// validator wired to the rule `comment` attribute. The imperative
+// validateDeveloperMDMIDEExtensionPolicy helper does not run schema-level
+// validators, so the bounds are verified by pulling the validator off the schema
+// and running it directly. Empty is rejected (an unset comment is expressed by
+// omitting the attribute, not by ""; this avoids an apply inconsistency from the
+// omitempty round-trip). The multibyte case confirms the cap counts runes, not
+// bytes (i.e. a UTF8-length validator, not a byte-length one).
+func TestDeveloperMDMIDEExtensionPolicy_CommentLengthValidator(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	schemaResp := &fwresource.SchemaResponse{}
+	NewDeveloperMDMIDEExtensionPolicyResource().Schema(ctx, fwresource.SchemaRequest{}, schemaResp)
+	require.False(t, schemaResp.Diagnostics.HasError())
+
+	rules, ok := schemaResp.Schema.Attributes["rules"].(schema.ListNestedAttribute)
+	require.True(t, ok, "rules should be a ListNestedAttribute")
+	comment, ok := rules.NestedObject.Attributes["comment"].(schema.StringAttribute)
+	require.True(t, ok, "comment should be a StringAttribute")
+	require.NotEmpty(t, comment.Validators, "comment should have a length validator")
+
+	validate := func(value string) diag.Diagnostics {
+		var all diag.Diagnostics
+		for _, v := range comment.Validators {
+			resp := &validator.StringResponse{}
+			v.ValidateString(ctx, validator.StringRequest{
+				Path:        path.Root("rules").AtListIndex(0).AtName("comment"),
+				ConfigValue: types.StringValue(value),
+			}, resp)
+			all.Append(resp.Diagnostics...)
+		}
+		return all
+	}
+
+	assert.True(t, validate("").HasError(), "empty comment should be rejected (omit the attribute instead)")
+	assert.False(t, validate(strings.Repeat("a", 512)).HasError(), "512 runes should be accepted")
+	assert.True(t, validate(strings.Repeat("a", 513)).HasError(), "513 runes should be rejected")
+	assert.False(t, validate(strings.Repeat("世", 512)).HasError(), "512 multibyte runes should be accepted (rune-counted)")
 }
 
 func TestDeveloperMDMIDEExtensionPolicy_NonIDECategoryReadDiagnostic(t *testing.T) {
@@ -312,6 +362,7 @@ func TestAccDeveloperMDMIDEExtensionPolicyResource(t *testing.T) {
 					resourcehelper.TestCheckResourceAttr("stepsecurity_developer_mdm_ide_extension_policy.test", "name", name),
 					resourcehelper.TestCheckResourceAttr("stepsecurity_developer_mdm_ide_extension_policy.test", "mode", "allowlist"),
 					resourcehelper.TestCheckResourceAttr("stepsecurity_developer_mdm_ide_extension_policy.test", "description", "approved extensions"),
+					resourcehelper.TestCheckResourceAttr("stepsecurity_developer_mdm_ide_extension_policy.test", "rules.0.comment", "approved for engineering"),
 					resourcehelper.TestCheckResourceAttrSet("stepsecurity_developer_mdm_ide_extension_policy.test", "policy_id"),
 					resourcehelper.TestCheckResourceAttrSet("stepsecurity_developer_mdm_ide_extension_policy.test", "id"),
 				),
@@ -346,6 +397,7 @@ resource "stepsecurity_developer_mdm_ide_extension_policy" "test" {
       publisher = "ms-python"
       name      = "python"
       stable    = %s
+      comment   = "approved for engineering"
     },
   ]
 }
