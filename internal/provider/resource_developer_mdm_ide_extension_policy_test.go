@@ -219,6 +219,33 @@ func TestDeveloperMDMIDEExtensionPolicy_ValidateAcceptsValidRules(t *testing.T) 
 	}
 	assert.True(t, validateDeveloperMDMIDEExtensionPolicy(ctx, conflict).HasError(), "expected same-key stable/versions conflict")
 
+	// versions with an unknown name defers rather than erroring: the name may
+	// resolve to a valid value at apply time, and create/update re-validates
+	// once it is known. (An explicitly null name still errors; see
+	// TestDeveloperMDMIDEExtensionPolicy_ValidateRejectsInvalidRules.)
+	unknownName := developerMDMIDEExtensionPolicyModel{
+		Name: types.StringValue("p"),
+		Mode: types.StringValue("allowlist"),
+		Rules: []developerMDMIDEExtensionRuleModel{
+			{Publisher: types.StringValue("redhat"), Name: types.StringUnknown(), Versions: stringSet(t, "1.15.0"), Stable: types.BoolValue(false)},
+		},
+	}
+	assert.False(t, validateDeveloperMDMIDEExtensionPolicy(ctx, unknownName).HasError(), "versions with an unknown name should defer, not error")
+
+	// An unknown-name versions rule must not falsely collide in the cross-rule
+	// conflict map with a whole-publisher stable rule for the same publisher: the
+	// compiled key is not known until the name resolves, so tracking defers rather
+	// than treating the zero-value "" name as the same extension.
+	unknownNameNoCollision := developerMDMIDEExtensionPolicyModel{
+		Name: types.StringValue("p"),
+		Mode: types.StringValue("allowlist"),
+		Rules: []developerMDMIDEExtensionRuleModel{
+			{Publisher: types.StringValue("github"), Name: types.StringNull(), Versions: types.SetNull(types.StringType), Stable: types.BoolValue(true)},
+			{Publisher: types.StringValue("github"), Name: types.StringUnknown(), Versions: stringSet(t, "1.0.0"), Stable: types.BoolValue(false)},
+		},
+	}
+	assert.False(t, validateDeveloperMDMIDEExtensionPolicy(ctx, unknownNameNoCollision).HasError(), "unknown-name versions rule must not collide with a whole-publisher stable rule")
+
 	// Empty rules are backend-valid for both modes.
 	for _, mode := range []string{"allowlist", "blocklist"} {
 		empty := developerMDMIDEExtensionPolicyModel{
@@ -240,6 +267,36 @@ func TestDeveloperMDMIDEExtensionPolicy_ValidateAcceptsValidRules(t *testing.T) 
 		},
 	}
 	assert.False(t, validateDeveloperMDMIDEExtensionPolicy(ctx, valid).HasError(), "valid policy should not error: %v", validateDeveloperMDMIDEExtensionPolicy(ctx, valid))
+}
+
+// TestDeveloperMDMIDEExtensionPolicy_ConflictDiagnosticIsHumanReadable proves the
+// cross-rule conflict message shows a readable `publisher.name` identifier and
+// never leaks the internal NUL-delimited map key.
+func TestDeveloperMDMIDEExtensionPolicy_ConflictDiagnosticIsHumanReadable(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	conflict := developerMDMIDEExtensionPolicyModel{
+		Name: types.StringValue("p"),
+		Mode: types.StringValue("allowlist"),
+		Rules: []developerMDMIDEExtensionRuleModel{
+			{Publisher: types.StringValue("redhat"), Name: types.StringValue("yaml"), Versions: types.SetNull(types.StringType), Stable: types.BoolValue(true)},
+			{Publisher: types.StringValue("redhat"), Name: types.StringValue("yaml"), Versions: stringSet(t, "1.0.0"), Stable: types.BoolValue(false)},
+		},
+	}
+
+	diags := validateDeveloperMDMIDEExtensionPolicy(ctx, conflict)
+	require.True(t, diags.HasError(), "expected same-key stable/versions conflict")
+
+	var detail string
+	for _, d := range diags.Errors() {
+		if strings.Contains(d.Summary(), "Conflicting rules") {
+			detail = d.Detail()
+		}
+	}
+	require.NotEmpty(t, detail, "expected a conflicting-rules diagnostic")
+	assert.Contains(t, detail, "redhat.yaml", "message should use a human-readable publisher.name identifier")
+	assert.NotContains(t, detail, "\x00", "message must not leak the internal NUL-delimited key")
 }
 
 func TestDeveloperMDMIDEExtensionPolicy_ApplyAPIToModel(t *testing.T) {
@@ -328,6 +385,42 @@ func TestDeveloperMDMIDEExtensionPolicy_CommentLengthValidator(t *testing.T) {
 	assert.False(t, validate(strings.Repeat("a", 512)).HasError(), "512 runes should be accepted")
 	assert.True(t, validate(strings.Repeat("a", 513)).HasError(), "513 runes should be rejected")
 	assert.False(t, validate(strings.Repeat("世", 512)).HasError(), "512 multibyte runes should be accepted (rune-counted)")
+}
+
+// TestDeveloperMDMIDEExtensionPolicy_RuleNameRejectsEmpty exercises the schema
+// validator on the rule `name` attribute. An unset name (target the whole
+// publisher) is expressed by omitting the attribute, not by ""; an empty string
+// would be dropped by omitempty and read back as null, causing an apply
+// inconsistency, so it is rejected at plan time.
+func TestDeveloperMDMIDEExtensionPolicy_RuleNameRejectsEmpty(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	schemaResp := &fwresource.SchemaResponse{}
+	NewDeveloperMDMIDEExtensionPolicyResource().Schema(ctx, fwresource.SchemaRequest{}, schemaResp)
+	require.False(t, schemaResp.Diagnostics.HasError())
+
+	rules, ok := schemaResp.Schema.Attributes["rules"].(schema.ListNestedAttribute)
+	require.True(t, ok, "rules should be a ListNestedAttribute")
+	nameAttr, ok := rules.NestedObject.Attributes["name"].(schema.StringAttribute)
+	require.True(t, ok, "name should be a StringAttribute")
+	require.NotEmpty(t, nameAttr.Validators, "name should have a length validator")
+
+	validate := func(value string) diag.Diagnostics {
+		var all diag.Diagnostics
+		for _, v := range nameAttr.Validators {
+			resp := &validator.StringResponse{}
+			v.ValidateString(ctx, validator.StringRequest{
+				Path:        path.Root("rules").AtListIndex(0).AtName("name"),
+				ConfigValue: types.StringValue(value),
+			}, resp)
+			all.Append(resp.Diagnostics...)
+		}
+		return all
+	}
+
+	assert.True(t, validate("").HasError(), "empty name should be rejected (omit the attribute to target the whole publisher)")
+	assert.False(t, validate("python").HasError(), "a non-empty name should be accepted")
 }
 
 func TestDeveloperMDMIDEExtensionPolicy_NonIDECategoryReadDiagnostic(t *testing.T) {

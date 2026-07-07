@@ -111,7 +111,7 @@ func TestDeveloperMDMPolicyClient_GetUpdateDeletePolicy(t *testing.T) {
 	c := newTestClient(server)
 	ctx := context.Background()
 
-	// Space in ID verifies url.QueryEscape on the path segment.
+	// Space in ID verifies url.PathEscape on the path segment.
 	getPolicy, err := c.GetDeveloperMDMPolicy(ctx, "p 1")
 	require.NoError(t, err)
 	assert.Equal(t, "p 1", getPolicy.PolicyID)

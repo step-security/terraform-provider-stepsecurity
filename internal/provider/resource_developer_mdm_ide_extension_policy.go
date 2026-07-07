@@ -148,6 +148,9 @@ func (r *developerMDMIDEExtensionPolicyResource) Schema(_ context.Context, _ res
 							Optional: true,
 							MarkdownDescription: "VS Code extension name segment (e.g. `python`). " +
 								"Omit to target the whole publisher. No `*` or spaces.",
+							Validators: []validator.String{
+								stringvalidator.LengthAtLeast(1),
+							},
 						},
 						"versions": schema.SetAttribute{
 							ElementType: types.StringType,
@@ -396,7 +399,10 @@ func validateDeveloperMDMIDEExtensionPolicy(ctx context.Context, model developer
 				)
 			}
 		} else {
-			if hasVersions && !hasName {
+			// Defer when name is unknown (e.g. computed from an expression): it may
+			// resolve to a valid value at apply time, and create/update re-validates
+			// once it is known. Only reject when name is explicitly absent.
+			if hasVersions && !hasName && !rule.Name.IsUnknown() {
 				diags.AddAttributeError(
 					rulePath.AtName("versions"),
 					"versions require name",
@@ -429,23 +435,34 @@ func validateDeveloperMDMIDEExtensionPolicy(ctx context.Context, model developer
 			}
 		}
 
-		key := publisher + "\x00" + name
-		st := states[key]
-		if st == nil {
-			st = &keyState{}
-			states[key] = st
-		}
-		if stable {
-			st.stable = true
-		}
-		if hasVersions {
-			st.versions = true
-		}
-		if st.stable && st.versions {
-			diags.AddError(
-				"Conflicting rules for the same extension",
-				fmt.Sprintf("Extension %q cannot mix `stable` and explicit `versions` across rules.", key),
-			)
+		// Cross-rule conflict tracking compares the compiled key (publisher + name).
+		// Skip when either segment is unknown: the real key is not known yet, so a
+		// zero-value ValueString() would falsely collide distinct extensions (e.g. an
+		// unknown-name versions rule with a whole-publisher stable rule). Create/update
+		// re-validates once the values are known.
+		if !rule.Publisher.IsUnknown() && !rule.Name.IsUnknown() {
+			key := publisher + "\x00" + name
+			st := states[key]
+			if st == nil {
+				st = &keyState{}
+				states[key] = st
+			}
+			if stable {
+				st.stable = true
+			}
+			if hasVersions {
+				st.versions = true
+			}
+			if st.stable && st.versions {
+				display := publisher
+				if name != "" {
+					display += "." + name
+				}
+				diags.AddError(
+					"Conflicting rules for the same extension",
+					fmt.Sprintf("Extension %q cannot mix `stable` and explicit `versions` across rules.", display),
+				)
+			}
 		}
 	}
 
