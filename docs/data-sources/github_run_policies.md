@@ -204,6 +204,7 @@ Read-Only:
 - `disallowed_runner_labels` (Set of String) Set of disallowed runner labels.
 - `enable_action_policy` (Boolean) Whether the action policy is enabled.
 - `enable_compromised_actions_policy` (Boolean) Whether the compromised actions policy is enabled.
+- `enable_generic_runner_labels` (Boolean) Whether the GitHub-hosted standard runner label set is added to the policy labels at evaluation time.
 - `enable_harden_runner_policy` (Boolean) Whether the Harden Runner policy is enabled.
 - `enable_runs_on_policy` (Boolean) Whether the runs-on policy is enabled.
 - `enable_secrets_policy` (Boolean) Whether the secrets policy is enabled.

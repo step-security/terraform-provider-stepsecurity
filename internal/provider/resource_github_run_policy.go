@@ -67,6 +67,7 @@ type policyConfigModel struct {
 	HardenRunnerCustomActions      types.Set    `tfsdk:"harden_runner_custom_actions"`
 	EnableRunsOnPolicy             types.Bool   `tfsdk:"enable_runs_on_policy"`
 	DisallowedRunnerLabels         types.Set    `tfsdk:"disallowed_runner_labels"`
+	EnableGenericRunnerLabels      types.Bool   `tfsdk:"enable_generic_runner_labels"`
 	EnableSecretsPolicy            types.Bool   `tfsdk:"enable_secrets_policy"`
 	EnableCompromisedActionsPolicy types.Bool   `tfsdk:"enable_compromised_actions_policy"`
 	RequirePinnedActions           types.Bool   `tfsdk:"require_pinned_actions"`
@@ -177,6 +178,12 @@ func (r *githubRunPolicyResource) Schema(_ context.Context, _ resource.SchemaReq
 						ElementType:         types.StringType,
 						Optional:            true,
 						MarkdownDescription: "Set of disallowed runner labels.",
+					},
+					"enable_generic_runner_labels": schema.BoolAttribute{
+						Optional:            true,
+						Computed:            true,
+						Default:             booldefault.StaticBool(false),
+						MarkdownDescription: "When true, the GitHub-hosted standard runner label set (ubuntu-latest, windows-latest, macos-*, arm variants, ...; kept up to date automatically) is added to `disallowed_runner_labels` (runs-on policy) and `harden_runner_target_labels` (Harden Runner policy) at evaluation time.",
 					},
 					"enable_secrets_policy": schema.BoolAttribute{
 						Optional:            true,
@@ -292,6 +299,7 @@ func (r *githubRunPolicyResource) Create(ctx context.Context, req resource.Creat
 			EnableActionPolicy:             policyConfig.EnableActionPolicy.ValueBool(),
 			EnableHardenRunnerPolicy:       policyConfig.EnableHardenRunnerPolicy.ValueBool(),
 			EnableRunsOnPolicy:             policyConfig.EnableRunsOnPolicy.ValueBool(),
+			EnableGenericRunnerLabels:      policyConfig.EnableGenericRunnerLabels.ValueBool(),
 			EnableSecretsPolicy:            policyConfig.EnableSecretsPolicy.ValueBool(),
 			EnableCompromisedActionsPolicy: policyConfig.EnableCompromisedActionsPolicy.ValueBool(),
 			RequirePinnedActions:           policyConfig.RequirePinnedActions.ValueBool(),
@@ -514,6 +522,7 @@ func (r *githubRunPolicyResource) Update(ctx context.Context, req resource.Updat
 			EnableActionPolicy:             policyConfig.EnableActionPolicy.ValueBool(),
 			EnableHardenRunnerPolicy:       enableHardenRunnerPolicy.ValueBool(),
 			EnableRunsOnPolicy:             policyConfig.EnableRunsOnPolicy.ValueBool(),
+			EnableGenericRunnerLabels:      policyConfig.EnableGenericRunnerLabels.ValueBool(),
 			EnableSecretsPolicy:            policyConfig.EnableSecretsPolicy.ValueBool(),
 			EnableCompromisedActionsPolicy: policyConfig.EnableCompromisedActionsPolicy.ValueBool(),
 			RequirePinnedActions:           policyConfig.RequirePinnedActions.ValueBool(),
@@ -750,6 +759,7 @@ func (r *githubRunPolicyResource) updateModelFromAPI(ctx context.Context, model 
 		"enable_action_policy":              types.BoolValue(policy.PolicyConfig.EnableActionPolicy),
 		"enable_harden_runner_policy":       types.BoolValue(policy.PolicyConfig.EnableHardenRunnerPolicy),
 		"enable_runs_on_policy":             types.BoolValue(policy.PolicyConfig.EnableRunsOnPolicy),
+		"enable_generic_runner_labels":      types.BoolValue(policy.PolicyConfig.EnableGenericRunnerLabels),
 		"enable_secrets_policy":             types.BoolValue(policy.PolicyConfig.EnableSecretsPolicy),
 		"enable_compromised_actions_policy": types.BoolValue(policy.PolicyConfig.EnableCompromisedActionsPolicy),
 		"require_pinned_actions":            types.BoolValue(policy.PolicyConfig.RequirePinnedActions),
@@ -856,6 +866,7 @@ func (r *githubRunPolicyResource) updateModelFromAPI(ctx context.Context, model 
 		"harden_runner_target_labels":       types.SetType{ElemType: types.StringType},
 		"harden_runner_custom_actions":      types.SetType{ElemType: types.StringType},
 		"enable_runs_on_policy":             types.BoolType,
+		"enable_generic_runner_labels":      types.BoolType,
 		"disallowed_runner_labels":          types.SetType{ElemType: types.StringType},
 		"enable_secrets_policy":             types.BoolType,
 		"enable_compromised_actions_policy": types.BoolType,
