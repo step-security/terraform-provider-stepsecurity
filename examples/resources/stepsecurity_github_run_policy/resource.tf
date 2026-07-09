@@ -83,6 +83,25 @@ resource "stepsecurity_github_run_policy" "runner_policy_all_repos" {
   }
 }
 
+# Runner Label Policy Example (generic labels) - Blocks every GitHub-hosted
+# standard runner via the enable_standard_runner_labels boolean: the standard
+# label set (ubuntu-latest, windows-latest, macos-*, arm variants, ...) is
+# added to disallowed_runner_labels at evaluation time and kept up to date
+# automatically. Additional custom labels can still be listed.
+resource "stepsecurity_github_run_policy" "runner_policy_generic_labels" {
+  owner     = "my-org"
+  name      = "Runner Label Policy - Generic Labels"
+  all_repos = true
+
+  policy_config = {
+    owner                         = "my-org"
+    name                          = "Runner Label Policy - Generic Labels"
+    enable_runs_on_policy         = true
+    enable_standard_runner_labels = true
+    disallowed_runner_labels      = ["self-hosted"]
+  }
+}
+
 # Runner Label Policy Example (all_orgs) - Restricts which runners can be used across all orgs
 resource "stepsecurity_github_run_policy" "runner_policy_all_orgs" {
   owner    = "my-org"
@@ -123,6 +142,26 @@ resource "stepsecurity_github_run_policy" "harden_runner_policy_targeted" {
     name                        = "Harden Runner Policy - Targeted"
     enable_harden_runner_policy = true
     harden_runner_target_labels = ["ubuntu-step-security", "linux-secure"]
+  }
+}
+
+# Harden Runner Policy Example (generic labels) - Enforces Harden Runner on
+# every job running on a GitHub-hosted standard runner via the
+# enable_standard_runner_labels boolean: the standard label set (ubuntu-latest,
+# windows-latest, macos-*, arm variants, ...) becomes the target labels at
+# evaluation time and stays current automatically. Self-hosted jobs are not
+# targeted; add harden_runner_target_labels entries to also target custom
+# runners.
+resource "stepsecurity_github_run_policy" "harden_runner_policy_generic_labels" {
+  owner     = "my-org"
+  name      = "Harden Runner Policy - Generic Labels"
+  all_repos = true
+
+  policy_config = {
+    owner                         = "my-org"
+    name                          = "Harden Runner Policy - Generic Labels"
+    enable_harden_runner_policy   = true
+    enable_standard_runner_labels = true
   }
 }
 
