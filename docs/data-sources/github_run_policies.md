@@ -204,10 +204,10 @@ Read-Only:
 - `disallowed_runner_labels` (Set of String) Set of disallowed runner labels.
 - `enable_action_policy` (Boolean) Whether the action policy is enabled.
 - `enable_compromised_actions_policy` (Boolean) Whether the compromised actions policy is enabled.
-- `enable_generic_runner_labels` (Boolean) Whether the GitHub-hosted standard runner label set is added to the policy labels at evaluation time.
 - `enable_harden_runner_policy` (Boolean) Whether the Harden Runner policy is enabled.
 - `enable_runs_on_policy` (Boolean) Whether the runs-on policy is enabled.
 - `enable_secrets_policy` (Boolean) Whether the secrets policy is enabled.
+- `enable_standard_runner_labels` (Boolean) Whether the GitHub-hosted standard runner label set is added to the policy labels at evaluation time.
 - `harden_runner_custom_actions` (Set of String) Set of custom actions accepted as Harden Runner equivalents (in addition to `step-security/harden-runner`).
 - `harden_runner_target_labels` (Set of String) Set of runner labels that target Harden Runner enforcement. When `enable_harden_runner_policy` is true, an empty set means the policy applies to every job; a non-empty set filters to jobs whose `runs-on` matches at least one label. When the policy is disabled, this attribute is null.
 - `is_dry_run` (Boolean) Whether this policy is in dry-run mode.

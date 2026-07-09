@@ -69,7 +69,7 @@ func TestGithubRunPoliciesDataSource_ReadMappingWithPinnedActions(t *testing.T) 
 		"harden_runner_target_labels":       types.SetNull(types.StringType),
 		"harden_runner_custom_actions":      types.SetNull(types.StringType),
 		"enable_runs_on_policy":             types.BoolValue(policy.PolicyConfig.EnableRunsOnPolicy),
-		"enable_generic_runner_labels":      types.BoolValue(policy.PolicyConfig.EnableGenericRunnerLabels),
+		"enable_standard_runner_labels":      types.BoolValue(policy.PolicyConfig.EnableStandardRunnerLabels),
 		"disallowed_runner_labels":          types.SetNull(types.StringType),
 		"enable_secrets_policy":             types.BoolValue(policy.PolicyConfig.EnableSecretsPolicy),
 		"enable_compromised_actions_policy": types.BoolValue(policy.PolicyConfig.EnableCompromisedActionsPolicy),
@@ -96,7 +96,7 @@ func TestGithubRunPoliciesDataSource_ReadMappingWithPinnedActions(t *testing.T) 
 		"harden_runner_target_labels":       types.SetType{ElemType: types.StringType},
 		"harden_runner_custom_actions":      types.SetType{ElemType: types.StringType},
 		"enable_runs_on_policy":             types.BoolType,
-		"enable_generic_runner_labels":      types.BoolType,
+		"enable_standard_runner_labels":      types.BoolType,
 		"disallowed_runner_labels":          types.SetType{ElemType: types.StringType},
 		"enable_secrets_policy":             types.BoolType,
 		"enable_compromised_actions_policy": types.BoolType,
@@ -326,7 +326,7 @@ type githubRunPolicyDataSourcePolicyConfigModel struct {
 	HardenRunnerTargetLabels       types.Set    `tfsdk:"harden_runner_target_labels"`
 	HardenRunnerCustomActions      types.Set    `tfsdk:"harden_runner_custom_actions"`
 	EnableRunsOnPolicy             types.Bool   `tfsdk:"enable_runs_on_policy"`
-	EnableGenericRunnerLabels      types.Bool   `tfsdk:"enable_generic_runner_labels"`
+	EnableStandardRunnerLabels      types.Bool   `tfsdk:"enable_standard_runner_labels"`
 	DisallowedRunnerLabels         types.Set    `tfsdk:"disallowed_runner_labels"`
 	EnableSecretsPolicy            types.Bool   `tfsdk:"enable_secrets_policy"`
 	EnableCompromisedActionsPolicy types.Bool   `tfsdk:"enable_compromised_actions_policy"`
@@ -383,7 +383,7 @@ func testRunPolicyDataSourceAttrTypes() map[string]attr.Type {
 			"harden_runner_target_labels":       types.SetType{ElemType: types.StringType},
 			"harden_runner_custom_actions":      types.SetType{ElemType: types.StringType},
 			"enable_runs_on_policy":             types.BoolType,
-			"enable_generic_runner_labels":      types.BoolType,
+			"enable_standard_runner_labels":      types.BoolType,
 			"disallowed_runner_labels":          types.SetType{ElemType: types.StringType},
 			"enable_secrets_policy":             types.BoolType,
 			"enable_compromised_actions_policy": types.BoolType,
