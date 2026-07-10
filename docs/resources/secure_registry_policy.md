@@ -26,18 +26,27 @@ provider "stepsecurity" {
   customer = "abcdefg"  # can also be set as env variable STEP_SECURITY_CUSTOMER
 }
 
-# Enable both controls for the npm registry
+# Enable all controls for the npm registry
 resource "stepsecurity_secure_registry_policy" "npm_full" {
   registry = "npm"
 
   cooldown_control = {
     enabled        = true
     period_in_days = 7
-    exemption_list = ["@babel/core@*", "react", "@scope/*", "lodash@4.17.21"]
+    exemption_list = ["@babel/core@*", "react@1.2.3", "@scope/*", "lodash@4.17.21"]
   }
 
   compromised_packages_control = {
     enabled = true
+  }
+
+  custom_block_list_control = {
+    enabled  = true
+    patterns = ["lodash@4.17.20", "@scope/*", "left-pad@*"]
+  }
+
+  npm_settings = {
+    rewrite_tarball_urls = true
   }
 }
 
@@ -67,7 +76,7 @@ import {
   id = "npm"
 }
 
-# Enable both controls for the PyPI registry
+# Enable all controls for the PyPI registry (npm_settings is npm-only, omitted here)
 resource "stepsecurity_secure_registry_policy" "pypi_full" {
   registry = "pypi"
 
@@ -79,6 +88,11 @@ resource "stepsecurity_secure_registry_policy" "pypi_full" {
 
   compromised_packages_control = {
     enabled = true
+  }
+
+  custom_block_list_control = {
+    enabled  = false
+    patterns = ["requests@2.25.0", "insecure-package@*"]
   }
 }
 
@@ -119,6 +133,8 @@ import {
 
 - `compromised_packages_control` (Attributes) Blocks packages flagged as compromised or reported as malicious by the security community. (see [below for nested schema](#nestedatt--compromised_packages_control))
 - `cooldown_control` (Attributes) Blocks packages published within a configurable number of days, giving the community time to vet new releases. (see [below for nested schema](#nestedatt--cooldown_control))
+- `custom_block_list_control` (Attributes) Explicitly blocks packages or versions matching configured glob patterns. Supported for both `npm` and `pypi`. (see [below for nested schema](#nestedatt--custom_block_list_control))
+- `npm_settings` (Attributes) npm-specific registry settings. Only applicable when `registry = "npm"`; setting this for any other registry raises a plan-time error. (see [below for nested schema](#nestedatt--npm_settings))
 
 <a id="nestedatt--compromised_packages_control"></a>
 ### Nested Schema for `compromised_packages_control`
@@ -139,6 +155,26 @@ Optional:
 
 - `exemption_list` (Set of String) Packages exempt from the cooldown period. Supports exact names, version globs (`package@*`), and exact versions (`package@1.2.3`). For npm, scoped wildcards (`@scope/*`) are also supported. Order-insensitive — reordering entries produces no plan diff.
 - `period_in_days` (Number) Number of days to quarantine newly-published package versions. Must be between 1 and 30.
+
+
+<a id="nestedatt--custom_block_list_control"></a>
+### Nested Schema for `custom_block_list_control`
+
+Required:
+
+- `enabled` (Boolean) Whether the custom block list control is enabled.
+
+Optional:
+
+- `patterns` (Set of String) Package/version glob patterns to block. Supports exact names, version globs (`package@*`), and exact versions (`package@1.2.3`). For npm, scoped wildcards (`@scope/*`) are also supported. Order-insensitive — reordering entries produces no plan diff.
+
+
+<a id="nestedatt--npm_settings"></a>
+### Nested Schema for `npm_settings`
+
+Required:
+
+- `rewrite_tarball_urls` (Boolean) Whether to rewrite `dist.tarball` URLs in npm package metadata so tarballs are served through the secure registry.
 
 ## Import
 
