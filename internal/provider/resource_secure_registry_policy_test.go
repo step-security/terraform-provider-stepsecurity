@@ -3,16 +3,21 @@ package provider
 import (
 	"context"
 	"fmt"
+	"regexp"
+	"strings"
 	"testing"
 
 	"github.com/hashicorp/terraform-plugin-framework/attr"
 	"github.com/hashicorp/terraform-plugin-framework/diag"
 	fwresource "github.com/hashicorp/terraform-plugin-framework/resource"
+	resourceschema "github.com/hashicorp/terraform-plugin-framework/resource/schema"
+	"github.com/hashicorp/terraform-plugin-framework/tfsdk"
 	"github.com/hashicorp/terraform-plugin-framework/types"
 	"github.com/hashicorp/terraform-plugin-framework/types/basetypes"
 	resourcehelper "github.com/hashicorp/terraform-plugin-testing/helper/resource"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/require"
 
 	stepsecurityapi "github.com/step-security/terraform-provider-stepsecurity/internal/stepsecurity-api"
 )
@@ -30,7 +35,7 @@ func TestSecureRegistryPolicyResource_Schema(t *testing.T) {
 	assert.False(t, schemaResp.Diagnostics.HasError(), "Schema() returned errors: %v", schemaResp.Diagnostics)
 
 	attrs := schemaResp.Schema.Attributes
-	for _, required := range []string{"registry", "cooldown_control", "compromised_packages_control"} {
+	for _, required := range []string{"registry", "cooldown_control", "compromised_packages_control", "custom_block_list_control", "npm_settings"} {
 		assert.Contains(t, attrs, required, "expected attribute %q in schema", required)
 	}
 }
@@ -98,6 +103,330 @@ func TestSecureRegistryPolicyResource_buildUpsertRequest_DisablesRemovedControl(
 	// Compromised packages from plan.
 	assert.NotNil(t, req.CompromisedPackages)
 	assert.True(t, req.CompromisedPackages.Enabled)
+}
+
+// TestSecureRegistryPolicyResource_buildUpsertRequest_CustomBlockListAndNpmSettings verifies the
+// request builder includes both new controls when present in the plan.
+func TestSecureRegistryPolicyResource_buildUpsertRequest_CustomBlockListAndNpmSettings(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	r := &secureRegistryPolicyResource{}
+
+	blockListObj, blockListDiag := buildTestCustomBlockListObject(ctx, true, []string{"lodash@4*", "@scope/*"})
+	assert.False(t, blockListDiag.HasError())
+
+	npmSettingsObj, npmDiag := buildTestNpmSettingsObject(true)
+	assert.False(t, npmDiag.HasError())
+
+	plan := &secureRegistryPolicyResourceModel{
+		Registry:               types.StringValue("npm"),
+		CustomBlockListControl: blockListObj,
+		NpmSettings:            npmSettingsObj,
+	}
+
+	var diags diag.Diagnostics
+	req := r.buildUpsertRequest(ctx, plan, nil, &diags)
+
+	assert.False(t, diags.HasError())
+	assert.NotNil(t, req.CustomBlockList)
+	assert.True(t, req.CustomBlockList.Enabled)
+	assert.ElementsMatch(t, []string{"lodash@4*", "@scope/*"}, req.CustomBlockList.Patterns)
+	assert.NotNil(t, req.NpmSettings)
+	assert.True(t, req.NpmSettings.RewriteTarballURLs)
+}
+
+// TestSecureRegistryPolicyResource_buildUpsertRequest_DisablesRemovedCustomBlockListAndNpmSettings
+// verifies that removing custom_block_list_control/npm_settings from plan (null) while state had
+// them causes an explicit disable/reset.
+func TestSecureRegistryPolicyResource_buildUpsertRequest_DisablesRemovedCustomBlockListAndNpmSettings(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	r := &secureRegistryPolicyResource{}
+
+	prevBlockListObj, _ := buildTestCustomBlockListObject(ctx, true, []string{"left-pad"})
+	prevNpmSettingsObj, _ := buildTestNpmSettingsObject(true)
+	prevState := &secureRegistryPolicyResourceModel{
+		Registry:               types.StringValue("npm"),
+		CustomBlockListControl: prevBlockListObj,
+		NpmSettings:            prevNpmSettingsObj,
+	}
+
+	plan := &secureRegistryPolicyResourceModel{
+		Registry:               types.StringValue("npm"),
+		CustomBlockListControl: types.ObjectNull(customBlockListControlAttrTypes),
+		NpmSettings:            types.ObjectNull(npmSettingsAttrTypes),
+	}
+
+	var diags diag.Diagnostics
+	req := r.buildUpsertRequest(ctx, plan, prevState, &diags)
+
+	assert.False(t, diags.HasError())
+	assert.NotNil(t, req.CustomBlockList)
+	assert.False(t, req.CustomBlockList.Enabled)
+	assert.Equal(t, []string{}, req.CustomBlockList.Patterns)
+	assert.NotNil(t, req.NpmSettings)
+	assert.False(t, req.NpmSettings.RewriteTarballURLs)
+}
+
+// TestSecureRegistryPolicyResource_applyAPIResponse_CustomBlockListDisabledNotInRefStaysNull verifies
+// that a disabled custom block list control does not get populated in state when not tracked.
+func TestSecureRegistryPolicyResource_applyAPIResponse_CustomBlockListDisabledNotInRefStaysNull(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	r := &secureRegistryPolicyResource{}
+
+	ref := &secureRegistryPolicyResourceModel{
+		CustomBlockListControl: types.ObjectNull(customBlockListControlAttrTypes),
+	}
+
+	apiResponse := &stepsecurityapi.SecureRegistryControls{
+		Registry:  "npm",
+		UpdatedBy: "api",
+		UpdatedAt: "2024-01-01T00:00:00Z",
+		CustomBlockList: &stepsecurityapi.CustomBlockListControl{
+			Enabled: false,
+		},
+	}
+
+	model := &secureRegistryPolicyResourceModel{
+		CustomBlockListControl: types.ObjectNull(customBlockListControlAttrTypes),
+	}
+
+	var diags diag.Diagnostics
+	r.applyAPIResponseToModel(ctx, ref, model, apiResponse, &diags)
+
+	assert.False(t, diags.HasError())
+	assert.True(t, model.CustomBlockListControl.IsNull(), "disabled custom block list should remain null when not tracked")
+}
+
+// TestSecureRegistryPolicyResource_applyAPIResponse_CustomBlockListEnabledPopulatesState verifies
+// that an enabled custom block list control is reflected in state.
+func TestSecureRegistryPolicyResource_applyAPIResponse_CustomBlockListEnabledPopulatesState(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	r := &secureRegistryPolicyResource{}
+
+	ref := &secureRegistryPolicyResourceModel{
+		CustomBlockListControl: types.ObjectNull(customBlockListControlAttrTypes),
+	}
+
+	apiResponse := &stepsecurityapi.SecureRegistryControls{
+		Registry:  "npm",
+		UpdatedBy: "api",
+		UpdatedAt: "2024-01-01T00:00:00Z",
+		CustomBlockList: &stepsecurityapi.CustomBlockListControl{
+			Enabled:  true,
+			Patterns: []string{"lodash@4*"},
+		},
+	}
+
+	model := &secureRegistryPolicyResourceModel{
+		CustomBlockListControl: types.ObjectNull(customBlockListControlAttrTypes),
+	}
+
+	var diags diag.Diagnostics
+	r.applyAPIResponseToModel(ctx, ref, model, apiResponse, &diags)
+
+	assert.False(t, diags.HasError())
+	assert.False(t, model.CustomBlockListControl.IsNull(), "enabled custom block list should be in state")
+
+	var blockList customBlockListControlModel
+	diags = model.CustomBlockListControl.As(ctx, &blockList, basetypes.ObjectAsOptions{})
+	assert.False(t, diags.HasError())
+	assert.True(t, blockList.Enabled.ValueBool())
+}
+
+// TestSecureRegistryPolicyResource_applyAPIResponse_NpmSettingsDisabledNotInRefStaysNull verifies
+// that npm_settings with RewriteTarballURLs=false does not get populated in state when the ref
+// (current state) had null for it — mirrors the other controls' null-preservation rule.
+func TestSecureRegistryPolicyResource_applyAPIResponse_NpmSettingsDisabledNotInRefStaysNull(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	r := &secureRegistryPolicyResource{}
+
+	ref := &secureRegistryPolicyResourceModel{
+		NpmSettings: types.ObjectNull(npmSettingsAttrTypes),
+	}
+
+	apiResponse := &stepsecurityapi.SecureRegistryControls{
+		Registry:    "npm",
+		UpdatedBy:   "api",
+		UpdatedAt:   "2024-01-01T00:00:00Z",
+		NpmSettings: &stepsecurityapi.NpmSettingsControl{RewriteTarballURLs: false},
+	}
+
+	model := &secureRegistryPolicyResourceModel{
+		NpmSettings: types.ObjectNull(npmSettingsAttrTypes),
+	}
+
+	var diags diag.Diagnostics
+	r.applyAPIResponseToModel(ctx, ref, model, apiResponse, &diags)
+
+	assert.False(t, diags.HasError())
+	assert.True(t, model.NpmSettings.IsNull(), "npm_settings with rewrite_tarball_urls=false should remain null when not tracked")
+}
+
+// TestSecureRegistryPolicyResource_applyAPIResponse_NpmSettingsEnabledPopulatesState verifies
+// that npm_settings with RewriteTarballURLs=true is reflected in state.
+func TestSecureRegistryPolicyResource_applyAPIResponse_NpmSettingsEnabledPopulatesState(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	r := &secureRegistryPolicyResource{}
+
+	ref := &secureRegistryPolicyResourceModel{
+		NpmSettings: types.ObjectNull(npmSettingsAttrTypes),
+	}
+
+	apiResponse := &stepsecurityapi.SecureRegistryControls{
+		Registry:    "npm",
+		UpdatedBy:   "api",
+		UpdatedAt:   "2024-01-01T00:00:00Z",
+		NpmSettings: &stepsecurityapi.NpmSettingsControl{RewriteTarballURLs: true},
+	}
+
+	model := &secureRegistryPolicyResourceModel{
+		NpmSettings: types.ObjectNull(npmSettingsAttrTypes),
+	}
+
+	var diags diag.Diagnostics
+	r.applyAPIResponseToModel(ctx, ref, model, apiResponse, &diags)
+
+	assert.False(t, diags.HasError())
+	require.False(t, model.NpmSettings.IsNull(), "enabled npm_settings should be in state")
+
+	var npmSettings npmSettingsModel
+	diags = model.NpmSettings.As(ctx, &npmSettings, basetypes.ObjectAsOptions{})
+	assert.False(t, diags.HasError())
+	assert.True(t, npmSettings.RewriteTarballURLs.ValueBool())
+}
+
+// TestSecureRegistryPolicyResource_applyAPIResponse_NpmSettingsDisabledButTrackedStaysInState verifies
+// that npm_settings with RewriteTarballURLs=false stays populated when it was already tracked
+// (e.g. user explicitly configured rewrite_tarball_urls = false).
+func TestSecureRegistryPolicyResource_applyAPIResponse_NpmSettingsDisabledButTrackedStaysInState(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	r := &secureRegistryPolicyResource{}
+
+	trackedObj := mustBuildTestNpmSettingsObject(t, false)
+	ref := &secureRegistryPolicyResourceModel{
+		NpmSettings: trackedObj,
+	}
+
+	apiResponse := &stepsecurityapi.SecureRegistryControls{
+		Registry:    "npm",
+		UpdatedBy:   "api",
+		UpdatedAt:   "2024-01-01T00:00:00Z",
+		NpmSettings: &stepsecurityapi.NpmSettingsControl{RewriteTarballURLs: false},
+	}
+
+	model := &secureRegistryPolicyResourceModel{
+		NpmSettings: types.ObjectNull(npmSettingsAttrTypes),
+	}
+
+	var diags diag.Diagnostics
+	r.applyAPIResponseToModel(ctx, ref, model, apiResponse, &diags)
+
+	assert.False(t, diags.HasError())
+	assert.False(t, model.NpmSettings.IsNull(), "previously tracked npm_settings should remain in state even when false")
+}
+
+// TestSecureRegistryPolicyResource_applyAPIResponse_NpmSettingsNullForNonNpm verifies npm_settings
+// stays null when the backend never returns it (e.g. pypi).
+func TestSecureRegistryPolicyResource_applyAPIResponse_NpmSettingsNullForNonNpm(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	r := &secureRegistryPolicyResource{}
+
+	ref := &secureRegistryPolicyResourceModel{
+		NpmSettings: types.ObjectNull(npmSettingsAttrTypes),
+	}
+
+	apiResponse := &stepsecurityapi.SecureRegistryControls{
+		Registry:    "pypi",
+		UpdatedBy:   "api",
+		UpdatedAt:   "2024-01-01T00:00:00Z",
+		NpmSettings: nil,
+	}
+
+	model := &secureRegistryPolicyResourceModel{
+		NpmSettings: types.ObjectNull(npmSettingsAttrTypes),
+	}
+
+	var diags diag.Diagnostics
+	r.applyAPIResponseToModel(ctx, ref, model, apiResponse, &diags)
+
+	assert.False(t, diags.HasError())
+	assert.True(t, model.NpmSettings.IsNull())
+}
+
+// TestSecureRegistryPolicyResource_ValidateConfig_NpmSettings exercises the real ValidateConfig
+// method, asserting npm_settings is rejected for non-npm registries and allowed for npm.
+func TestSecureRegistryPolicyResource_ValidateConfig_NpmSettings(t *testing.T) {
+	t.Parallel()
+
+	testCases := []struct {
+		name          string
+		registry      string
+		npmSettings   types.Object
+		expectedError bool
+	}{
+		{
+			name:          "npm_settings_allowed_for_npm",
+			registry:      "npm",
+			npmSettings:   mustBuildTestNpmSettingsObject(t, true),
+			expectedError: false,
+		},
+		{
+			name:          "npm_settings_rejected_for_pypi",
+			registry:      "pypi",
+			npmSettings:   mustBuildTestNpmSettingsObject(t, true),
+			expectedError: true,
+		},
+		{
+			name:          "npm_settings_absent_for_pypi",
+			registry:      "pypi",
+			npmSettings:   types.ObjectNull(npmSettingsAttrTypes),
+			expectedError: false,
+		},
+	}
+
+	for _, tc := range testCases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			ctx := context.Background()
+			r := &secureRegistryPolicyResource{}
+
+			model := secureRegistryPolicyResourceModel{
+				Registry:                   types.StringValue(tc.registry),
+				CooldownControl:            types.ObjectNull(cooldownControlAttrTypes),
+				CompromisedPackagesControl: types.ObjectNull(compromisedPackagesControlAttrTypes),
+				CustomBlockListControl:     types.ObjectNull(customBlockListControlAttrTypes),
+				NpmSettings:                tc.npmSettings,
+			}
+
+			config := testSecureRegistryPolicyConfig(t, model)
+			resp := &fwresource.ValidateConfigResponse{}
+
+			r.ValidateConfig(ctx, fwresource.ValidateConfigRequest{Config: config}, resp)
+
+			if tc.expectedError {
+				assert.True(t, resp.Diagnostics.HasError())
+			} else {
+				assert.False(t, resp.Diagnostics.HasError(), "unexpected diagnostics: %v", resp.Diagnostics)
+			}
+		})
+	}
 }
 
 // TestSecureRegistryPolicyResource_applyAPIResponse_DisabledControlNotInRefStaysNull verifies
@@ -280,6 +609,55 @@ func TestAccSecureRegistryPolicyResource(t *testing.T) {
 					resourcehelper.TestCheckResourceAttr("stepsecurity_secure_registry_policy.test", "compromised_packages_control.enabled", "true"),
 				),
 			},
+			// Update: add custom_block_list_control and npm_settings
+			{
+				Config: testAccSecureRegistryPolicyNpmFullConfig(true, []string{"lodash@4*", "@scope/*"}, true),
+				Check: resourcehelper.ComposeAggregateTestCheckFunc(
+					resourcehelper.TestCheckResourceAttr("stepsecurity_secure_registry_policy.test", "custom_block_list_control.enabled", "true"),
+					resourcehelper.TestCheckResourceAttr("stepsecurity_secure_registry_policy.test", "custom_block_list_control.patterns.#", "2"),
+					resourcehelper.TestCheckResourceAttr("stepsecurity_secure_registry_policy.test", "npm_settings.rewrite_tarball_urls", "true"),
+				),
+			},
+			// Update: change patterns list and disable tarball rewriting
+			{
+				Config: testAccSecureRegistryPolicyNpmFullConfig(true, []string{"requests@*"}, false),
+				Check: resourcehelper.ComposeAggregateTestCheckFunc(
+					resourcehelper.TestCheckResourceAttr("stepsecurity_secure_registry_policy.test", "custom_block_list_control.patterns.#", "1"),
+					resourcehelper.TestCheckResourceAttr("stepsecurity_secure_registry_policy.test", "npm_settings.rewrite_tarball_urls", "false"),
+				),
+			},
+			// Update: remove custom_block_list_control block
+			{
+				Config: testAccSecureRegistryPolicyOnlyCompromisedConfig(true),
+				Check: resourcehelper.ComposeAggregateTestCheckFunc(
+					resourcehelper.TestCheckNoResourceAttr("stepsecurity_secure_registry_policy.test", "custom_block_list_control"),
+				),
+			},
+		},
+	})
+}
+
+// TestAccSecureRegistryPolicyResource_PypiBlockList is an acceptance test covering
+// custom_block_list_control on pypi (npm_settings is not applicable there).
+// Requires TF_ACC=1 and env vars STEP_SECURITY_API_KEY, STEP_SECURITY_CUSTOMER.
+func TestAccSecureRegistryPolicyResource_PypiBlockList(t *testing.T) {
+	resourcehelper.Test(t, resourcehelper.TestCase{
+		PreCheck:                 func() { testAccPreCheck(t) },
+		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+		Steps: []resourcehelper.TestStep{
+			{
+				Config: testAccSecureRegistryPolicyPypiBlockListConfig(true, []string{"requests@2.25.0", "insecure-package"}),
+				Check: resourcehelper.ComposeAggregateTestCheckFunc(
+					resourcehelper.TestCheckResourceAttr("stepsecurity_secure_registry_policy.pypi_test", "registry", "pypi"),
+					resourcehelper.TestCheckResourceAttr("stepsecurity_secure_registry_policy.pypi_test", "custom_block_list_control.enabled", "true"),
+					resourcehelper.TestCheckResourceAttr("stepsecurity_secure_registry_policy.pypi_test", "custom_block_list_control.patterns.#", "2"),
+				),
+			},
+			// npm_settings is not applicable to pypi — plan-time ValidateConfig error.
+			{
+				Config:      testAccSecureRegistryPolicyPypiWithNpmSettingsConfig(),
+				ExpectError: regexp.MustCompile(`npm_settings is not applicable`),
+			},
 		},
 	})
 }
@@ -314,6 +692,62 @@ func buildTestCompromisedPackagesObject(enabled bool) (types.Object, diag.Diagno
 	})
 }
 
+func buildTestCustomBlockListObject(ctx context.Context, enabled bool, patterns []string) (types.Object, diag.Diagnostics) {
+	var patternsSet types.Set
+	var diags diag.Diagnostics
+	if patterns != nil {
+		vals := make([]attr.Value, len(patterns))
+		for i, v := range patterns {
+			vals[i] = types.StringValue(v)
+		}
+		patternsSet, diags = types.SetValue(types.StringType, vals)
+		if diags.HasError() {
+			return types.ObjectNull(customBlockListControlAttrTypes), diags
+		}
+	} else {
+		patternsSet = types.SetNull(types.StringType)
+	}
+	return types.ObjectValue(customBlockListControlAttrTypes, map[string]attr.Value{
+		"enabled":  types.BoolValue(enabled),
+		"patterns": patternsSet,
+	})
+}
+
+func buildTestNpmSettingsObject(rewriteTarballURLs bool) (types.Object, diag.Diagnostics) {
+	return types.ObjectValue(npmSettingsAttrTypes, map[string]attr.Value{
+		"rewrite_tarball_urls": types.BoolValue(rewriteTarballURLs),
+	})
+}
+
+func mustBuildTestNpmSettingsObject(t *testing.T, rewriteTarballURLs bool) types.Object {
+	t.Helper()
+	obj, diags := buildTestNpmSettingsObject(rewriteTarballURLs)
+	require.False(t, diags.HasError())
+	return obj
+}
+
+func testSecureRegistryPolicySchema(t *testing.T) resourceschema.Schema {
+	t.Helper()
+
+	r := &secureRegistryPolicyResource{}
+	resp := &fwresource.SchemaResponse{}
+	r.Schema(context.Background(), fwresource.SchemaRequest{}, resp)
+	require.False(t, resp.Diagnostics.HasError())
+
+	return resp.Schema
+}
+
+func testSecureRegistryPolicyConfig(t *testing.T, model secureRegistryPolicyResourceModel) tfsdk.Config {
+	t.Helper()
+
+	schema := testSecureRegistryPolicySchema(t)
+	plan := tfsdk.Plan{Schema: schema}
+	diags := plan.Set(context.Background(), model)
+	require.False(t, diags.HasError())
+
+	return tfsdk.Config{Raw: plan.Raw, Schema: schema}
+}
+
 func testAccSecureRegistryPolicyConfig(cooldownEnabled bool, periodInDays int, compromisedEnabled bool) string {
 	return testProviderConfig() + fmt.Sprintf(`
 resource "stepsecurity_secure_registry_policy" "test" {
@@ -341,4 +775,58 @@ resource "stepsecurity_secure_registry_policy" "test" {
   }
 }
 `, compromisedEnabled)
+}
+
+func quotedPatternsList(patterns []string) string {
+	quoted := make([]string, len(patterns))
+	for i, p := range patterns {
+		quoted[i] = fmt.Sprintf("%q", p)
+	}
+	return "[" + strings.Join(quoted, ", ") + "]"
+}
+
+func testAccSecureRegistryPolicyNpmFullConfig(blockListEnabled bool, patterns []string, rewriteTarballURLs bool) string {
+	return testProviderConfig() + fmt.Sprintf(`
+resource "stepsecurity_secure_registry_policy" "test" {
+  registry = "npm"
+
+  compromised_packages_control = {
+    enabled = true
+  }
+
+  custom_block_list_control = {
+    enabled  = %t
+    patterns = %s
+  }
+
+  npm_settings = {
+    rewrite_tarball_urls = %t
+  }
+}
+`, blockListEnabled, quotedPatternsList(patterns), rewriteTarballURLs)
+}
+
+func testAccSecureRegistryPolicyPypiBlockListConfig(blockListEnabled bool, patterns []string) string {
+	return testProviderConfig() + fmt.Sprintf(`
+resource "stepsecurity_secure_registry_policy" "pypi_test" {
+  registry = "pypi"
+
+  custom_block_list_control = {
+    enabled  = %t
+    patterns = %s
+  }
+}
+`, blockListEnabled, quotedPatternsList(patterns))
+}
+
+func testAccSecureRegistryPolicyPypiWithNpmSettingsConfig() string {
+	return testProviderConfig() + `
+resource "stepsecurity_secure_registry_policy" "pypi_test" {
+  registry = "pypi"
+
+  npm_settings = {
+    rewrite_tarball_urls = true
+  }
+}
+`
 }

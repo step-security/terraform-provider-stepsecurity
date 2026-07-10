@@ -22,9 +22,10 @@ import (
 )
 
 var (
-	_ resource.Resource                = &secureRegistryPolicyResource{}
-	_ resource.ResourceWithConfigure   = &secureRegistryPolicyResource{}
-	_ resource.ResourceWithImportState = &secureRegistryPolicyResource{}
+	_ resource.Resource                   = &secureRegistryPolicyResource{}
+	_ resource.ResourceWithConfigure      = &secureRegistryPolicyResource{}
+	_ resource.ResourceWithImportState    = &secureRegistryPolicyResource{}
+	_ resource.ResourceWithValidateConfig = &secureRegistryPolicyResource{}
 )
 
 // cooldownControlAttrTypes defines the types for the cooldown_control nested object.
@@ -39,6 +40,17 @@ var compromisedPackagesControlAttrTypes = map[string]attr.Type{
 	"enabled": types.BoolType,
 }
 
+// customBlockListControlAttrTypes defines the types for the custom_block_list_control nested object.
+var customBlockListControlAttrTypes = map[string]attr.Type{
+	"enabled":  types.BoolType,
+	"patterns": types.SetType{ElemType: types.StringType},
+}
+
+// npmSettingsAttrTypes defines the types for the npm_settings nested object.
+var npmSettingsAttrTypes = map[string]attr.Type{
+	"rewrite_tarball_urls": types.BoolType,
+}
+
 func NewSecureRegistryPolicyResource() resource.Resource {
 	return &secureRegistryPolicyResource{}
 }
@@ -51,6 +63,8 @@ type secureRegistryPolicyResourceModel struct {
 	Registry                   types.String `tfsdk:"registry"`
 	CooldownControl            types.Object `tfsdk:"cooldown_control"`
 	CompromisedPackagesControl types.Object `tfsdk:"compromised_packages_control"`
+	CustomBlockListControl     types.Object `tfsdk:"custom_block_list_control"`
+	NpmSettings                types.Object `tfsdk:"npm_settings"`
 }
 
 type cooldownControlModel struct {
@@ -61,6 +75,15 @@ type cooldownControlModel struct {
 
 type compromisedPackagesControlModel struct {
 	Enabled types.Bool `tfsdk:"enabled"`
+}
+
+type customBlockListControlModel struct {
+	Enabled  types.Bool `tfsdk:"enabled"`
+	Patterns types.Set  `tfsdk:"patterns"`
+}
+
+type npmSettingsModel struct {
+	RewriteTarballURLs types.Bool `tfsdk:"rewrite_tarball_urls"`
 }
 
 func (r *secureRegistryPolicyResource) Metadata(_ context.Context, req resource.MetadataRequest, resp *resource.MetadataResponse) {
@@ -115,7 +138,54 @@ func (r *secureRegistryPolicyResource) Schema(_ context.Context, _ resource.Sche
 					},
 				},
 			},
+			"custom_block_list_control": schema.SingleNestedAttribute{
+				Optional:            true,
+				MarkdownDescription: "Explicitly blocks packages or versions matching configured glob patterns. Supported for both `npm` and `pypi`.",
+				Attributes: map[string]schema.Attribute{
+					"enabled": schema.BoolAttribute{
+						Required:            true,
+						MarkdownDescription: "Whether the custom block list control is enabled.",
+					},
+					"patterns": schema.SetAttribute{
+						ElementType:         types.StringType,
+						Optional:            true,
+						MarkdownDescription: "Package/version glob patterns to block. Supports exact names, version globs (`package@*`), and exact versions (`package@1.2.3`). For npm, scoped wildcards (`@scope/*`) are also supported. Order-insensitive — reordering entries produces no plan diff.",
+					},
+				},
+			},
+			"npm_settings": schema.SingleNestedAttribute{
+				Optional:            true,
+				MarkdownDescription: "npm-specific registry settings. Only applicable when `registry = \"npm\"`; setting this for any other registry raises a plan-time error.",
+				Attributes: map[string]schema.Attribute{
+					"rewrite_tarball_urls": schema.BoolAttribute{
+						Required:            true,
+						MarkdownDescription: "Whether to rewrite `dist.tarball` URLs in npm package metadata so tarballs are served through the secure registry.",
+					},
+				},
+			},
 		},
+	}
+}
+
+// ValidateConfig rejects npm_settings on non-npm registries at plan time, giving a
+// clearer error than the backend's 400 ("npm_settings is not applicable to registry %s").
+func (r *secureRegistryPolicyResource) ValidateConfig(ctx context.Context, req resource.ValidateConfigRequest, resp *resource.ValidateConfigResponse) {
+	var model secureRegistryPolicyResourceModel
+	resp.Diagnostics.Append(req.Config.Get(ctx, &model)...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+
+	if model.Registry.IsUnknown() || model.Registry.IsNull() {
+		return
+	}
+
+	if model.Registry.ValueString() != "npm" && !model.NpmSettings.IsNull() {
+		resp.Diagnostics.AddAttributeError(
+			path.Root("npm_settings"),
+			"npm_settings not applicable",
+			fmt.Sprintf("npm_settings is not applicable to registry %q. Remove this block or set registry to \"npm\".", model.Registry.ValueString()),
+		)
 	}
 }
 
@@ -293,6 +363,39 @@ func (r *secureRegistryPolicyResource) buildUpsertRequest(
 		req.CompromisedPackages = &stepsecurityapi.CompromisedPackagesControl{Enabled: false}
 	}
 
+	// custom_block_list_control
+	if !plan.CustomBlockListControl.IsNull() {
+		var m customBlockListControlModel
+		diags.Append(plan.CustomBlockListControl.As(ctx, &m, basetypes.ObjectAsOptions{})...)
+		if diags.HasError() {
+			return req
+		}
+		ctrl := &stepsecurityapi.CustomBlockListControl{
+			Enabled: m.Enabled.ValueBool(),
+		}
+		if !m.Patterns.IsNull() {
+			var patterns []string
+			diags.Append(m.Patterns.ElementsAs(ctx, &patterns, false)...)
+			ctrl.Patterns = patterns
+		}
+		req.CustomBlockList = ctrl
+	} else if prevState != nil && !prevState.CustomBlockListControl.IsNull() {
+		req.CustomBlockList = &stepsecurityapi.CustomBlockListControl{Enabled: false, Patterns: []string{}}
+	}
+
+	// npm_settings — always send the current desired value when present in plan; on
+	// removal from config, reset to false so the backend doesn't keep a stale value.
+	if !plan.NpmSettings.IsNull() {
+		var m npmSettingsModel
+		diags.Append(plan.NpmSettings.As(ctx, &m, basetypes.ObjectAsOptions{})...)
+		if diags.HasError() {
+			return req
+		}
+		req.NpmSettings = &stepsecurityapi.NpmSettingsControl{RewriteTarballURLs: m.RewriteTarballURLs.ValueBool()}
+	} else if prevState != nil && !prevState.NpmSettings.IsNull() {
+		req.NpmSettings = &stepsecurityapi.NpmSettingsControl{RewriteTarballURLs: false}
+	}
+
 	return req
 }
 
@@ -313,6 +416,12 @@ func (r *secureRegistryPolicyResource) applyAPIResponseToModel(
 
 	// compromised_packages_control
 	model.CompromisedPackagesControl = r.buildCompromisedPackagesControlObject(controls.CompromisedPackages, ref, diags)
+
+	// custom_block_list_control
+	model.CustomBlockListControl = r.buildCustomBlockListControlObject(ctx, controls.CustomBlockList, ref, diags)
+
+	// npm_settings
+	model.NpmSettings = r.buildNpmSettingsObject(controls.NpmSettings, ref, diags)
 }
 
 // buildCooldownControlObject converts the API cooldown period to a Terraform object.
@@ -385,6 +494,83 @@ func (r *secureRegistryPolicyResource) buildCompromisedPackagesControlObject(
 
 	obj, objDiags := types.ObjectValue(compromisedPackagesControlAttrTypes, map[string]attr.Value{
 		"enabled": types.BoolValue(ctrl.Enabled),
+	})
+	diags.Append(objDiags...)
+	return obj
+}
+
+// buildCustomBlockListControlObject converts the API custom block list control to a Terraform object.
+// If the control is disabled and ref did not track it, null is returned so the
+// user's state stays clean.
+func (r *secureRegistryPolicyResource) buildCustomBlockListControlObject(
+	ctx context.Context,
+	ctrl *stepsecurityapi.CustomBlockListControl,
+	ref *secureRegistryPolicyResourceModel,
+	diags *diag.Diagnostics,
+) types.Object {
+	if ctrl == nil {
+		return types.ObjectNull(customBlockListControlAttrTypes)
+	}
+
+	refTracking := ref != nil && !ref.CustomBlockListControl.IsNull()
+	if !ctrl.Enabled && !refTracking {
+		// Disabled and not previously tracked — treat as not configured.
+		return types.ObjectNull(customBlockListControlAttrTypes)
+	}
+
+	var patternsVal attr.Value
+	if len(ctrl.Patterns) > 0 {
+		vals := make([]attr.Value, len(ctrl.Patterns))
+		for i, v := range ctrl.Patterns {
+			vals[i] = types.StringValue(v)
+		}
+		setVal, setDiags := types.SetValue(types.StringType, vals)
+		diags.Append(setDiags...)
+		patternsVal = setVal
+	} else {
+		// Preserve existing patterns value if it was an explicit empty set.
+		if refTracking {
+			var existingM customBlockListControlModel
+			if diag := ref.CustomBlockListControl.As(ctx, &existingM, basetypes.ObjectAsOptions{}); !diag.HasError() && !existingM.Patterns.IsNull() {
+				emptySet, emptyDiags := types.SetValue(types.StringType, []attr.Value{})
+				diags.Append(emptyDiags...)
+				patternsVal = emptySet
+			} else {
+				patternsVal = types.SetNull(types.StringType)
+			}
+		} else {
+			patternsVal = types.SetNull(types.StringType)
+		}
+	}
+
+	obj, objDiags := types.ObjectValue(customBlockListControlAttrTypes, map[string]attr.Value{
+		"enabled":  types.BoolValue(ctrl.Enabled),
+		"patterns": patternsVal,
+	})
+	diags.Append(objDiags...)
+	return obj
+}
+
+// buildNpmSettingsObject converts the API npm settings to a Terraform object.
+// If the setting is off (false) and ref did not track it, null is returned so the
+// user's state stays clean — mirrors the enabled/disabled null-preservation rule
+// used by the other controls, treating RewriteTarballURLs as the pseudo-enabled signal.
+func (r *secureRegistryPolicyResource) buildNpmSettingsObject(
+	ctrl *stepsecurityapi.NpmSettingsControl,
+	ref *secureRegistryPolicyResourceModel,
+	diags *diag.Diagnostics,
+) types.Object {
+	if ctrl == nil {
+		return types.ObjectNull(npmSettingsAttrTypes)
+	}
+
+	refTracking := ref != nil && !ref.NpmSettings.IsNull()
+	if !ctrl.RewriteTarballURLs && !refTracking {
+		return types.ObjectNull(npmSettingsAttrTypes)
+	}
+
+	obj, objDiags := types.ObjectValue(npmSettingsAttrTypes, map[string]attr.Value{
+		"rewrite_tarball_urls": types.BoolValue(ctrl.RewriteTarballURLs),
 	})
 	diags.Append(objDiags...)
 	return obj
