@@ -9,6 +9,7 @@ import (
 	"github.com/google/go-cmp/cmp"
 	"github.com/google/go-cmp/cmp/cmpopts"
 	"github.com/hashicorp/terraform-plugin-framework/attr"
+	"github.com/hashicorp/terraform-plugin-framework/diag"
 	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
@@ -188,7 +189,7 @@ func (r *githubChecksResource) ImportState(ctx context.Context, req resource.Imp
 
 type githubChecksModel struct {
 	Owner             types.String  `tfsdk:"owner"`
-	Controls          []control     `tfsdk:"controls"`
+	Controls          types.List    `tfsdk:"controls"`
 	RequiredChecks    *checksConfig `tfsdk:"required_checks"`
 	OptionalChecks    *checksConfig `tfsdk:"optional_checks"`
 	BaselineCheck     *checksConfig `tfsdk:"baseline_check"`
@@ -207,6 +208,40 @@ type control struct {
 	Settings types.Object `tfsdk:"settings"`
 }
 
+// controlSettingsAttrTypes returns the attribute types for a control's "settings" object.
+func controlSettingsAttrTypes() map[string]attr.Type {
+	return map[string]attr.Type{
+		"cool_down_period":                     types.Int64Type,
+		"packages_to_exempt_in_cooldown_check": types.ListType{ElemType: types.StringType},
+	}
+}
+
+// controlObjectType returns the object type of a single element of the "controls" list.
+// The "controls" attribute is bound to types.List (rather than a plain Go slice) so that
+// the framework can represent an unknown list value (e.g. when it is derived from a value
+// that is not known until apply); a plain []control cannot represent "unknown".
+func controlObjectType() types.ObjectType {
+	return types.ObjectType{
+		AttrTypes: map[string]attr.Type{
+			"control": types.StringType,
+			"enable":  types.BoolType,
+			"type":    types.StringType,
+			"settings": types.ObjectType{
+				AttrTypes: controlSettingsAttrTypes(),
+			},
+		},
+	}
+}
+
+// diagsToError flattens error diagnostics into a single error.
+func diagsToError(diags diag.Diagnostics) error {
+	msgs := make([]string, 0, len(diags))
+	for _, d := range diags.Errors() {
+		msgs = append(msgs, fmt.Sprintf("%s: %s", d.Summary(), d.Detail()))
+	}
+	return fmt.Errorf("%s", strings.Join(msgs, "; "))
+}
+
 func (r *githubChecksResource) ValidateConfig(ctx context.Context, req resource.ValidateConfigRequest, resp *resource.ValidateConfigResponse) {
 	var config githubChecksModel
 	diags := req.Config.Get(ctx, &config)
@@ -222,66 +257,79 @@ func (r *githubChecksResource) ValidateConfig(ctx context.Context, req resource.
 		)
 	}
 
-	if len(config.Controls) == 0 {
+	hasRequired := false
+	hasOptional := false
+
+	if config.Controls.IsUnknown() {
+		// The whole controls list is unknown (e.g., it is derived from a value that
+		// isn't known until apply, such as a for_each over an unresolved collection).
+		// Skip control-level validation until the value is known; it will be
+		// re-validated on a subsequent plan.
+	} else if config.Controls.IsNull() || len(config.Controls.Elements()) == 0 {
 		resp.Diagnostics.AddError(
 			"Controls are required",
 			"Controls are required to create a GitHub Checks resource",
 		)
-	}
-
-	hasRequired := false
-	hasOptional := false
-	for _, control := range config.Controls {
-		// Skip validation if control attributes are unknown (e.g., when using for_each or count)
-		if control.Control.IsUnknown() || control.Type.IsUnknown() || control.Enable.IsUnknown() {
-			continue
+	} else {
+		var controls []control
+		diags = config.Controls.ElementsAs(ctx, &controls, false)
+		resp.Diagnostics.Append(diags...)
+		if resp.Diagnostics.HasError() {
+			return
 		}
 
-		if _, ok := stepsecurityapi.AvailableControls[control.Control.ValueString()]; !ok {
-			resp.Diagnostics.AddError(
-				"Invalid control provided",
-				"only the following controls are accepted to configure: "+strings.Join(stepsecurityapi.GetAvailableControls(), ", \n"),
-			)
-		}
+		for _, control := range controls {
+			// Skip validation if control attributes are unknown (e.g., when using for_each or count)
+			if control.Control.IsUnknown() || control.Type.IsUnknown() || control.Enable.IsUnknown() {
+				continue
+			}
 
-		if control.Type.ValueString() == "required" && control.Enable.ValueBool() {
-			hasRequired = true
-		}
-		if control.Type.ValueString() == "optional" && control.Enable.ValueBool() {
-			hasOptional = true
-		}
-		if control.Type.ValueString() != "required" && control.Type.ValueString() != "optional" {
-			resp.Diagnostics.AddError(
-				"Type can only be 'required' or 'optional'",
-				"Type can only be 'required' or 'optional'",
-			)
-		}
+			if _, ok := stepsecurityapi.AvailableControls[control.Control.ValueString()]; !ok {
+				resp.Diagnostics.AddError(
+					"Invalid control provided",
+					"only the following controls are accepted to configure: "+strings.Join(stepsecurityapi.GetAvailableControls(), ", \n"),
+				)
+			}
 
-		isCooldownControl := control.Control.ValueString() == "NPM Package Cooldown" ||
-			control.Control.ValueString() == "PyPI Package Cooldown" ||
-			control.Control.ValueString() == "Maven Package Cooldown"
-		if !isCooldownControl && !control.Settings.IsNull() && !control.Settings.IsUnknown() {
-			resp.Diagnostics.AddError(
-				"can't provide settings",
-				"can't provide settings for control "+control.Control.ValueString(),
-			)
-		}
+			if control.Type.ValueString() == "required" && control.Enable.ValueBool() {
+				hasRequired = true
+			}
+			if control.Type.ValueString() == "optional" && control.Enable.ValueBool() {
+				hasOptional = true
+			}
+			if control.Type.ValueString() != "required" && control.Type.ValueString() != "optional" {
+				resp.Diagnostics.AddError(
+					"Type can only be 'required' or 'optional'",
+					"Type can only be 'required' or 'optional'",
+				)
+			}
 
-		if isCooldownControl && !control.Settings.IsNull() && !control.Settings.IsUnknown() {
-			// Extract cooldown period from the object
-			if cooldownAttr := control.Settings.Attributes()["cool_down_period"]; cooldownAttr != nil {
-				if cooldownValue, ok := cooldownAttr.(types.Int64); ok {
-					period := cooldownValue.ValueInt64()
-					if period != 0 && (period < 1 || period > 30) {
-						resp.Diagnostics.AddError(
-							"cool_down_period should be between 1 and 30",
-							"cool_down_period should be between 1 and 30 for control "+control.Control.ValueString(),
-						)
+			isCooldownControl := control.Control.ValueString() == "NPM Package Cooldown" ||
+				control.Control.ValueString() == "PyPI Package Cooldown" ||
+				control.Control.ValueString() == "Maven Package Cooldown"
+			if !isCooldownControl && !control.Settings.IsNull() && !control.Settings.IsUnknown() {
+				resp.Diagnostics.AddError(
+					"can't provide settings",
+					"can't provide settings for control "+control.Control.ValueString(),
+				)
+			}
+
+			if isCooldownControl && !control.Settings.IsNull() && !control.Settings.IsUnknown() {
+				// Extract cooldown period from the object
+				if cooldownAttr := control.Settings.Attributes()["cool_down_period"]; cooldownAttr != nil {
+					if cooldownValue, ok := cooldownAttr.(types.Int64); ok {
+						period := cooldownValue.ValueInt64()
+						if period != 0 && (period < 1 || period > 30) {
+							resp.Diagnostics.AddError(
+								"cool_down_period should be between 1 and 30",
+								"cool_down_period should be between 1 and 30 for control "+control.Control.ValueString(),
+							)
+						}
 					}
 				}
 			}
-		}
 
+		}
 	}
 
 	if config.RequiredChecks != nil && len(config.RequiredChecks.Repos.Elements()) != 0 && !hasRequired {
@@ -386,9 +434,20 @@ func (r *githubChecksResource) ModifyPlan(ctx context.Context, req resource.Modi
 		return
 	}
 
+	if plan.Controls.IsUnknown() || plan.Controls.IsNull() {
+		return
+	}
+
+	var controls []control
+	diags = plan.Controls.ElementsAs(ctx, &controls, false)
+	resp.Diagnostics.Append(diags...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+
 	modified := false
 
-	for ind, control := range plan.Controls {
+	for ind, control := range controls {
 
 		if (control.Control.ValueString() == "NPM Package Cooldown" ||
 			control.Control.ValueString() == "PyPI Package Cooldown" ||
@@ -398,20 +457,21 @@ func (r *githubChecksResource) ModifyPlan(ctx context.Context, req resource.Modi
 				"cool_down_period":                     types.Int64Value(2),
 				"packages_to_exempt_in_cooldown_check": types.ListNull(types.StringType),
 			}
-			settingsType := types.ObjectType{
-				AttrTypes: map[string]attr.Type{
-					"cool_down_period":                     types.Int64Type,
-					"packages_to_exempt_in_cooldown_check": types.ListType{ElemType: types.StringType},
-				},
-			}
-			control.Settings, _ = types.ObjectValue(settingsType.AttrTypes, settingsMap)
-			plan.Controls[ind] = control
+			control.Settings, _ = types.ObjectValue(controlSettingsAttrTypes(), settingsMap)
+			controls[ind] = control
 			modified = true
 		}
 	}
 
 	// Set the plan back (either because it was modified )
 	if modified {
+		newControls, listDiags := types.ListValueFrom(ctx, controlObjectType(), controls)
+		resp.Diagnostics.Append(listDiags...)
+		if resp.Diagnostics.HasError() {
+			return
+		}
+		plan.Controls = newControls
+
 		diags = resp.Plan.Set(ctx, plan)
 		resp.Diagnostics.Append(diags...)
 		if resp.Diagnostics.HasError() {
@@ -430,7 +490,7 @@ func (r *githubChecksResource) Create(ctx context.Context, req resource.CreateRe
 		return
 	}
 
-	createRequest, err := r.convertToCreateRequest(plan)
+	createRequest, err := r.convertToCreateRequest(ctx, plan)
 	if err != nil {
 		resp.Diagnostics.AddError(
 			"Error creating GitHub Checks",
@@ -448,7 +508,7 @@ func (r *githubChecksResource) Create(ctx context.Context, req resource.CreateRe
 		return
 	}
 
-	state := r.convertToState(plan.Owner.ValueString(), *createRequest)
+	state := r.convertToState(ctx, plan.Owner.ValueString(), *createRequest)
 	state.Owner = types.StringValue(plan.Owner.ValueString())
 	r.updateStateListsWithOrderFromPlan(ctx, plan, &state)
 
@@ -478,7 +538,7 @@ func (r *githubChecksResource) Read(ctx context.Context, req resource.ReadReques
 		return
 	}
 
-	newState := r.convertToState(state.Owner.ValueString(), config)
+	newState := r.convertToState(ctx, state.Owner.ValueString(), config)
 	r.updateStateListsWithOrderFromPlan(ctx, state, &newState)
 
 	diags = resp.State.Set(ctx, newState)
@@ -497,7 +557,7 @@ func (r *githubChecksResource) Update(ctx context.Context, req resource.UpdateRe
 		return
 	}
 
-	updateRequest, err := r.convertToCreateRequest(plan)
+	updateRequest, err := r.convertToCreateRequest(ctx, plan)
 	if err != nil {
 		resp.Diagnostics.AddError(
 			"Error creating GitHub Checks",
@@ -515,7 +575,7 @@ func (r *githubChecksResource) Update(ctx context.Context, req resource.UpdateRe
 		return
 	}
 
-	state := r.convertToState(plan.Owner.ValueString(), *updateRequest)
+	state := r.convertToState(ctx, plan.Owner.ValueString(), *updateRequest)
 	state.Owner = types.StringValue(plan.Owner.ValueString())
 	r.updateStateListsWithOrderFromPlan(ctx, plan, &state)
 
@@ -555,10 +615,19 @@ func (r *githubChecksResource) Delete(ctx context.Context, req resource.DeleteRe
 
 }
 
-func (r *githubChecksResource) convertToCreateRequest(plan githubChecksModel) (*stepsecurityapi.GitHubPRChecksConfig, error) {
+func (r *githubChecksResource) convertToCreateRequest(ctx context.Context, plan githubChecksModel) (*stepsecurityapi.GitHubPRChecksConfig, error) {
 	prChecksConfig := stepsecurityapi.GitHubPRChecksConfig{}
 	prChecksConfig.Checks = make(map[string]stepsecurityapi.CheckConfig)
-	for _, control := range plan.Controls {
+
+	var controls []control
+	if !plan.Controls.IsNull() && !plan.Controls.IsUnknown() {
+		diags := plan.Controls.ElementsAs(ctx, &controls, false)
+		if diags.HasError() {
+			return nil, diagsToError(diags)
+		}
+	}
+
+	for _, control := range controls {
 		controlName := control.Control.ValueString()
 		checkConfig := stepsecurityapi.CheckConfig{
 			Enabled: control.Enable.ValueBool(),
@@ -746,7 +815,7 @@ func (r *githubChecksResource) convertToCreateRequest(plan githubChecksModel) (*
 	return &prChecksConfig, nil
 }
 
-func (r *githubChecksResource) convertToState(owner string, config stepsecurityapi.GitHubPRChecksConfig) githubChecksModel {
+func (r *githubChecksResource) convertToState(ctx context.Context, owner string, config stepsecurityapi.GitHubPRChecksConfig) githubChecksModel {
 	model := githubChecksModel{}
 	model.Owner = types.StringValue(owner)
 	if config.CustomDescription != "" {
@@ -755,8 +824,8 @@ func (r *githubChecksResource) convertToState(owner string, config stepsecuritya
 		model.CustomDescription = types.StringNull()
 	}
 
-	// Initialize Controls as empty slice instead of nil
-	model.Controls = []control{}
+	// Initialize controls as an empty slice instead of nil
+	controls := []control{}
 
 	// Don't initialize pointer fields yet - only initialize them if needed
 
@@ -820,29 +889,22 @@ func (r *githubChecksResource) convertToState(owner string, config stepsecuritya
 				"cool_down_period":                     cooldownPeriod,
 				"packages_to_exempt_in_cooldown_check": packagesList,
 			}
-			settingsType := types.ObjectType{
-				AttrTypes: map[string]attr.Type{
-					"cool_down_period":                     types.Int64Type,
-					"packages_to_exempt_in_cooldown_check": types.ListType{ElemType: types.StringType},
-				},
-			}
-			c.Settings, _ = types.ObjectValue(settingsType.AttrTypes, settingsMap)
+			c.Settings, _ = types.ObjectValue(controlSettingsAttrTypes(), settingsMap)
 		} else {
 			// For non-NPM controls or controls without settings, set to null
-			c.Settings = types.ObjectNull(map[string]attr.Type{
-				"cool_down_period":                     types.Int64Type,
-				"packages_to_exempt_in_cooldown_check": types.ListType{ElemType: types.StringType},
-			})
+			c.Settings = types.ObjectNull(controlSettingsAttrTypes())
 		}
 
-		model.Controls = append(model.Controls, c)
+		controls = append(controls, c)
 	}
 
 	// Sort controls by name to ensure deterministic order
 	// This prevents Terraform from detecting changes due to random map iteration order
-	sort.Slice(model.Controls, func(i, j int) bool {
-		return model.Controls[i].Control.ValueString() < model.Controls[j].Control.ValueString()
+	sort.Slice(controls, func(i, j int) bool {
+		return controls[i].Control.ValueString() < controls[j].Control.ValueString()
 	})
+
+	model.Controls, _ = types.ListValueFrom(ctx, controlObjectType(), controls)
 
 	// Flags for applying checks to all repos
 	isBaselineAll := config.EnableBaselineCheckForAllNewRepos != nil && *config.EnableBaselineCheckForAllNewRepos
@@ -904,7 +966,7 @@ func (r *githubChecksResource) convertToState(owner string, config stepsecuritya
 	hasRequiredControls := false
 	hasOptionalControls := false
 
-	for _, control := range model.Controls {
+	for _, control := range controls {
 		if control.Enable.ValueBool() {
 			switch control.Type.ValueString() {
 			case "required":
@@ -1020,15 +1082,27 @@ func (r *githubChecksResource) updateStateListsWithOrderFromPlan(ctx context.Con
 	}
 
 	// preserve order of controls
+	if plan.Controls.IsUnknown() || plan.Controls.IsNull() || state.Controls.IsUnknown() || state.Controls.IsNull() {
+		return
+	}
+
+	var planControls, stateControls []control
+	if diags := plan.Controls.ElementsAs(ctx, &planControls, false); diags.HasError() {
+		return
+	}
+	if diags := state.Controls.ElementsAs(ctx, &stateControls, false); diags.HasError() {
+		return
+	}
+
 	// Create a map of controls from state for efficient lookup
 	controls2Map := make(map[string]control)
-	for _, ctrl := range state.Controls {
+	for _, ctrl := range stateControls {
 		controls2Map[ctrl.Control.ValueString()] = ctrl
 	}
 
 	// Reorder state controls to match plan order
-	orderedControls := make([]control, 0, len(plan.Controls))
-	for _, ctrl := range plan.Controls {
+	orderedControls := make([]control, 0, len(planControls))
+	for _, ctrl := range planControls {
 		if _, exists := controls2Map[ctrl.Control.ValueString()]; !exists {
 			tflog.Info(ctx, "Control not found in state", map[string]any{
 				"control": ctrl.Control.ValueString(),
@@ -1037,7 +1111,7 @@ func (r *githubChecksResource) updateStateListsWithOrderFromPlan(ctx context.Con
 		}
 		orderedControls = append(orderedControls, controls2Map[ctrl.Control.ValueString()])
 	}
-	state.Controls = orderedControls
+	state.Controls, _ = types.ListValueFrom(ctx, controlObjectType(), orderedControls)
 
 }
 
