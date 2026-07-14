@@ -259,12 +259,18 @@ func (r *githubChecksResource) ValidateConfig(ctx context.Context, req resource.
 
 	hasRequired := false
 	hasOptional := false
+	// controlsIndeterminate is true whenever we could not fully evaluate every control's
+	// type/enable state (the whole list is unknown, or an individual control's fields are
+	// unknown). In that case hasRequired/hasOptional cannot be trusted, so cross-checks that
+	// depend on them must be skipped until a later plan when the values are known.
+	controlsIndeterminate := false
 
 	if config.Controls.IsUnknown() {
 		// The whole controls list is unknown (e.g., it is derived from a value that
 		// isn't known until apply, such as a for_each over an unresolved collection).
 		// Skip control-level validation until the value is known; it will be
 		// re-validated on a subsequent plan.
+		controlsIndeterminate = true
 	} else if config.Controls.IsNull() || len(config.Controls.Elements()) == 0 {
 		resp.Diagnostics.AddError(
 			"Controls are required",
@@ -281,6 +287,7 @@ func (r *githubChecksResource) ValidateConfig(ctx context.Context, req resource.
 		for _, control := range controls {
 			// Skip validation if control attributes are unknown (e.g., when using for_each or count)
 			if control.Control.IsUnknown() || control.Type.IsUnknown() || control.Enable.IsUnknown() {
+				controlsIndeterminate = true
 				continue
 			}
 
@@ -332,14 +339,14 @@ func (r *githubChecksResource) ValidateConfig(ctx context.Context, req resource.
 		}
 	}
 
-	if config.RequiredChecks != nil && len(config.RequiredChecks.Repos.Elements()) != 0 && !hasRequired {
+	if !controlsIndeterminate && config.RequiredChecks != nil && len(config.RequiredChecks.Repos.Elements()) != 0 && !hasRequired {
 		resp.Diagnostics.AddError(
 			"can't provide repos for required checks without enabling any control for required checks",
 			"No control of type 'required' is enabled to apply to the repos",
 		)
 	}
 
-	if config.OptionalChecks != nil && len(config.OptionalChecks.Repos.Elements()) != 0 && !hasOptional {
+	if !controlsIndeterminate && config.OptionalChecks != nil && len(config.OptionalChecks.Repos.Elements()) != 0 && !hasOptional {
 		resp.Diagnostics.AddError(
 			"can't provide repos for optional checks without enabling any control for optional checks",
 			"No control of type 'optional' is enabled to apply to the repos",

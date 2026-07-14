@@ -671,6 +671,59 @@ func TestGithubChecksResource_ValidateConfig_UnknownControlsList(t *testing.T) {
 	assert.False(t, validateResp.Diagnostics.HasError(), "unexpected diagnostics: %v", validateResp.Diagnostics)
 }
 
+// TestGithubChecksResource_ValidateConfig_UnknownControlsListWithKnownRepos is a regression
+// test for a false positive introduced while fixing the crash covered by
+// TestGithubChecksResource_ValidateConfig_UnknownControlsList above: when "controls" is
+// unknown but required_checks/baseline_check repos are known literals (e.g. "*", as in a
+// customer config using terraform_data to make controls unknown on the first plan),
+// ValidateConfig must not error with "can't provide repos for required checks without
+// enabling any control for required checks". hasRequired/hasOptional cannot be determined
+// while controls is unknown, so those cross-checks must be skipped until a later plan when
+// controls becomes known.
+func TestGithubChecksResource_ValidateConfig_UnknownControlsListWithKnownRepos(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	r := &githubChecksResource{}
+
+	schemaResp := &resource.SchemaResponse{}
+	r.Schema(ctx, resource.SchemaRequest{}, schemaResp)
+	if schemaResp.Diagnostics.HasError() {
+		t.Fatalf("unexpected schema diagnostics: %v", schemaResp.Diagnostics)
+	}
+
+	starList, diags := types.ListValue(types.StringType, []attr.Value{types.StringValue("*")})
+	if diags.HasError() {
+		t.Fatalf("unexpected diagnostics building repos list: %v", diags)
+	}
+
+	model := githubChecksModel{
+		Owner:    types.StringValue(testOwner),
+		Controls: types.ListUnknown(controlObjectType()),
+		RequiredChecks: &checksConfig{
+			Repos:     starList,
+			OmitRepos: types.ListNull(types.StringType),
+		},
+		BaselineCheck: &checksConfig{
+			Repos:     starList,
+			OmitRepos: types.ListNull(types.StringType),
+		},
+	}
+
+	plan := tfsdk.Plan{Schema: schemaResp.Schema}
+	planDiags := plan.Set(ctx, model)
+	if planDiags.HasError() {
+		t.Fatalf("unexpected diagnostics setting plan: %v", planDiags)
+	}
+
+	config := tfsdk.Config{Raw: plan.Raw, Schema: schemaResp.Schema}
+	validateResp := &resource.ValidateConfigResponse{}
+
+	r.ValidateConfig(ctx, resource.ValidateConfigRequest{Config: config}, validateResp)
+
+	assert.False(t, validateResp.Diagnostics.HasError(), "unexpected diagnostics (false positive on unknown controls + known repos): %v", validateResp.Diagnostics)
+}
+
 func TestGithubChecksResource_ConvertToCreateRequest(t *testing.T) {
 	t.Parallel()
 
