@@ -8,6 +8,7 @@ import (
 
 	"github.com/hashicorp/terraform-plugin-framework/attr"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
+	"github.com/hashicorp/terraform-plugin-framework/tfsdk"
 	"github.com/hashicorp/terraform-plugin-framework/types"
 	res "github.com/hashicorp/terraform-plugin-testing/helper/resource"
 	"github.com/stretchr/testify/assert"
@@ -56,6 +57,29 @@ func createNullSettingsObject() types.Object {
 		"cool_down_period":                     types.Int64Type,
 		"packages_to_exempt_in_cooldown_check": types.ListType{ElemType: types.StringType},
 	})
+}
+
+// mustControlsList converts a []control slice into the types.List value that the
+// "controls" attribute is now bound to.
+func mustControlsList(controls []control) types.List {
+	list, diags := types.ListValueFrom(context.Background(), controlObjectType(), controls)
+	if diags.HasError() {
+		panic(diagsToError(diags))
+	}
+	return list
+}
+
+// controlsListToSlice decodes a "controls" types.List back into a []control slice for assertions.
+func controlsListToSlice(list types.List) []control {
+	if list.IsNull() || list.IsUnknown() {
+		return nil
+	}
+	var controls []control
+	diags := list.ElementsAs(context.Background(), &controls, false)
+	if diags.HasError() {
+		panic(diagsToError(diags))
+	}
+	return controls
 }
 
 func TestAccGithubChecksResource(t *testing.T) {
@@ -349,14 +373,14 @@ func TestGithubChecksResource_ValidateConfig(t *testing.T) {
 			name: "valid_config",
 			config: githubChecksModel{
 				Owner: types.StringValue(testOwner),
-				Controls: []control{
+				Controls: mustControlsList([]control{
 					{
 						Control:  types.StringValue("Script Injection"),
 						Enable:   types.BoolValue(true),
 						Type:     types.StringValue("required"),
 						Settings: createNullSettingsObject(),
 					},
-				},
+				}),
 				RequiredChecks: &checksConfig{
 					Repos: func() types.List {
 						elements := []attr.Value{types.StringValue("*")}
@@ -371,14 +395,14 @@ func TestGithubChecksResource_ValidateConfig(t *testing.T) {
 			name: "empty_owner",
 			config: githubChecksModel{
 				Owner: types.StringValue(""),
-				Controls: []control{
+				Controls: mustControlsList([]control{
 					{
 						Control:  types.StringValue("Script Injection"),
 						Enable:   types.BoolValue(true),
 						Type:     types.StringValue("required"),
 						Settings: createNullSettingsObject(),
 					},
-				},
+				}),
 			},
 			expectedError: true,
 			errorContains: "Owner is required",
@@ -387,7 +411,7 @@ func TestGithubChecksResource_ValidateConfig(t *testing.T) {
 			name: "empty_controls",
 			config: githubChecksModel{
 				Owner:    types.StringValue(testOwner),
-				Controls: []control{},
+				Controls: mustControlsList([]control{}),
 			},
 			expectedError: true,
 			errorContains: "Controls are required",
@@ -396,14 +420,14 @@ func TestGithubChecksResource_ValidateConfig(t *testing.T) {
 			name: "invalid_control",
 			config: githubChecksModel{
 				Owner: types.StringValue(testOwner),
-				Controls: []control{
+				Controls: mustControlsList([]control{
 					{
 						Control:  types.StringValue("Invalid Control"),
 						Enable:   types.BoolValue(true),
 						Type:     types.StringValue("required"),
 						Settings: createNullSettingsObject(),
 					},
-				},
+				}),
 			},
 			expectedError: true,
 			errorContains: "Invalid control provided",
@@ -412,14 +436,14 @@ func TestGithubChecksResource_ValidateConfig(t *testing.T) {
 			name: "invalid_type",
 			config: githubChecksModel{
 				Owner: types.StringValue(testOwner),
-				Controls: []control{
+				Controls: mustControlsList([]control{
 					{
 						Control:  types.StringValue("Script Injection"),
 						Enable:   types.BoolValue(true),
 						Type:     types.StringValue("invalid"),
 						Settings: createNullSettingsObject(),
 					},
-				},
+				}),
 			},
 			expectedError: true,
 			errorContains: "Type can only be 'required' or 'optional'",
@@ -428,14 +452,14 @@ func TestGithubChecksResource_ValidateConfig(t *testing.T) {
 			name: "cooldown_period_out_of_range",
 			config: githubChecksModel{
 				Owner: types.StringValue(testOwner),
-				Controls: []control{
+				Controls: mustControlsList([]control{
 					{
 						Control:  types.StringValue("NPM Package Cooldown"),
 						Enable:   types.BoolValue(true),
 						Type:     types.StringValue("required"),
 						Settings: createSettingsObject(func() *int64 { v := int64(50); return &v }(), nil),
 					},
-				},
+				}),
 			},
 			expectedError: true,
 			errorContains: "cool_down_period should be between 1 and 30",
@@ -444,14 +468,14 @@ func TestGithubChecksResource_ValidateConfig(t *testing.T) {
 			name: "valid_pypi_cooldown",
 			config: githubChecksModel{
 				Owner: types.StringValue(testOwner),
-				Controls: []control{
+				Controls: mustControlsList([]control{
 					{
 						Control:  types.StringValue("PyPI Package Cooldown"),
 						Enable:   types.BoolValue(true),
 						Type:     types.StringValue("required"),
 						Settings: createSettingsObject(func() *int64 { v := int64(5); return &v }(), nil),
 					},
-				},
+				}),
 				RequiredChecks: &checksConfig{
 					Repos: func() types.List {
 						elements := []attr.Value{types.StringValue("*")}
@@ -466,14 +490,14 @@ func TestGithubChecksResource_ValidateConfig(t *testing.T) {
 			name: "valid_pypi_compromised_updates",
 			config: githubChecksModel{
 				Owner: types.StringValue(testOwner),
-				Controls: []control{
+				Controls: mustControlsList([]control{
 					{
 						Control:  types.StringValue("PyPI Package Compromised Updates"),
 						Enable:   types.BoolValue(true),
 						Type:     types.StringValue("required"),
 						Settings: createNullSettingsObject(),
 					},
-				},
+				}),
 				RequiredChecks: &checksConfig{
 					Repos: func() types.List {
 						elements := []attr.Value{types.StringValue("*")}
@@ -488,14 +512,14 @@ func TestGithubChecksResource_ValidateConfig(t *testing.T) {
 			name: "pypi_cooldown_period_out_of_range",
 			config: githubChecksModel{
 				Owner: types.StringValue(testOwner),
-				Controls: []control{
+				Controls: mustControlsList([]control{
 					{
 						Control:  types.StringValue("PyPI Package Cooldown"),
 						Enable:   types.BoolValue(true),
 						Type:     types.StringValue("required"),
 						Settings: createSettingsObject(func() *int64 { v := int64(50); return &v }(), nil),
 					},
-				},
+				}),
 			},
 			expectedError: true,
 			errorContains: "cool_down_period should be between 1 and 30",
@@ -504,14 +528,14 @@ func TestGithubChecksResource_ValidateConfig(t *testing.T) {
 			name: "settings_provided_for_pypi_compromised_updates",
 			config: githubChecksModel{
 				Owner: types.StringValue(testOwner),
-				Controls: []control{
+				Controls: mustControlsList([]control{
 					{
 						Control:  types.StringValue("PyPI Package Compromised Updates"),
 						Enable:   types.BoolValue(true),
 						Type:     types.StringValue("required"),
 						Settings: createSettingsObject(func() *int64 { v := int64(3); return &v }(), nil),
 					},
-				},
+				}),
 			},
 			expectedError: true,
 			errorContains: "can't provide settings",
@@ -534,14 +558,16 @@ func TestGithubChecksResource_ValidateConfig(t *testing.T) {
 				)
 			}
 
-			if len(tc.config.Controls) == 0 {
+			configControls := controlsListToSlice(tc.config.Controls)
+
+			if len(configControls) == 0 {
 				mockResp.Diagnostics.AddError(
 					"Controls are required",
 					"Controls are required to create a GitHub Checks resource",
 				)
 			}
 
-			for _, control := range tc.config.Controls {
+			for _, control := range configControls {
 				if _, ok := stepsecurityapi.AvailableControls[control.Control.ValueString()]; !ok {
 					mockResp.Diagnostics.AddError(
 						"Invalid control provided",
@@ -605,6 +631,99 @@ func TestGithubChecksResource_ValidateConfig(t *testing.T) {
 	}
 }
 
+// TestGithubChecksResource_ValidateConfig_UnknownControlsList is a regression test for a
+// customer-reported crash: when the whole "controls" list is unknown at plan time (e.g. it
+// is derived from a for_each/local referencing a value that isn't known until apply), the
+// framework used to fail to bind it into a plain []control field with:
+//
+//	"Received unknown value, however the target type cannot handle unknown values."
+//
+// ValidateConfig must handle this gracefully instead of erroring.
+func TestGithubChecksResource_ValidateConfig_UnknownControlsList(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	r := &githubChecksResource{}
+
+	schemaResp := &resource.SchemaResponse{}
+	r.Schema(ctx, resource.SchemaRequest{}, schemaResp)
+	if schemaResp.Diagnostics.HasError() {
+		t.Fatalf("unexpected schema diagnostics: %v", schemaResp.Diagnostics)
+	}
+
+	model := githubChecksModel{
+		Owner:    types.StringValue(testOwner),
+		Controls: types.ListUnknown(controlObjectType()),
+	}
+
+	plan := tfsdk.Plan{Schema: schemaResp.Schema}
+	diags := plan.Set(ctx, model)
+	if diags.HasError() {
+		t.Fatalf("unexpected diagnostics setting plan: %v", diags)
+	}
+
+	config := tfsdk.Config{Raw: plan.Raw, Schema: schemaResp.Schema}
+	validateResp := &resource.ValidateConfigResponse{}
+
+	assert.NotPanics(t, func() {
+		r.ValidateConfig(ctx, resource.ValidateConfigRequest{Config: config}, validateResp)
+	})
+	assert.False(t, validateResp.Diagnostics.HasError(), "unexpected diagnostics: %v", validateResp.Diagnostics)
+}
+
+// TestGithubChecksResource_ValidateConfig_UnknownControlsListWithKnownRepos is a regression
+// test for a false positive introduced while fixing the crash covered by
+// TestGithubChecksResource_ValidateConfig_UnknownControlsList above: when "controls" is
+// unknown but required_checks/baseline_check repos are known literals (e.g. "*", as in a
+// customer config using terraform_data to make controls unknown on the first plan),
+// ValidateConfig must not error with "can't provide repos for required checks without
+// enabling any control for required checks". hasRequired/hasOptional cannot be determined
+// while controls is unknown, so those cross-checks must be skipped until a later plan when
+// controls becomes known.
+func TestGithubChecksResource_ValidateConfig_UnknownControlsListWithKnownRepos(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	r := &githubChecksResource{}
+
+	schemaResp := &resource.SchemaResponse{}
+	r.Schema(ctx, resource.SchemaRequest{}, schemaResp)
+	if schemaResp.Diagnostics.HasError() {
+		t.Fatalf("unexpected schema diagnostics: %v", schemaResp.Diagnostics)
+	}
+
+	starList, diags := types.ListValue(types.StringType, []attr.Value{types.StringValue("*")})
+	if diags.HasError() {
+		t.Fatalf("unexpected diagnostics building repos list: %v", diags)
+	}
+
+	model := githubChecksModel{
+		Owner:    types.StringValue(testOwner),
+		Controls: types.ListUnknown(controlObjectType()),
+		RequiredChecks: &checksConfig{
+			Repos:     starList,
+			OmitRepos: types.ListNull(types.StringType),
+		},
+		BaselineCheck: &checksConfig{
+			Repos:     starList,
+			OmitRepos: types.ListNull(types.StringType),
+		},
+	}
+
+	plan := tfsdk.Plan{Schema: schemaResp.Schema}
+	planDiags := plan.Set(ctx, model)
+	if planDiags.HasError() {
+		t.Fatalf("unexpected diagnostics setting plan: %v", planDiags)
+	}
+
+	config := tfsdk.Config{Raw: plan.Raw, Schema: schemaResp.Schema}
+	validateResp := &resource.ValidateConfigResponse{}
+
+	r.ValidateConfig(ctx, resource.ValidateConfigRequest{Config: config}, validateResp)
+
+	assert.False(t, validateResp.Diagnostics.HasError(), "unexpected diagnostics (false positive on unknown controls + known repos): %v", validateResp.Diagnostics)
+}
+
 func TestGithubChecksResource_ConvertToCreateRequest(t *testing.T) {
 	t.Parallel()
 
@@ -619,14 +738,14 @@ func TestGithubChecksResource_ConvertToCreateRequest(t *testing.T) {
 			name: "basic_config_with_npm_cooldown",
 			input: githubChecksModel{
 				Owner: types.StringValue("test-org"),
-				Controls: []control{
+				Controls: mustControlsList([]control{
 					{
 						Control:  types.StringValue("NPM Package Cooldown"),
 						Enable:   types.BoolValue(true),
 						Type:     types.StringValue("required"),
 						Settings: createSettingsObject(func() *int64 { v := int64(5); return &v }(), nil),
 					},
-				},
+				}),
 				RequiredChecks: &checksConfig{
 					Repos: func() types.List {
 						elements := []attr.Value{types.StringValue("*")}
@@ -658,14 +777,14 @@ func TestGithubChecksResource_ConvertToCreateRequest(t *testing.T) {
 			name: "package_exemptions",
 			input: githubChecksModel{
 				Owner: types.StringValue("test-org"),
-				Controls: []control{
+				Controls: mustControlsList([]control{
 					{
 						Control:  types.StringValue("NPM Package Cooldown"),
 						Enable:   types.BoolValue(true),
 						Type:     types.StringValue("required"),
 						Settings: createSettingsObject(func() *int64 { v := int64(3); return &v }(), []string{"lodash", "express"}),
 					},
-				},
+				}),
 				RequiredChecks: &checksConfig{
 					Repos: func() types.List {
 						elements := []attr.Value{types.StringValue("*")}
@@ -698,7 +817,7 @@ func TestGithubChecksResource_ConvertToCreateRequest(t *testing.T) {
 			name: "multiple_controls_and_repos",
 			input: githubChecksModel{
 				Owner: types.StringValue("test-org"),
-				Controls: []control{
+				Controls: mustControlsList([]control{
 					{
 						Control:  types.StringValue("NPM Package Cooldown"),
 						Enable:   types.BoolValue(true),
@@ -711,7 +830,7 @@ func TestGithubChecksResource_ConvertToCreateRequest(t *testing.T) {
 						Type:     types.StringValue("optional"),
 						Settings: createNullSettingsObject(),
 					},
-				},
+				}),
 				RequiredChecks: &checksConfig{
 					Repos: func() types.List {
 						elements := []attr.Value{types.StringValue("*")}
@@ -774,14 +893,14 @@ func TestGithubChecksResource_ConvertToCreateRequest(t *testing.T) {
 			name: "baseline_checks_enabled",
 			input: githubChecksModel{
 				Owner: types.StringValue("test-org"),
-				Controls: []control{
+				Controls: mustControlsList([]control{
 					{
 						Control:  types.StringValue("Script Injection"),
 						Enable:   types.BoolValue(true),
 						Type:     types.StringValue("required"),
 						Settings: createNullSettingsObject(),
 					},
-				},
+				}),
 				RequiredChecks: &checksConfig{
 					Repos: func() types.List {
 						elements := []attr.Value{types.StringValue("*")}
@@ -818,14 +937,14 @@ func TestGithubChecksResource_ConvertToCreateRequest(t *testing.T) {
 			name: "basic_config_with_pypi_cooldown",
 			input: githubChecksModel{
 				Owner: types.StringValue("test-org"),
-				Controls: []control{
+				Controls: mustControlsList([]control{
 					{
 						Control:  types.StringValue("PyPI Package Cooldown"),
 						Enable:   types.BoolValue(true),
 						Type:     types.StringValue("required"),
 						Settings: createSettingsObject(func() *int64 { v := int64(3); return &v }(), []string{"my-internal-pkg"}),
 					},
-				},
+				}),
 				RequiredChecks: &checksConfig{
 					Repos: func() types.List {
 						elements := []attr.Value{types.StringValue("*")}
@@ -858,14 +977,14 @@ func TestGithubChecksResource_ConvertToCreateRequest(t *testing.T) {
 			name: "pypi_compromised_updates",
 			input: githubChecksModel{
 				Owner: types.StringValue("test-org"),
-				Controls: []control{
+				Controls: mustControlsList([]control{
 					{
 						Control:  types.StringValue("PyPI Package Compromised Updates"),
 						Enable:   types.BoolValue(true),
 						Type:     types.StringValue("required"),
 						Settings: createNullSettingsObject(),
 					},
-				},
+				}),
 				RequiredChecks: &checksConfig{
 					Repos: func() types.List {
 						elements := []attr.Value{types.StringValue("*")}
@@ -895,14 +1014,14 @@ func TestGithubChecksResource_ConvertToCreateRequest(t *testing.T) {
 			name: "omit_repos_configuration",
 			input: githubChecksModel{
 				Owner: types.StringValue("test-org"),
-				Controls: []control{
+				Controls: mustControlsList([]control{
 					{
 						Control:  types.StringValue("PWN Request"),
 						Enable:   types.BoolValue(true),
 						Type:     types.StringValue("optional"),
 						Settings: createNullSettingsObject(),
 					},
-				},
+				}),
 				OptionalChecks: &checksConfig{
 					Repos: func() types.List {
 						elements := []attr.Value{types.StringValue("*")}
@@ -954,7 +1073,7 @@ func TestGithubChecksResource_ConvertToCreateRequest(t *testing.T) {
 			t.Parallel()
 
 			r := &githubChecksResource{}
-			result, err := r.convertToCreateRequest(tc.input)
+			result, err := r.convertToCreateRequest(context.Background(), tc.input)
 
 			if tc.expectError {
 				assert.Error(t, err)
@@ -1004,14 +1123,14 @@ func TestGithubChecksResource_ConvertToState(t *testing.T) {
 			},
 			expected: githubChecksModel{
 				Owner: types.StringValue("test-org"),
-				Controls: []control{
+				Controls: mustControlsList([]control{
 					{
 						Control:  types.StringValue("NPM Package Cooldown"),
 						Enable:   types.BoolValue(true),
 						Type:     types.StringValue("required"),
 						Settings: createSettingsObject(func() *int64 { v := int64(7); return &v }(), nil),
 					},
-				},
+				}),
 				RequiredChecks: &checksConfig{
 					Repos: func() types.List {
 						elements := []attr.Value{types.StringValue("*")}
@@ -1071,7 +1190,7 @@ func TestGithubChecksResource_ConvertToState(t *testing.T) {
 			},
 			expected: githubChecksModel{
 				Owner: types.StringValue("test-org"),
-				Controls: []control{
+				Controls: mustControlsList([]control{
 					{
 						Control:  types.StringValue("NPM Package Cooldown"),
 						Enable:   types.BoolValue(true),
@@ -1090,7 +1209,7 @@ func TestGithubChecksResource_ConvertToState(t *testing.T) {
 						Type:     types.StringValue("optional"),
 						Settings: createNullSettingsObject(),
 					},
-				},
+				}),
 				RequiredChecks: &checksConfig{
 					Repos: func() types.List {
 						elements := []attr.Value{types.StringValue("*")}
@@ -1141,14 +1260,14 @@ func TestGithubChecksResource_ConvertToState(t *testing.T) {
 			},
 			expected: githubChecksModel{
 				Owner: types.StringValue("global-org"),
-				Controls: []control{
+				Controls: mustControlsList([]control{
 					{
 						Control:  types.StringValue("NPM Package Compromised Updates"),
 						Enable:   types.BoolValue(true),
 						Type:     types.StringValue("required"),
 						Settings: createNullSettingsObject(),
 					},
-				},
+				}),
 				RequiredChecks: &checksConfig{
 					Repos: func() types.List {
 						elements := []attr.Value{types.StringValue("*")}
@@ -1198,14 +1317,14 @@ func TestGithubChecksResource_ConvertToState(t *testing.T) {
 			},
 			expected: githubChecksModel{
 				Owner: types.StringValue("test-org"),
-				Controls: []control{
+				Controls: mustControlsList([]control{
 					{
 						Control:  types.StringValue("PyPI Package Cooldown"),
 						Enable:   types.BoolValue(true),
 						Type:     types.StringValue("required"),
 						Settings: createSettingsObject(func() *int64 { v := int64(3); return &v }(), []string{"my-internal-pkg"}),
 					},
-				},
+				}),
 				RequiredChecks: &checksConfig{
 					Repos: func() types.List {
 						elements := []attr.Value{types.StringValue("*")}
@@ -1238,14 +1357,14 @@ func TestGithubChecksResource_ConvertToState(t *testing.T) {
 			},
 			expected: githubChecksModel{
 				Owner: types.StringValue("test-org"),
-				Controls: []control{
+				Controls: mustControlsList([]control{
 					{
 						Control:  types.StringValue("PyPI Package Compromised Updates"),
 						Enable:   types.BoolValue(true),
 						Type:     types.StringValue("required"),
 						Settings: createNullSettingsObject(),
 					},
-				},
+				}),
 				RequiredChecks: &checksConfig{
 					Repos: func() types.List {
 						elements := []attr.Value{types.StringValue("*")}
@@ -1272,7 +1391,7 @@ func TestGithubChecksResource_ConvertToState(t *testing.T) {
 			},
 			expected: githubChecksModel{
 				Owner:          types.StringValue("empty-org"),
-				Controls:       []control{},
+				Controls:       mustControlsList([]control{}),
 				RequiredChecks: nil,
 				OptionalChecks: nil,
 				BaselineCheck:  nil,
@@ -1285,7 +1404,7 @@ func TestGithubChecksResource_ConvertToState(t *testing.T) {
 			t.Parallel()
 
 			r := &githubChecksResource{}
-			got := r.convertToState(tc.owner, tc.input)
+			got := r.convertToState(context.Background(), tc.owner, tc.input)
 
 			// Use Equal to compare the entire result structure
 			assert.Equal(t, tc.expected, got)
@@ -1765,7 +1884,7 @@ func TestGithubChecksResource_UpdateStateListsWithOrderFromPlan(t *testing.T) {
 			name: "controls_same_content_different_order",
 			plan: githubChecksModel{
 				Owner: types.StringValue("test-org"),
-				Controls: []control{
+				Controls: mustControlsList([]control{
 					{
 						Control:  types.StringValue("Script Injection"),
 						Enable:   types.BoolValue(true),
@@ -1778,11 +1897,11 @@ func TestGithubChecksResource_UpdateStateListsWithOrderFromPlan(t *testing.T) {
 						Type:     types.StringValue("optional"),
 						Settings: createNullSettingsObject(),
 					},
-				},
+				}),
 			},
 			state: githubChecksModel{
 				Owner: types.StringValue("test-org"),
-				Controls: []control{
+				Controls: mustControlsList([]control{
 					{
 						Control:  types.StringValue("PWN Request"),
 						Enable:   types.BoolValue(true),
@@ -1795,11 +1914,11 @@ func TestGithubChecksResource_UpdateStateListsWithOrderFromPlan(t *testing.T) {
 						Type:     types.StringValue("required"),
 						Settings: createNullSettingsObject(),
 					},
-				},
+				}),
 			},
 			expectedState: githubChecksModel{
 				Owner: types.StringValue("test-org"),
-				Controls: []control{
+				Controls: mustControlsList([]control{
 					{
 						Control:  types.StringValue("Script Injection"),
 						Enable:   types.BoolValue(true),
@@ -1812,14 +1931,14 @@ func TestGithubChecksResource_UpdateStateListsWithOrderFromPlan(t *testing.T) {
 						Type:     types.StringValue("optional"),
 						Settings: createNullSettingsObject(),
 					},
-				},
+				}),
 			},
 		},
 		{
 			name: "controls_with_settings_same_content_different_order",
 			plan: githubChecksModel{
 				Owner: types.StringValue("test-org"),
-				Controls: []control{
+				Controls: mustControlsList([]control{
 					{
 						Control:  types.StringValue("NPM Package Cooldown"),
 						Enable:   types.BoolValue(true),
@@ -1832,11 +1951,11 @@ func TestGithubChecksResource_UpdateStateListsWithOrderFromPlan(t *testing.T) {
 						Type:     types.StringValue("required"),
 						Settings: createNullSettingsObject(),
 					},
-				},
+				}),
 			},
 			state: githubChecksModel{
 				Owner: types.StringValue("test-org"),
-				Controls: []control{
+				Controls: mustControlsList([]control{
 					{
 						Control:  types.StringValue("Script Injection"),
 						Enable:   types.BoolValue(true),
@@ -1849,11 +1968,11 @@ func TestGithubChecksResource_UpdateStateListsWithOrderFromPlan(t *testing.T) {
 						Type:     types.StringValue("required"),
 						Settings: createSettingsObject(func() *int64 { v := int64(5); return &v }(), []string{"express", "lodash"}),
 					},
-				},
+				}),
 			},
 			expectedState: githubChecksModel{
 				Owner: types.StringValue("test-org"),
-				Controls: []control{
+				Controls: mustControlsList([]control{
 					{
 						Control:  types.StringValue("NPM Package Cooldown"),
 						Enable:   types.BoolValue(true),
@@ -1866,14 +1985,14 @@ func TestGithubChecksResource_UpdateStateListsWithOrderFromPlan(t *testing.T) {
 						Type:     types.StringValue("required"),
 						Settings: createNullSettingsObject(),
 					},
-				},
+				}),
 			},
 		},
 		{
 			name: "controls_missing_in_state",
 			plan: githubChecksModel{
 				Owner: types.StringValue("test-org"),
-				Controls: []control{
+				Controls: mustControlsList([]control{
 					{
 						Control:  types.StringValue("Script Injection"),
 						Enable:   types.BoolValue(true),
@@ -1886,29 +2005,29 @@ func TestGithubChecksResource_UpdateStateListsWithOrderFromPlan(t *testing.T) {
 						Type:     types.StringValue("optional"),
 						Settings: createNullSettingsObject(),
 					},
-				},
+				}),
 			},
 			state: githubChecksModel{
 				Owner: types.StringValue("test-org"),
-				Controls: []control{
+				Controls: mustControlsList([]control{
 					{
 						Control:  types.StringValue("Script Injection"),
 						Enable:   types.BoolValue(true),
 						Type:     types.StringValue("required"),
 						Settings: createNullSettingsObject(),
 					},
-				},
+				}),
 			},
 			expectedState: githubChecksModel{
 				Owner: types.StringValue("test-org"),
-				Controls: []control{
+				Controls: mustControlsList([]control{
 					{
 						Control:  types.StringValue("Script Injection"),
 						Enable:   types.BoolValue(true),
 						Type:     types.StringValue("required"),
 						Settings: createNullSettingsObject(),
 					},
-				},
+				}),
 			},
 		},
 		{
@@ -1951,15 +2070,15 @@ func TestGithubChecksResource_UpdateStateListsWithOrderFromPlan(t *testing.T) {
 			name: "empty_controls",
 			plan: githubChecksModel{
 				Owner:    types.StringValue("test-org"),
-				Controls: []control{},
+				Controls: mustControlsList([]control{}),
 			},
 			state: githubChecksModel{
 				Owner:    types.StringValue("test-org"),
-				Controls: []control{},
+				Controls: mustControlsList([]control{}),
 			},
 			expectedState: githubChecksModel{
 				Owner:    types.StringValue("test-org"),
-				Controls: []control{},
+				Controls: mustControlsList([]control{}),
 			},
 		},
 	}
@@ -1977,14 +2096,16 @@ func TestGithubChecksResource_UpdateStateListsWithOrderFromPlan(t *testing.T) {
 			r.updateStateListsWithOrderFromPlan(ctx, tc.plan, &stateCopy)
 
 			// For controls, we need to manually check the order
-			if len(tc.expectedState.Controls) > 0 {
-				assert.Equal(t, len(tc.expectedState.Controls), len(stateCopy.Controls), "Controls length mismatch")
-				for i := range tc.expectedState.Controls {
-					assert.Equal(t, tc.expectedState.Controls[i].Control.ValueString(), stateCopy.Controls[i].Control.ValueString(),
+			expectedControls := controlsListToSlice(tc.expectedState.Controls)
+			actualControls := controlsListToSlice(stateCopy.Controls)
+			if len(expectedControls) > 0 {
+				assert.Equal(t, len(expectedControls), len(actualControls), "Controls length mismatch")
+				for i := range expectedControls {
+					assert.Equal(t, expectedControls[i].Control.ValueString(), actualControls[i].Control.ValueString(),
 						"Control name mismatch at index %d", i)
-					assert.Equal(t, tc.expectedState.Controls[i].Enable.ValueBool(), stateCopy.Controls[i].Enable.ValueBool(),
+					assert.Equal(t, expectedControls[i].Enable.ValueBool(), actualControls[i].Enable.ValueBool(),
 						"Control enable mismatch at index %d", i)
-					assert.Equal(t, tc.expectedState.Controls[i].Type.ValueString(), stateCopy.Controls[i].Type.ValueString(),
+					assert.Equal(t, expectedControls[i].Type.ValueString(), actualControls[i].Type.ValueString(),
 						"Control type mismatch at index %d", i)
 				}
 			}
