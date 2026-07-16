@@ -428,7 +428,7 @@ resource "stepsecurity_github_run_policy" "runner_policy_allowed_mode" {
 # from the policy store (use-policy-store: true on the Harden Runner step; the
 # legacy policy: input does not satisfy this check), and block jobs that run
 # entirely inside a job-level container: (Harden Runner cannot monitor a fully
-# containerized job on self-hosted or custom VM runners; container steps are fine).
+# containerized job on GitHub-hosted standard runners; container steps are fine).
 resource "stepsecurity_github_run_policy" "harden_runner_policy_checks" {
   owner     = "my-org"
   name      = "Harden Runner Policy - Policy Store and Container"
@@ -508,7 +508,7 @@ Optional:
 - `allowed_actions` (Map of String) Map of allowed actions and their permissions (e.g., 'actions/checkout': 'allow').
 - `allowed_runner_constraints` (Map of Set of String) Structured runs-on.com constraints permitted when `runs_on_mode` is `allowed`, keyed by dimension (e.g. `family`, `cpu`, `image`). Each key maps to the set of allowed values for that dimension: a `runs-on` token of the form `key=value` is allowed when the key is unconfigured, or when its value is in the set. Keys are lowercased server-side (use lowercase keys to avoid plan drift) and each key must have at least one value.
 - `allowed_runner_labels` (Set of String) Set of plain runner labels permitted when `runs_on_mode` is `allowed` (e.g. `ubuntu-latest`). A job is allowed when its `runs-on` label matches an entry verbatim. Ignored in `disallowed` mode.
-- `block_job_container` (Boolean) Sub-feature of the Harden Runner policy. When true, targeted jobs that run entirely inside a job-level `container:` are blocked, because Harden Runner cannot monitor a fully containerized job on self-hosted or custom VM runners. Steps that use containers are unaffected. Only meaningful when `enable_harden_runner_policy` is true.
+- `block_job_container` (Boolean) Sub-feature of the Harden Runner policy. When true, targeted jobs that run entirely inside a job-level `container:` are blocked, because Harden Runner cannot monitor a fully containerized job on GitHub-hosted standard runners. Steps that use containers are unaffected. Only meaningful when `enable_harden_runner_policy` is true.
 - `bulk_secrets_only_mode` (Boolean) When enabled, the secret exfiltration policy restricts enforcement to high-risk bulk secret-exposure attempts rather than all secret references. See the StepSecurity run-policies documentation for details.
 - `disallowed_runner_labels` (Set of String) Set of disallowed runner labels.
 - `enable_action_policy` (Boolean) Whether to enable the action policy.

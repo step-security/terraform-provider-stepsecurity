@@ -413,7 +413,7 @@ resource "stepsecurity_github_run_policy" "runner_policy_allowed_mode" {
 # from the policy store (use-policy-store: true on the Harden Runner step; the
 # legacy policy: input does not satisfy this check), and block jobs that run
 # entirely inside a job-level container: (Harden Runner cannot monitor a fully
-# containerized job on self-hosted or custom VM runners; container steps are fine).
+# containerized job on GitHub-hosted standard runners; container steps are fine).
 resource "stepsecurity_github_run_policy" "harden_runner_policy_checks" {
   owner     = "my-org"
   name      = "Harden Runner Policy - Policy Store and Container"

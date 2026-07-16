@@ -201,7 +201,7 @@ func (d *githubRunPoliciesDataSource) Schema(_ context.Context, _ datasource.Sch
 								},
 								"block_job_container": schema.BoolAttribute{
 									Computed:            true,
-									MarkdownDescription: "When true, targeted jobs that run entirely inside a job-level `container:` are blocked (Harden Runner cannot monitor a fully containerized job on self-hosted or custom VM runners).",
+									MarkdownDescription: "When true, targeted jobs that run entirely inside a job-level `container:` are blocked (Harden Runner cannot monitor a fully containerized job on GitHub-hosted standard runners).",
 								},
 								"secrets_analyze_default_branch": schema.BoolAttribute{
 									Computed:            true,
