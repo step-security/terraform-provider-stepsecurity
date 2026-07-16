@@ -254,7 +254,7 @@ func (r *githubRunPolicyResource) Schema(_ context.Context, _ resource.SchemaReq
 					"allowed_runner_constraints": schema.MapAttribute{
 						ElementType:         types.SetType{ElemType: types.StringType},
 						Optional:            true,
-						MarkdownDescription: "Structured runs-on.com constraints permitted when `runs_on_mode` is `allowed`, keyed by dimension (e.g. `family`, `cpu`, `image`). Each key maps to the set of allowed values for that dimension: a `runs-on` token of the form `key=value` is allowed when the key is unconfigured, or when its value is in the set. Keys are lowercased server-side (use lowercase keys to avoid plan drift) and each key must have at least one value.",
+						MarkdownDescription: "Structured runs-on.com constraints permitted when `runs_on_mode` is `allowed`, keyed by dimension (e.g. `family`, `cpu`, `image`). Each key maps to the set of allowed values for that dimension: a `runs-on` token of the form `key=value` is allowed when the key is unconfigured, or when its value is in the set. Keys are lowercased server-side (use lowercase keys to avoid plan drift) and each key must have at least one value. Expression values are matched by their exact text (whitespace-insensitive), so the `runs-on` routing key itself can be pinned to the conventional expression.",
 					},
 					"require_policy_store": schema.BoolAttribute{
 						Optional:            true,

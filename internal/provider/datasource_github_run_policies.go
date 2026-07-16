@@ -193,7 +193,7 @@ func (d *githubRunPoliciesDataSource) Schema(_ context.Context, _ datasource.Sch
 								"allowed_runner_constraints": schema.MapAttribute{
 									ElementType:         types.SetType{ElemType: types.StringType},
 									Computed:            true,
-									MarkdownDescription: "Structured runs-on.com constraints permitted when `runs_on_mode` is `allowed`, keyed by dimension (e.g. `family`, `cpu`, `image`); each key maps to the set of allowed values.",
+									MarkdownDescription: "Structured runs-on.com constraints permitted when `runs_on_mode` is `allowed`, keyed by dimension (e.g. `family`, `cpu`, `image`); each key maps to the set of allowed values. Expression values match by exact text, which also lets the `runs-on` routing key be pinned.",
 								},
 								"require_policy_store": schema.BoolAttribute{
 									Computed:            true,

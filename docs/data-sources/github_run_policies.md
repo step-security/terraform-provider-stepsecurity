@@ -200,7 +200,7 @@ Read-Only:
 
 - `actions_to_exempt_while_pinning` (Set of String) Set of actions exempt from pinning requirements.
 - `allowed_actions` (Map of String) Map of allowed actions and their permissions.
-- `allowed_runner_constraints` (Map of Set of String) Structured runs-on.com constraints permitted when `runs_on_mode` is `allowed`, keyed by dimension (e.g. `family`, `cpu`, `image`); each key maps to the set of allowed values.
+- `allowed_runner_constraints` (Map of Set of String) Structured runs-on.com constraints permitted when `runs_on_mode` is `allowed`, keyed by dimension (e.g. `family`, `cpu`, `image`); each key maps to the set of allowed values. Expression values match by exact text, which also lets the `runs-on` routing key be pinned.
 - `allowed_runner_labels` (Set of String) Set of plain runner labels permitted when `runs_on_mode` is `allowed`.
 - `block_job_container` (Boolean) When true, targeted jobs that run entirely inside a job-level `container:` are blocked (Harden Runner cannot monitor a fully containerized job on GitHub-hosted standard runners).
 - `bulk_secrets_only_mode` (Boolean) When enabled, the secret exfiltration policy restricts enforcement to high-risk bulk secret-exposure attempts rather than all secret references. See the StepSecurity run-policies documentation for details.
