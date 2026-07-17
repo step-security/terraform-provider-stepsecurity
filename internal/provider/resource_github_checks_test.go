@@ -82,6 +82,22 @@ func controlsListToSlice(list types.List) []control {
 	return controls
 }
 
+// mustChecksConfigObject converts a *checksConfig into the types.Object value that
+// required_checks/optional_checks/baseline_check are now bound to. A nil cfg produces a null object.
+func mustChecksConfigObject(cfg *checksConfig) types.Object {
+	return encodeChecksConfig(context.Background(), cfg)
+}
+
+// checksConfigFromObject decodes a required_checks/optional_checks/baseline_check types.Object
+// back into a *checksConfig for assertions.
+func checksConfigFromObject(obj types.Object) *checksConfig {
+	cfg, diags := decodeChecksConfig(context.Background(), obj)
+	if diags.HasError() {
+		panic(diagsToError(diags))
+	}
+	return cfg
+}
+
 func TestAccGithubChecksResource(t *testing.T) {
 	res.Test(t, res.TestCase{
 		PreCheck:                 func() { testAccPreCheck(t) },
@@ -381,13 +397,13 @@ func TestGithubChecksResource_ValidateConfig(t *testing.T) {
 						Settings: createNullSettingsObject(),
 					},
 				}),
-				RequiredChecks: &checksConfig{
+				RequiredChecks: mustChecksConfigObject(&checksConfig{
 					Repos: func() types.List {
 						elements := []attr.Value{types.StringValue("*")}
 						list, _ := types.ListValue(types.StringType, elements)
 						return list
 					}(),
-				},
+				}),
 			},
 			expectedError: false,
 		},
@@ -476,13 +492,13 @@ func TestGithubChecksResource_ValidateConfig(t *testing.T) {
 						Settings: createSettingsObject(func() *int64 { v := int64(5); return &v }(), nil),
 					},
 				}),
-				RequiredChecks: &checksConfig{
+				RequiredChecks: mustChecksConfigObject(&checksConfig{
 					Repos: func() types.List {
 						elements := []attr.Value{types.StringValue("*")}
 						list, _ := types.ListValue(types.StringType, elements)
 						return list
 					}(),
-				},
+				}),
 			},
 			expectedError: false,
 		},
@@ -498,13 +514,13 @@ func TestGithubChecksResource_ValidateConfig(t *testing.T) {
 						Settings: createNullSettingsObject(),
 					},
 				}),
-				RequiredChecks: &checksConfig{
+				RequiredChecks: mustChecksConfigObject(&checksConfig{
 					Repos: func() types.List {
 						elements := []attr.Value{types.StringValue("*")}
 						list, _ := types.ListValue(types.StringType, elements)
 						return list
 					}(),
-				},
+				}),
 			},
 			expectedError: false,
 		},
@@ -652,8 +668,11 @@ func TestGithubChecksResource_ValidateConfig_UnknownControlsList(t *testing.T) {
 	}
 
 	model := githubChecksModel{
-		Owner:    types.StringValue(testOwner),
-		Controls: types.ListUnknown(controlObjectType()),
+		Owner:          types.StringValue(testOwner),
+		Controls:       types.ListUnknown(controlObjectType()),
+		RequiredChecks: types.ObjectNull(checksConfigAttrTypes()),
+		OptionalChecks: types.ObjectNull(checksConfigAttrTypes()),
+		BaselineCheck:  types.ObjectNull(checksConfigAttrTypes()),
 	}
 
 	plan := tfsdk.Plan{Schema: schemaResp.Schema}
@@ -700,14 +719,15 @@ func TestGithubChecksResource_ValidateConfig_UnknownControlsListWithKnownRepos(t
 	model := githubChecksModel{
 		Owner:    types.StringValue(testOwner),
 		Controls: types.ListUnknown(controlObjectType()),
-		RequiredChecks: &checksConfig{
+		RequiredChecks: mustChecksConfigObject(&checksConfig{
 			Repos:     starList,
 			OmitRepos: types.ListNull(types.StringType),
-		},
-		BaselineCheck: &checksConfig{
+		}),
+		OptionalChecks: types.ObjectNull(checksConfigAttrTypes()),
+		BaselineCheck: mustChecksConfigObject(&checksConfig{
 			Repos:     starList,
 			OmitRepos: types.ListNull(types.StringType),
-		},
+		}),
 	}
 
 	plan := tfsdk.Plan{Schema: schemaResp.Schema}
@@ -746,13 +766,13 @@ func TestGithubChecksResource_ConvertToCreateRequest(t *testing.T) {
 						Settings: createSettingsObject(func() *int64 { v := int64(5); return &v }(), nil),
 					},
 				}),
-				RequiredChecks: &checksConfig{
+				RequiredChecks: mustChecksConfigObject(&checksConfig{
 					Repos: func() types.List {
 						elements := []attr.Value{types.StringValue("*")}
 						list, _ := types.ListValue(types.StringType, elements)
 						return list
 					}(),
-				},
+				}),
 			},
 			expected: stepsecurityapi.GitHubPRChecksConfig{
 				ChecksConfig: stepsecurityapi.ChecksConfig{
@@ -785,13 +805,13 @@ func TestGithubChecksResource_ConvertToCreateRequest(t *testing.T) {
 						Settings: createSettingsObject(func() *int64 { v := int64(3); return &v }(), []string{"lodash", "express"}),
 					},
 				}),
-				RequiredChecks: &checksConfig{
+				RequiredChecks: mustChecksConfigObject(&checksConfig{
 					Repos: func() types.List {
 						elements := []attr.Value{types.StringValue("*")}
 						list, _ := types.ListValue(types.StringType, elements)
 						return list
 					}(),
-				},
+				}),
 			},
 			expected: stepsecurityapi.GitHubPRChecksConfig{
 				ChecksConfig: stepsecurityapi.ChecksConfig{
@@ -831,7 +851,7 @@ func TestGithubChecksResource_ConvertToCreateRequest(t *testing.T) {
 						Settings: createNullSettingsObject(),
 					},
 				}),
-				RequiredChecks: &checksConfig{
+				RequiredChecks: mustChecksConfigObject(&checksConfig{
 					Repos: func() types.List {
 						elements := []attr.Value{types.StringValue("*")}
 						list, _ := types.ListValue(types.StringType, elements)
@@ -842,8 +862,8 @@ func TestGithubChecksResource_ConvertToCreateRequest(t *testing.T) {
 						list, _ := types.ListValue(types.StringType, elements)
 						return list
 					}(),
-				},
-				OptionalChecks: &checksConfig{
+				}),
+				OptionalChecks: mustChecksConfigObject(&checksConfig{
 					Repos: func() types.List {
 						elements := []attr.Value{
 							types.StringValue("repo1"),
@@ -852,7 +872,7 @@ func TestGithubChecksResource_ConvertToCreateRequest(t *testing.T) {
 						list, _ := types.ListValue(types.StringType, elements)
 						return list
 					}(),
-				},
+				}),
 			},
 			expected: stepsecurityapi.GitHubPRChecksConfig{
 				ChecksConfig: stepsecurityapi.ChecksConfig{
@@ -901,20 +921,20 @@ func TestGithubChecksResource_ConvertToCreateRequest(t *testing.T) {
 						Settings: createNullSettingsObject(),
 					},
 				}),
-				RequiredChecks: &checksConfig{
+				RequiredChecks: mustChecksConfigObject(&checksConfig{
 					Repos: func() types.List {
 						elements := []attr.Value{types.StringValue("*")}
 						list, _ := types.ListValue(types.StringType, elements)
 						return list
 					}(),
-				},
-				BaselineCheck: &checksConfig{
+				}),
+				BaselineCheck: mustChecksConfigObject(&checksConfig{
 					Repos: func() types.List {
 						elements := []attr.Value{types.StringValue("*")}
 						list, _ := types.ListValue(types.StringType, elements)
 						return list
 					}(),
-				},
+				}),
 			},
 			expected: stepsecurityapi.GitHubPRChecksConfig{
 				ChecksConfig: stepsecurityapi.ChecksConfig{
@@ -945,13 +965,13 @@ func TestGithubChecksResource_ConvertToCreateRequest(t *testing.T) {
 						Settings: createSettingsObject(func() *int64 { v := int64(3); return &v }(), []string{"my-internal-pkg"}),
 					},
 				}),
-				RequiredChecks: &checksConfig{
+				RequiredChecks: mustChecksConfigObject(&checksConfig{
 					Repos: func() types.List {
 						elements := []attr.Value{types.StringValue("*")}
 						list, _ := types.ListValue(types.StringType, elements)
 						return list
 					}(),
-				},
+				}),
 			},
 			expected: stepsecurityapi.GitHubPRChecksConfig{
 				ChecksConfig: stepsecurityapi.ChecksConfig{
@@ -985,13 +1005,13 @@ func TestGithubChecksResource_ConvertToCreateRequest(t *testing.T) {
 						Settings: createNullSettingsObject(),
 					},
 				}),
-				RequiredChecks: &checksConfig{
+				RequiredChecks: mustChecksConfigObject(&checksConfig{
 					Repos: func() types.List {
 						elements := []attr.Value{types.StringValue("*")}
 						list, _ := types.ListValue(types.StringType, elements)
 						return list
 					}(),
-				},
+				}),
 			},
 			expected: stepsecurityapi.GitHubPRChecksConfig{
 				ChecksConfig: stepsecurityapi.ChecksConfig{
@@ -1022,7 +1042,7 @@ func TestGithubChecksResource_ConvertToCreateRequest(t *testing.T) {
 						Settings: createNullSettingsObject(),
 					},
 				}),
-				OptionalChecks: &checksConfig{
+				OptionalChecks: mustChecksConfigObject(&checksConfig{
 					Repos: func() types.List {
 						elements := []attr.Value{types.StringValue("*")}
 						list, _ := types.ListValue(types.StringType, elements)
@@ -1036,7 +1056,7 @@ func TestGithubChecksResource_ConvertToCreateRequest(t *testing.T) {
 						list, _ := types.ListValue(types.StringType, elements)
 						return list
 					}(),
-				},
+				}),
 			},
 			expected: stepsecurityapi.GitHubPRChecksConfig{
 				ChecksConfig: stepsecurityapi.ChecksConfig{
@@ -1131,16 +1151,16 @@ func TestGithubChecksResource_ConvertToState(t *testing.T) {
 						Settings: createSettingsObject(func() *int64 { v := int64(7); return &v }(), nil),
 					},
 				}),
-				RequiredChecks: &checksConfig{
+				RequiredChecks: mustChecksConfigObject(&checksConfig{
 					Repos: func() types.List {
 						elements := []attr.Value{types.StringValue("*")}
 						list, _ := types.ListValue(types.StringType, elements)
 						return list
 					}(),
 					OmitRepos: types.ListNull(types.StringType),
-				},
-				OptionalChecks: nil,
-				BaselineCheck:  nil,
+				}),
+				OptionalChecks: mustChecksConfigObject(nil),
+				BaselineCheck:  mustChecksConfigObject(nil),
 			},
 		},
 		{
@@ -1210,7 +1230,7 @@ func TestGithubChecksResource_ConvertToState(t *testing.T) {
 						Settings: createNullSettingsObject(),
 					},
 				}),
-				RequiredChecks: &checksConfig{
+				RequiredChecks: mustChecksConfigObject(&checksConfig{
 					Repos: func() types.List {
 						elements := []attr.Value{types.StringValue("*")}
 						list, _ := types.ListValue(types.StringType, elements)
@@ -1221,23 +1241,23 @@ func TestGithubChecksResource_ConvertToState(t *testing.T) {
 						list, _ := types.ListValue(types.StringType, elements)
 						return list
 					}(),
-				},
-				OptionalChecks: &checksConfig{
+				}),
+				OptionalChecks: mustChecksConfigObject(&checksConfig{
 					Repos: func() types.List {
 						elements := []attr.Value{types.StringValue("repo1")}
 						list, _ := types.ListValue(types.StringType, elements)
 						return list
 					}(),
 					OmitRepos: types.ListNull(types.StringType),
-				},
-				BaselineCheck: &checksConfig{
+				}),
+				BaselineCheck: mustChecksConfigObject(&checksConfig{
 					Repos: func() types.List {
 						elements := []attr.Value{types.StringValue("repo2")}
 						list, _ := types.ListValue(types.StringType, elements)
 						return list
 					}(),
 					OmitRepos: types.ListNull(types.StringType),
-				},
+				}),
 			},
 		},
 		{
@@ -1268,30 +1288,30 @@ func TestGithubChecksResource_ConvertToState(t *testing.T) {
 						Settings: createNullSettingsObject(),
 					},
 				}),
-				RequiredChecks: &checksConfig{
+				RequiredChecks: mustChecksConfigObject(&checksConfig{
 					Repos: func() types.List {
 						elements := []attr.Value{types.StringValue("*")}
 						list, _ := types.ListValue(types.StringType, elements)
 						return list
 					}(),
 					OmitRepos: types.ListNull(types.StringType),
-				},
-				OptionalChecks: &checksConfig{
+				}),
+				OptionalChecks: mustChecksConfigObject(&checksConfig{
 					Repos: func() types.List {
 						elements := []attr.Value{types.StringValue("*")}
 						list, _ := types.ListValue(types.StringType, elements)
 						return list
 					}(),
 					OmitRepos: types.ListNull(types.StringType),
-				},
-				BaselineCheck: &checksConfig{
+				}),
+				BaselineCheck: mustChecksConfigObject(&checksConfig{
 					Repos: func() types.List {
 						elements := []attr.Value{types.StringValue("*")}
 						list, _ := types.ListValue(types.StringType, elements)
 						return list
 					}(),
 					OmitRepos: types.ListNull(types.StringType),
-				},
+				}),
 			},
 		},
 		{
@@ -1325,16 +1345,16 @@ func TestGithubChecksResource_ConvertToState(t *testing.T) {
 						Settings: createSettingsObject(func() *int64 { v := int64(3); return &v }(), []string{"my-internal-pkg"}),
 					},
 				}),
-				RequiredChecks: &checksConfig{
+				RequiredChecks: mustChecksConfigObject(&checksConfig{
 					Repos: func() types.List {
 						elements := []attr.Value{types.StringValue("*")}
 						list, _ := types.ListValue(types.StringType, elements)
 						return list
 					}(),
 					OmitRepos: types.ListNull(types.StringType),
-				},
-				OptionalChecks: nil,
-				BaselineCheck:  nil,
+				}),
+				OptionalChecks: mustChecksConfigObject(nil),
+				BaselineCheck:  mustChecksConfigObject(nil),
 			},
 		},
 		{
@@ -1365,16 +1385,16 @@ func TestGithubChecksResource_ConvertToState(t *testing.T) {
 						Settings: createNullSettingsObject(),
 					},
 				}),
-				RequiredChecks: &checksConfig{
+				RequiredChecks: mustChecksConfigObject(&checksConfig{
 					Repos: func() types.List {
 						elements := []attr.Value{types.StringValue("*")}
 						list, _ := types.ListValue(types.StringType, elements)
 						return list
 					}(),
 					OmitRepos: types.ListNull(types.StringType),
-				},
-				OptionalChecks: nil,
-				BaselineCheck:  nil,
+				}),
+				OptionalChecks: mustChecksConfigObject(nil),
+				BaselineCheck:  mustChecksConfigObject(nil),
 			},
 		},
 		{
@@ -1392,9 +1412,9 @@ func TestGithubChecksResource_ConvertToState(t *testing.T) {
 			expected: githubChecksModel{
 				Owner:          types.StringValue("empty-org"),
 				Controls:       mustControlsList([]control{}),
-				RequiredChecks: nil,
-				OptionalChecks: nil,
-				BaselineCheck:  nil,
+				RequiredChecks: mustChecksConfigObject(nil),
+				OptionalChecks: mustChecksConfigObject(nil),
+				BaselineCheck:  mustChecksConfigObject(nil),
 			},
 		},
 	}
@@ -1686,198 +1706,198 @@ func TestGithubChecksResource_UpdateStateListsWithOrderFromPlan(t *testing.T) {
 			name: "required_checks_repos_same_content_different_order",
 			plan: githubChecksModel{
 				Owner: types.StringValue("test-org"),
-				RequiredChecks: &checksConfig{
+				RequiredChecks: mustChecksConfigObject(&checksConfig{
 					Repos: createList([]string{"repo1", "repo2", "repo3"}),
-				},
+				}),
 			},
 			state: githubChecksModel{
 				Owner: types.StringValue("test-org"),
-				RequiredChecks: &checksConfig{
+				RequiredChecks: mustChecksConfigObject(&checksConfig{
 					Repos: createList([]string{"repo3", "repo1", "repo2"}),
-				},
+				}),
 			},
 			expectedState: githubChecksModel{
 				Owner: types.StringValue("test-org"),
-				RequiredChecks: &checksConfig{
+				RequiredChecks: mustChecksConfigObject(&checksConfig{
 					Repos: createList([]string{"repo1", "repo2", "repo3"}),
-				},
+				}),
 			},
 		},
 		{
 			name: "required_checks_repos_different_content",
 			plan: githubChecksModel{
 				Owner: types.StringValue("test-org"),
-				RequiredChecks: &checksConfig{
+				RequiredChecks: mustChecksConfigObject(&checksConfig{
 					Repos: createList([]string{"repo1", "repo2"}),
-				},
+				}),
 			},
 			state: githubChecksModel{
 				Owner: types.StringValue("test-org"),
-				RequiredChecks: &checksConfig{
+				RequiredChecks: mustChecksConfigObject(&checksConfig{
 					Repos: createList([]string{"repo3", "repo4"}),
-				},
+				}),
 			},
 			expectedState: githubChecksModel{
 				Owner: types.StringValue("test-org"),
-				RequiredChecks: &checksConfig{
+				RequiredChecks: mustChecksConfigObject(&checksConfig{
 					Repos: createList([]string{"repo3", "repo4"}),
-				},
+				}),
 			},
 		},
 		{
 			name: "required_checks_omit_repos_same_content_different_order",
 			plan: githubChecksModel{
 				Owner: types.StringValue("test-org"),
-				RequiredChecks: &checksConfig{
+				RequiredChecks: mustChecksConfigObject(&checksConfig{
 					Repos:     createList([]string{"*"}),
 					OmitRepos: createList([]string{"exclude1", "exclude2"}),
-				},
+				}),
 			},
 			state: githubChecksModel{
 				Owner: types.StringValue("test-org"),
-				RequiredChecks: &checksConfig{
+				RequiredChecks: mustChecksConfigObject(&checksConfig{
 					Repos:     createList([]string{"*"}),
 					OmitRepos: createList([]string{"exclude2", "exclude1"}),
-				},
+				}),
 			},
 			expectedState: githubChecksModel{
 				Owner: types.StringValue("test-org"),
-				RequiredChecks: &checksConfig{
+				RequiredChecks: mustChecksConfigObject(&checksConfig{
 					Repos:     createList([]string{"*"}),
 					OmitRepos: createList([]string{"exclude1", "exclude2"}),
-				},
+				}),
 			},
 		},
 		{
 			name: "optional_checks_repos_same_content_different_order",
 			plan: githubChecksModel{
 				Owner: types.StringValue("test-org"),
-				OptionalChecks: &checksConfig{
+				OptionalChecks: mustChecksConfigObject(&checksConfig{
 					Repos: createList([]string{"opt1", "opt2"}),
-				},
+				}),
 			},
 			state: githubChecksModel{
 				Owner: types.StringValue("test-org"),
-				OptionalChecks: &checksConfig{
+				OptionalChecks: mustChecksConfigObject(&checksConfig{
 					Repos: createList([]string{"opt2", "opt1"}),
-				},
+				}),
 			},
 			expectedState: githubChecksModel{
 				Owner: types.StringValue("test-org"),
-				OptionalChecks: &checksConfig{
+				OptionalChecks: mustChecksConfigObject(&checksConfig{
 					Repos: createList([]string{"opt1", "opt2"}),
-				},
+				}),
 			},
 		},
 		{
 			name: "optional_checks_omit_repos_same_content_different_order",
 			plan: githubChecksModel{
 				Owner: types.StringValue("test-org"),
-				OptionalChecks: &checksConfig{
+				OptionalChecks: mustChecksConfigObject(&checksConfig{
 					Repos:     createList([]string{"*"}),
 					OmitRepos: createList([]string{"omit1", "omit2", "omit3"}),
-				},
+				}),
 			},
 			state: githubChecksModel{
 				Owner: types.StringValue("test-org"),
-				OptionalChecks: &checksConfig{
+				OptionalChecks: mustChecksConfigObject(&checksConfig{
 					Repos:     createList([]string{"*"}),
 					OmitRepos: createList([]string{"omit3", "omit2", "omit1"}),
-				},
+				}),
 			},
 			expectedState: githubChecksModel{
 				Owner: types.StringValue("test-org"),
-				OptionalChecks: &checksConfig{
+				OptionalChecks: mustChecksConfigObject(&checksConfig{
 					Repos:     createList([]string{"*"}),
 					OmitRepos: createList([]string{"omit1", "omit2", "omit3"}),
-				},
+				}),
 			},
 		},
 		{
 			name: "baseline_check_repos_same_content_different_order",
 			plan: githubChecksModel{
 				Owner: types.StringValue("test-org"),
-				BaselineCheck: &checksConfig{
+				BaselineCheck: mustChecksConfigObject(&checksConfig{
 					Repos: createList([]string{"base1", "base2"}),
-				},
+				}),
 			},
 			state: githubChecksModel{
 				Owner: types.StringValue("test-org"),
-				BaselineCheck: &checksConfig{
+				BaselineCheck: mustChecksConfigObject(&checksConfig{
 					Repos: createList([]string{"base2", "base1"}),
-				},
+				}),
 			},
 			expectedState: githubChecksModel{
 				Owner: types.StringValue("test-org"),
-				BaselineCheck: &checksConfig{
+				BaselineCheck: mustChecksConfigObject(&checksConfig{
 					Repos: createList([]string{"base1", "base2"}),
-				},
+				}),
 			},
 		},
 		{
 			name: "baseline_check_omit_repos_same_content_different_order",
 			plan: githubChecksModel{
 				Owner: types.StringValue("test-org"),
-				BaselineCheck: &checksConfig{
+				BaselineCheck: mustChecksConfigObject(&checksConfig{
 					Repos:     createList([]string{"*"}),
 					OmitRepos: createList([]string{"skip1", "skip2"}),
-				},
+				}),
 			},
 			state: githubChecksModel{
 				Owner: types.StringValue("test-org"),
-				BaselineCheck: &checksConfig{
+				BaselineCheck: mustChecksConfigObject(&checksConfig{
 					Repos:     createList([]string{"*"}),
 					OmitRepos: createList([]string{"skip2", "skip1"}),
-				},
+				}),
 			},
 			expectedState: githubChecksModel{
 				Owner: types.StringValue("test-org"),
-				BaselineCheck: &checksConfig{
+				BaselineCheck: mustChecksConfigObject(&checksConfig{
 					Repos:     createList([]string{"*"}),
 					OmitRepos: createList([]string{"skip1", "skip2"}),
-				},
+				}),
 			},
 		},
 		{
 			name: "multiple_checks_all_same_content_different_order",
 			plan: githubChecksModel{
 				Owner: types.StringValue("test-org"),
-				RequiredChecks: &checksConfig{
+				RequiredChecks: mustChecksConfigObject(&checksConfig{
 					Repos:     createList([]string{"req1", "req2"}),
 					OmitRepos: createList([]string{"omit1", "omit2"}),
-				},
-				OptionalChecks: &checksConfig{
+				}),
+				OptionalChecks: mustChecksConfigObject(&checksConfig{
 					Repos: createList([]string{"opt1", "opt2"}),
-				},
-				BaselineCheck: &checksConfig{
+				}),
+				BaselineCheck: mustChecksConfigObject(&checksConfig{
 					Repos: createList([]string{"base1", "base2"}),
-				},
+				}),
 			},
 			state: githubChecksModel{
 				Owner: types.StringValue("test-org"),
-				RequiredChecks: &checksConfig{
+				RequiredChecks: mustChecksConfigObject(&checksConfig{
 					Repos:     createList([]string{"req2", "req1"}),
 					OmitRepos: createList([]string{"omit2", "omit1"}),
-				},
-				OptionalChecks: &checksConfig{
+				}),
+				OptionalChecks: mustChecksConfigObject(&checksConfig{
 					Repos: createList([]string{"opt2", "opt1"}),
-				},
-				BaselineCheck: &checksConfig{
+				}),
+				BaselineCheck: mustChecksConfigObject(&checksConfig{
 					Repos: createList([]string{"base2", "base1"}),
-				},
+				}),
 			},
 			expectedState: githubChecksModel{
 				Owner: types.StringValue("test-org"),
-				RequiredChecks: &checksConfig{
+				RequiredChecks: mustChecksConfigObject(&checksConfig{
 					Repos:     createList([]string{"req1", "req2"}),
 					OmitRepos: createList([]string{"omit1", "omit2"}),
-				},
-				OptionalChecks: &checksConfig{
+				}),
+				OptionalChecks: mustChecksConfigObject(&checksConfig{
 					Repos: createList([]string{"opt1", "opt2"}),
-				},
-				BaselineCheck: &checksConfig{
+				}),
+				BaselineCheck: mustChecksConfigObject(&checksConfig{
 					Repos: createList([]string{"base1", "base2"}),
-				},
+				}),
 			},
 		},
 		{
@@ -2034,36 +2054,36 @@ func TestGithubChecksResource_UpdateStateListsWithOrderFromPlan(t *testing.T) {
 			name: "plan_has_nil_required_checks_state_has_value",
 			plan: githubChecksModel{
 				Owner:          types.StringValue("test-org"),
-				RequiredChecks: nil,
+				RequiredChecks: mustChecksConfigObject(nil),
 			},
 			state: githubChecksModel{
 				Owner: types.StringValue("test-org"),
-				RequiredChecks: &checksConfig{
+				RequiredChecks: mustChecksConfigObject(&checksConfig{
 					Repos: createList([]string{"repo1"}),
-				},
+				}),
 			},
 			expectedState: githubChecksModel{
 				Owner: types.StringValue("test-org"),
-				RequiredChecks: &checksConfig{
+				RequiredChecks: mustChecksConfigObject(&checksConfig{
 					Repos: createList([]string{"repo1"}),
-				},
+				}),
 			},
 		},
 		{
 			name: "plan_has_value_state_has_nil_optional_checks",
 			plan: githubChecksModel{
 				Owner: types.StringValue("test-org"),
-				OptionalChecks: &checksConfig{
+				OptionalChecks: mustChecksConfigObject(&checksConfig{
 					Repos: createList([]string{"opt1"}),
-				},
+				}),
 			},
 			state: githubChecksModel{
 				Owner:          types.StringValue("test-org"),
-				OptionalChecks: nil,
+				OptionalChecks: mustChecksConfigObject(nil),
 			},
 			expectedState: githubChecksModel{
 				Owner:          types.StringValue("test-org"),
-				OptionalChecks: nil,
+				OptionalChecks: mustChecksConfigObject(nil),
 			},
 		},
 		{
@@ -2111,25 +2131,31 @@ func TestGithubChecksResource_UpdateStateListsWithOrderFromPlan(t *testing.T) {
 			}
 
 			// For lists, compare the string representation
-			if tc.expectedState.RequiredChecks != nil && stateCopy.RequiredChecks != nil {
-				assert.Equal(t, r.listToStringSlice(tc.expectedState.RequiredChecks.Repos),
-					r.listToStringSlice(stateCopy.RequiredChecks.Repos), "RequiredChecks.Repos mismatch")
-				assert.Equal(t, r.listToStringSlice(tc.expectedState.RequiredChecks.OmitRepos),
-					r.listToStringSlice(stateCopy.RequiredChecks.OmitRepos), "RequiredChecks.OmitRepos mismatch")
+			expectedRequiredChecks := checksConfigFromObject(tc.expectedState.RequiredChecks)
+			actualRequiredChecks := checksConfigFromObject(stateCopy.RequiredChecks)
+			if expectedRequiredChecks != nil && actualRequiredChecks != nil {
+				assert.Equal(t, r.listToStringSlice(expectedRequiredChecks.Repos),
+					r.listToStringSlice(actualRequiredChecks.Repos), "RequiredChecks.Repos mismatch")
+				assert.Equal(t, r.listToStringSlice(expectedRequiredChecks.OmitRepos),
+					r.listToStringSlice(actualRequiredChecks.OmitRepos), "RequiredChecks.OmitRepos mismatch")
 			}
 
-			if tc.expectedState.OptionalChecks != nil && stateCopy.OptionalChecks != nil {
-				assert.Equal(t, r.listToStringSlice(tc.expectedState.OptionalChecks.Repos),
-					r.listToStringSlice(stateCopy.OptionalChecks.Repos), "OptionalChecks.Repos mismatch")
-				assert.Equal(t, r.listToStringSlice(tc.expectedState.OptionalChecks.OmitRepos),
-					r.listToStringSlice(stateCopy.OptionalChecks.OmitRepos), "OptionalChecks.OmitRepos mismatch")
+			expectedOptionalChecks := checksConfigFromObject(tc.expectedState.OptionalChecks)
+			actualOptionalChecks := checksConfigFromObject(stateCopy.OptionalChecks)
+			if expectedOptionalChecks != nil && actualOptionalChecks != nil {
+				assert.Equal(t, r.listToStringSlice(expectedOptionalChecks.Repos),
+					r.listToStringSlice(actualOptionalChecks.Repos), "OptionalChecks.Repos mismatch")
+				assert.Equal(t, r.listToStringSlice(expectedOptionalChecks.OmitRepos),
+					r.listToStringSlice(actualOptionalChecks.OmitRepos), "OptionalChecks.OmitRepos mismatch")
 			}
 
-			if tc.expectedState.BaselineCheck != nil && stateCopy.BaselineCheck != nil {
-				assert.Equal(t, r.listToStringSlice(tc.expectedState.BaselineCheck.Repos),
-					r.listToStringSlice(stateCopy.BaselineCheck.Repos), "BaselineCheck.Repos mismatch")
-				assert.Equal(t, r.listToStringSlice(tc.expectedState.BaselineCheck.OmitRepos),
-					r.listToStringSlice(stateCopy.BaselineCheck.OmitRepos), "BaselineCheck.OmitRepos mismatch")
+			expectedBaselineCheck := checksConfigFromObject(tc.expectedState.BaselineCheck)
+			actualBaselineCheck := checksConfigFromObject(stateCopy.BaselineCheck)
+			if expectedBaselineCheck != nil && actualBaselineCheck != nil {
+				assert.Equal(t, r.listToStringSlice(expectedBaselineCheck.Repos),
+					r.listToStringSlice(actualBaselineCheck.Repos), "BaselineCheck.Repos mismatch")
+				assert.Equal(t, r.listToStringSlice(expectedBaselineCheck.OmitRepos),
+					r.listToStringSlice(actualBaselineCheck.OmitRepos), "BaselineCheck.OmitRepos mismatch")
 			}
 		})
 	}

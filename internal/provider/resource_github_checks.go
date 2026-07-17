@@ -15,6 +15,7 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/int64default"
 	"github.com/hashicorp/terraform-plugin-framework/types"
+	"github.com/hashicorp/terraform-plugin-framework/types/basetypes"
 	"github.com/hashicorp/terraform-plugin-log/tflog"
 
 	stepsecurityapi "github.com/step-security/terraform-provider-stepsecurity/internal/stepsecurity-api"
@@ -188,17 +189,69 @@ func (r *githubChecksResource) ImportState(ctx context.Context, req resource.Imp
 }
 
 type githubChecksModel struct {
-	Owner             types.String  `tfsdk:"owner"`
-	Controls          types.List    `tfsdk:"controls"`
-	RequiredChecks    *checksConfig `tfsdk:"required_checks"`
-	OptionalChecks    *checksConfig `tfsdk:"optional_checks"`
-	BaselineCheck     *checksConfig `tfsdk:"baseline_check"`
-	CustomDescription types.String  `tfsdk:"custom_description"`
+	Owner             types.String `tfsdk:"owner"`
+	Controls          types.List   `tfsdk:"controls"`
+	RequiredChecks    types.Object `tfsdk:"required_checks"`
+	OptionalChecks    types.Object `tfsdk:"optional_checks"`
+	BaselineCheck     types.Object `tfsdk:"baseline_check"`
+	CustomDescription types.String `tfsdk:"custom_description"`
 }
 
 type checksConfig struct {
 	Repos     types.List `tfsdk:"repos"`
 	OmitRepos types.List `tfsdk:"omit_repos"`
+}
+
+// checksConfigAttrTypes returns the attribute types of a required_checks/optional_checks/
+// baseline_check object.
+func checksConfigAttrTypes() map[string]attr.Type {
+	return map[string]attr.Type{
+		"repos":      types.ListType{ElemType: types.StringType},
+		"omit_repos": types.ListType{ElemType: types.StringType},
+	}
+}
+
+// decodeChecksConfig decodes a required_checks/optional_checks/baseline_check types.Object
+// into a *checksConfig. It returns nil (no error) when the object is null OR unknown; every
+// caller already treats a nil *checksConfig as "not configured, skip", which is also the
+// correct behavior to defer to a later plan when the whole object isn't known yet. Binding an
+// unknown object into a plain *checksConfig (rather than types.Object) is what caused a
+// customer-reported crash for required_checks.
+func decodeChecksConfig(ctx context.Context, obj types.Object) (*checksConfig, diag.Diagnostics) {
+	if obj.IsNull() || obj.IsUnknown() {
+		return nil, nil
+	}
+	var c checksConfig
+	diags := obj.As(ctx, &c, basetypes.ObjectAsOptions{})
+	if diags.HasError() {
+		return nil, diags
+	}
+	return &c, nil
+}
+
+// encodeChecksConfig converts a *checksConfig back into the types.Object it is bound to,
+// producing a null object when cfg is nil. Repos/OmitRepos are normalized to a properly
+// typed null list when left as the Go zero value types.List{} (no element type set) —
+// building the object via reflection (ObjectValueFrom) on that zero value fails a strict
+// type check and silently degrades to an Unknown object, which would reintroduce the
+// unknown-value crash this type is meant to prevent.
+func encodeChecksConfig(_ context.Context, cfg *checksConfig) types.Object {
+	if cfg == nil {
+		return types.ObjectNull(checksConfigAttrTypes())
+	}
+	repos := cfg.Repos
+	if repos.IsNull() {
+		repos = types.ListNull(types.StringType)
+	}
+	omitRepos := cfg.OmitRepos
+	if omitRepos.IsNull() {
+		omitRepos = types.ListNull(types.StringType)
+	}
+	obj, _ := types.ObjectValue(checksConfigAttrTypes(), map[string]attr.Value{
+		"repos":      repos,
+		"omit_repos": omitRepos,
+	})
+	return obj
 }
 
 type control struct {
@@ -255,6 +308,16 @@ func (r *githubChecksResource) ValidateConfig(ctx context.Context, req resource.
 			"Owner is required",
 			"Owner is required to create a GitHub Checks resource",
 		)
+	}
+
+	requiredChecks, diags2 := decodeChecksConfig(ctx, config.RequiredChecks)
+	resp.Diagnostics.Append(diags2...)
+	optionalChecks, diags3 := decodeChecksConfig(ctx, config.OptionalChecks)
+	resp.Diagnostics.Append(diags3...)
+	baselineCheck, diags4 := decodeChecksConfig(ctx, config.BaselineCheck)
+	resp.Diagnostics.Append(diags4...)
+	if resp.Diagnostics.HasError() {
+		return
 	}
 
 	hasRequired := false
@@ -339,14 +402,14 @@ func (r *githubChecksResource) ValidateConfig(ctx context.Context, req resource.
 		}
 	}
 
-	if !controlsIndeterminate && config.RequiredChecks != nil && len(config.RequiredChecks.Repos.Elements()) != 0 && !hasRequired {
+	if !controlsIndeterminate && requiredChecks != nil && len(requiredChecks.Repos.Elements()) != 0 && !hasRequired {
 		resp.Diagnostics.AddError(
 			"can't provide repos for required checks without enabling any control for required checks",
 			"No control of type 'required' is enabled to apply to the repos",
 		)
 	}
 
-	if !controlsIndeterminate && config.OptionalChecks != nil && len(config.OptionalChecks.Repos.Elements()) != 0 && !hasOptional {
+	if !controlsIndeterminate && optionalChecks != nil && len(optionalChecks.Repos.Elements()) != 0 && !hasOptional {
 		resp.Diagnostics.AddError(
 			"can't provide repos for optional checks without enabling any control for optional checks",
 			"No control of type 'optional' is enabled to apply to the repos",
@@ -357,24 +420,24 @@ func (r *githubChecksResource) ValidateConfig(ctx context.Context, req resource.
 	isOptionalCheckAppliedForAllRepos := false
 	isBaselineCheckAppliedForAllRepos := false
 
-	if config.RequiredChecks != nil && !config.RequiredChecks.Repos.IsUnknown() {
-		for _, repo := range config.RequiredChecks.Repos.Elements() {
+	if requiredChecks != nil && !requiredChecks.Repos.IsUnknown() {
+		for _, repo := range requiredChecks.Repos.Elements() {
 			repoStr, ok := repo.(types.String)
 			if ok && !repoStr.IsUnknown() && repoStr.ValueString() == "*" {
 				isRequiredCheckAppliedForAllRepos = true
 			}
 		}
 	}
-	if config.OptionalChecks != nil && !config.OptionalChecks.Repos.IsUnknown() {
-		for _, repo := range config.OptionalChecks.Repos.Elements() {
+	if optionalChecks != nil && !optionalChecks.Repos.IsUnknown() {
+		for _, repo := range optionalChecks.Repos.Elements() {
 			repoStr, ok := repo.(types.String)
 			if ok && !repoStr.IsUnknown() && repoStr.ValueString() == "*" {
 				isOptionalCheckAppliedForAllRepos = true
 			}
 		}
 	}
-	if config.BaselineCheck != nil && !config.BaselineCheck.Repos.IsUnknown() {
-		for _, repo := range config.BaselineCheck.Repos.Elements() {
+	if baselineCheck != nil && !baselineCheck.Repos.IsUnknown() {
+		for _, repo := range baselineCheck.Repos.Elements() {
 			repoStr, ok := repo.(types.String)
 			if ok && !repoStr.IsUnknown() && repoStr.ValueString() == "*" {
 				isBaselineCheckAppliedForAllRepos = true
@@ -382,13 +445,13 @@ func (r *githubChecksResource) ValidateConfig(ctx context.Context, req resource.
 		}
 	}
 
-	if config.RequiredChecks != nil {
-		if !config.RequiredChecks.OmitRepos.IsUnknown() && !isRequiredCheckAppliedForAllRepos && len(config.RequiredChecks.OmitRepos.Elements()) != 0 {
+	if requiredChecks != nil {
+		if !requiredChecks.OmitRepos.IsUnknown() && !isRequiredCheckAppliedForAllRepos && len(requiredChecks.OmitRepos.Elements()) != 0 {
 			resp.Diagnostics.AddError(
 				"can't provide omit_repos for required checks without enabling it for all repos",
 				"omit_repos can only be provided when repos is set to '*'",
 			)
-		} else if !config.RequiredChecks.Repos.IsUnknown() && isRequiredCheckAppliedForAllRepos && len(config.RequiredChecks.Repos.Elements()) != 1 {
+		} else if !requiredChecks.Repos.IsUnknown() && isRequiredCheckAppliedForAllRepos && len(requiredChecks.Repos.Elements()) != 1 {
 			resp.Diagnostics.AddError(
 				"can't provide additional values for repos for required checks when repos set to '*'",
 				"additional values for repos are not allowed when repos have a value '*'",
@@ -396,13 +459,13 @@ func (r *githubChecksResource) ValidateConfig(ctx context.Context, req resource.
 		}
 	}
 
-	if config.OptionalChecks != nil {
-		if !config.OptionalChecks.OmitRepos.IsUnknown() && !isOptionalCheckAppliedForAllRepos && len(config.OptionalChecks.OmitRepos.Elements()) != 0 {
+	if optionalChecks != nil {
+		if !optionalChecks.OmitRepos.IsUnknown() && !isOptionalCheckAppliedForAllRepos && len(optionalChecks.OmitRepos.Elements()) != 0 {
 			resp.Diagnostics.AddError(
 				"can't provide omit_repos for optional checks without enabling it for all repos",
 				"omit_repos can only be provided when repos is set to '*'",
 			)
-		} else if !config.OptionalChecks.Repos.IsUnknown() && isOptionalCheckAppliedForAllRepos && len(config.OptionalChecks.Repos.Elements()) != 1 {
+		} else if !optionalChecks.Repos.IsUnknown() && isOptionalCheckAppliedForAllRepos && len(optionalChecks.Repos.Elements()) != 1 {
 			resp.Diagnostics.AddError(
 				"can't provide additional values for repos for optional checks when repos set to '*'",
 				"additional values for repos are not allowed when repos have a value '*'",
@@ -410,13 +473,13 @@ func (r *githubChecksResource) ValidateConfig(ctx context.Context, req resource.
 		}
 	}
 
-	if config.BaselineCheck != nil {
-		if !config.BaselineCheck.OmitRepos.IsUnknown() && !isBaselineCheckAppliedForAllRepos && len(config.BaselineCheck.OmitRepos.Elements()) != 0 {
+	if baselineCheck != nil {
+		if !baselineCheck.OmitRepos.IsUnknown() && !isBaselineCheckAppliedForAllRepos && len(baselineCheck.OmitRepos.Elements()) != 0 {
 			resp.Diagnostics.AddError(
 				"can't provide omit_repos for baseline checks without enabling it for all repos",
 				"omit_repos can only be provided when repos is set to '*'",
 			)
-		} else if !config.BaselineCheck.Repos.IsUnknown() && isBaselineCheckAppliedForAllRepos && len(config.BaselineCheck.Repos.Elements()) != 1 {
+		} else if !baselineCheck.Repos.IsUnknown() && isBaselineCheckAppliedForAllRepos && len(baselineCheck.Repos.Elements()) != 1 {
 			resp.Diagnostics.AddError(
 				"can't provide additional values for repos for baseline checks when repos set to '*'",
 				"additional values for repos are not allowed when repos have a value '*'",
@@ -634,6 +697,19 @@ func (r *githubChecksResource) convertToCreateRequest(ctx context.Context, plan 
 		}
 	}
 
+	requiredChecks, diags := decodeChecksConfig(ctx, plan.RequiredChecks)
+	if diags.HasError() {
+		return nil, diagsToError(diags)
+	}
+	optionalChecks, diags := decodeChecksConfig(ctx, plan.OptionalChecks)
+	if diags.HasError() {
+		return nil, diagsToError(diags)
+	}
+	baselineCheck, diags := decodeChecksConfig(ctx, plan.BaselineCheck)
+	if diags.HasError() {
+		return nil, diagsToError(diags)
+	}
+
 	for _, control := range controls {
 		controlName := control.Control.ValueString()
 		checkConfig := stepsecurityapi.CheckConfig{
@@ -682,8 +758,8 @@ func (r *githubChecksResource) convertToCreateRequest(ctx context.Context, plan 
 	isOptionalCheckAppliedForAllRepos := false
 	isBaselineCheckAppliedForAllRepos := false
 
-	if plan.RequiredChecks != nil {
-		for _, repo := range plan.RequiredChecks.Repos.Elements() {
+	if requiredChecks != nil {
+		for _, repo := range requiredChecks.Repos.Elements() {
 			repoName := repo.(types.String).ValueString()
 			if repoName == "*" {
 				isRequiredCheckAppliedForAllRepos = true
@@ -692,8 +768,8 @@ func (r *githubChecksResource) convertToCreateRequest(ctx context.Context, plan 
 		}
 	}
 
-	if plan.OptionalChecks != nil {
-		for _, repo := range plan.OptionalChecks.Repos.Elements() {
+	if optionalChecks != nil {
+		for _, repo := range optionalChecks.Repos.Elements() {
 			repoName := repo.(types.String).ValueString()
 			if repoName == "*" {
 				isOptionalCheckAppliedForAllRepos = true
@@ -702,8 +778,8 @@ func (r *githubChecksResource) convertToCreateRequest(ctx context.Context, plan 
 		}
 	}
 
-	if plan.BaselineCheck != nil {
-		for _, repo := range plan.BaselineCheck.Repos.Elements() {
+	if baselineCheck != nil {
+		for _, repo := range baselineCheck.Repos.Elements() {
 			repoName := repo.(types.String).ValueString()
 			if repoName == "*" {
 				isBaselineCheckAppliedForAllRepos = true
@@ -713,8 +789,8 @@ func (r *githubChecksResource) convertToCreateRequest(ctx context.Context, plan 
 	}
 
 	repos := map[string]stepsecurityapi.CheckOptions{}
-	if plan.RequiredChecks != nil {
-		for _, repo := range plan.RequiredChecks.Repos.Elements() {
+	if requiredChecks != nil {
+		for _, repo := range requiredChecks.Repos.Elements() {
 			repoName := repo.(types.String).ValueString()
 			if repoName == "*" {
 				continue
@@ -727,8 +803,8 @@ func (r *githubChecksResource) convertToCreateRequest(ctx context.Context, plan 
 		}
 	}
 
-	if plan.OptionalChecks != nil {
-		for _, repo := range plan.OptionalChecks.Repos.Elements() {
+	if optionalChecks != nil {
+		for _, repo := range optionalChecks.Repos.Elements() {
 			repoName := repo.(types.String).ValueString()
 			if repoName == "*" {
 				continue
@@ -746,8 +822,8 @@ func (r *githubChecksResource) convertToCreateRequest(ctx context.Context, plan 
 		}
 	}
 
-	if plan.BaselineCheck != nil {
-		for _, repo := range plan.BaselineCheck.Repos.Elements() {
+	if baselineCheck != nil {
+		for _, repo := range baselineCheck.Repos.Elements() {
 			repoName := repo.(types.String).ValueString()
 			if repoName == "*" {
 				continue
@@ -766,8 +842,8 @@ func (r *githubChecksResource) convertToCreateRequest(ctx context.Context, plan 
 	}
 
 	// process omit repos
-	if isRequiredCheckAppliedForAllRepos && plan.RequiredChecks != nil {
-		for _, repo := range plan.RequiredChecks.OmitRepos.Elements() {
+	if isRequiredCheckAppliedForAllRepos && requiredChecks != nil {
+		for _, repo := range requiredChecks.OmitRepos.Elements() {
 			repoName := repo.(types.String).ValueString()
 			if val, ok := repos[repoName]; ok {
 				val.RunRequiredChecks = false
@@ -781,8 +857,8 @@ func (r *githubChecksResource) convertToCreateRequest(ctx context.Context, plan 
 			}
 		}
 	}
-	if isOptionalCheckAppliedForAllRepos && plan.OptionalChecks != nil {
-		for _, repo := range plan.OptionalChecks.OmitRepos.Elements() {
+	if isOptionalCheckAppliedForAllRepos && optionalChecks != nil {
+		for _, repo := range optionalChecks.OmitRepos.Elements() {
 			repoName := repo.(types.String).ValueString()
 			if val, ok := repos[repoName]; ok {
 				val.RunOptionalChecks = false
@@ -796,8 +872,8 @@ func (r *githubChecksResource) convertToCreateRequest(ctx context.Context, plan 
 			}
 		}
 	}
-	if isBaselineCheckAppliedForAllRepos && plan.BaselineCheck != nil {
-		for _, repo := range plan.BaselineCheck.OmitRepos.Elements() {
+	if isBaselineCheckAppliedForAllRepos && baselineCheck != nil {
+		for _, repo := range baselineCheck.OmitRepos.Elements() {
 			repoName := repo.(types.String).ValueString()
 			if val, ok := repos[repoName]; ok {
 				val.Baseline = false
@@ -918,24 +994,26 @@ func (r *githubChecksResource) convertToState(ctx context.Context, owner string,
 	isRequiredAll := config.EnableRequiredChecksForAllNewRepos != nil && *config.EnableRequiredChecksForAllNewRepos
 	isOptionalAll := config.EnableOptionalChecksForAllNewRepos != nil && *config.EnableOptionalChecksForAllNewRepos
 
+	var requiredChecks, optionalChecks, baselineCheck *checksConfig
+
 	// Pre-set '*' lists when applicable
 	if isBaselineAll {
-		if model.BaselineCheck == nil {
-			model.BaselineCheck = &checksConfig{}
+		if baselineCheck == nil {
+			baselineCheck = &checksConfig{}
 		}
-		model.BaselineCheck.Repos, _ = types.ListValue(types.StringType, []attr.Value{types.StringValue("*")})
+		baselineCheck.Repos, _ = types.ListValue(types.StringType, []attr.Value{types.StringValue("*")})
 	}
 	if isRequiredAll {
-		if model.RequiredChecks == nil {
-			model.RequiredChecks = &checksConfig{}
+		if requiredChecks == nil {
+			requiredChecks = &checksConfig{}
 		}
-		model.RequiredChecks.Repos, _ = types.ListValue(types.StringType, []attr.Value{types.StringValue("*")})
+		requiredChecks.Repos, _ = types.ListValue(types.StringType, []attr.Value{types.StringValue("*")})
 	}
 	if isOptionalAll {
-		if model.OptionalChecks == nil {
-			model.OptionalChecks = &checksConfig{}
+		if optionalChecks == nil {
+			optionalChecks = &checksConfig{}
 		}
-		model.OptionalChecks.Repos, _ = types.ListValue(types.StringType, []attr.Value{types.StringValue("*")})
+		optionalChecks.Repos, _ = types.ListValue(types.StringType, []attr.Value{types.StringValue("*")})
 	}
 
 	// Build per-repo lists
@@ -989,54 +1067,58 @@ func (r *githubChecksResource) convertToState(ctx context.Context, owner string,
 
 	// RequiredChecks - initialize if there are required controls or any required activity
 	if hasRequiredControls || isRequiredAll || len(requiredRepos) > 0 || len(requiredOmitRepos) > 0 {
-		model.RequiredChecks = &checksConfig{}
+		requiredChecks = &checksConfig{}
 		if isRequiredAll {
-			model.RequiredChecks.Repos, _ = types.ListValue(types.StringType, []attr.Value{types.StringValue("*")})
+			requiredChecks.Repos, _ = types.ListValue(types.StringType, []attr.Value{types.StringValue("*")})
 		} else {
-			model.RequiredChecks.Repos, _ = types.ListValue(types.StringType, requiredRepos)
+			requiredChecks.Repos, _ = types.ListValue(types.StringType, requiredRepos)
 		}
 		// Only set OmitRepos if there are actually repos to omit
 		if len(requiredOmitRepos) > 0 {
-			model.RequiredChecks.OmitRepos, _ = types.ListValue(types.StringType, requiredOmitRepos)
+			requiredChecks.OmitRepos, _ = types.ListValue(types.StringType, requiredOmitRepos)
 		} else {
 			// No omit repos - set as typed null
-			model.RequiredChecks.OmitRepos = types.ListNull(types.StringType)
+			requiredChecks.OmitRepos = types.ListNull(types.StringType)
 		}
 	}
 
 	// OptionalChecks - initialize if there are optional controls or any optional activity
 	if hasOptionalControls || isOptionalAll || len(optionalRepos) > 0 || len(optionalOmitRepos) > 0 {
-		model.OptionalChecks = &checksConfig{}
+		optionalChecks = &checksConfig{}
 		if isOptionalAll {
-			model.OptionalChecks.Repos, _ = types.ListValue(types.StringType, []attr.Value{types.StringValue("*")})
+			optionalChecks.Repos, _ = types.ListValue(types.StringType, []attr.Value{types.StringValue("*")})
 		} else {
-			model.OptionalChecks.Repos, _ = types.ListValue(types.StringType, optionalRepos)
+			optionalChecks.Repos, _ = types.ListValue(types.StringType, optionalRepos)
 		}
 		// Only set OmitRepos if there are actually repos to omit
 		if len(optionalOmitRepos) > 0 {
-			model.OptionalChecks.OmitRepos, _ = types.ListValue(types.StringType, optionalOmitRepos)
+			optionalChecks.OmitRepos, _ = types.ListValue(types.StringType, optionalOmitRepos)
 		} else {
 			// No omit repos - set as typed null
-			model.OptionalChecks.OmitRepos = types.ListNull(types.StringType)
+			optionalChecks.OmitRepos = types.ListNull(types.StringType)
 		}
 	}
 
 	// BaselineCheck - initialize if baseline is enabled globally or has any baseline activity
 	if isBaselineAll || len(baselineRepos) > 0 || len(baselineOmitRepos) > 0 {
-		model.BaselineCheck = &checksConfig{}
+		baselineCheck = &checksConfig{}
 		if isBaselineAll {
-			model.BaselineCheck.Repos, _ = types.ListValue(types.StringType, []attr.Value{types.StringValue("*")})
+			baselineCheck.Repos, _ = types.ListValue(types.StringType, []attr.Value{types.StringValue("*")})
 		} else {
-			model.BaselineCheck.Repos, _ = types.ListValue(types.StringType, baselineRepos)
+			baselineCheck.Repos, _ = types.ListValue(types.StringType, baselineRepos)
 		}
 		// Only set OmitRepos if there are actually repos to omit
 		if len(baselineOmitRepos) > 0 {
-			model.BaselineCheck.OmitRepos, _ = types.ListValue(types.StringType, baselineOmitRepos)
+			baselineCheck.OmitRepos, _ = types.ListValue(types.StringType, baselineOmitRepos)
 		} else {
 			// No omit repos - set as typed null
-			model.BaselineCheck.OmitRepos = types.ListNull(types.StringType)
+			baselineCheck.OmitRepos = types.ListNull(types.StringType)
 		}
 	}
+
+	model.RequiredChecks = encodeChecksConfig(ctx, requiredChecks)
+	model.OptionalChecks = encodeChecksConfig(ctx, optionalChecks)
+	model.BaselineCheck = encodeChecksConfig(ctx, baselineCheck)
 
 	return model
 }
@@ -1046,45 +1128,88 @@ func (r *githubChecksResource) updateStateListsWithOrderFromPlan(ctx context.Con
 		return
 	}
 
+	planRequiredChecks, diags := decodeChecksConfig(ctx, plan.RequiredChecks)
+	if diags.HasError() {
+		return
+	}
+	stateRequiredChecks, diags := decodeChecksConfig(ctx, state.RequiredChecks)
+	if diags.HasError() {
+		return
+	}
+	planOptionalChecks, diags := decodeChecksConfig(ctx, plan.OptionalChecks)
+	if diags.HasError() {
+		return
+	}
+	stateOptionalChecks, diags := decodeChecksConfig(ctx, state.OptionalChecks)
+	if diags.HasError() {
+		return
+	}
+	planBaselineCheck, diags := decodeChecksConfig(ctx, plan.BaselineCheck)
+	if diags.HasError() {
+		return
+	}
+	stateBaselineCheck, diags := decodeChecksConfig(ctx, state.BaselineCheck)
+	if diags.HasError() {
+		return
+	}
+
 	// Update state with plan if the lists are equal for required checks
-	if plan.RequiredChecks != nil && state.RequiredChecks != nil {
-		planRepos := r.listToStringSlice(plan.RequiredChecks.Repos)
-		stateRepos := r.listToStringSlice(state.RequiredChecks.Repos)
+	if planRequiredChecks != nil && stateRequiredChecks != nil {
+		changed := false
+		planRepos := r.listToStringSlice(planRequiredChecks.Repos)
+		stateRepos := r.listToStringSlice(stateRequiredChecks.Repos)
 		if cmp.Equal(planRepos, stateRepos, cmpopts.SortSlices(func(a, b string) bool { return a < b })) {
-			state.RequiredChecks.Repos = plan.RequiredChecks.Repos
+			stateRequiredChecks.Repos = planRequiredChecks.Repos
+			changed = true
 		}
-		planOmitRepos := r.listToStringSlice(plan.RequiredChecks.OmitRepos)
-		stateOmitRepos := r.listToStringSlice(state.RequiredChecks.OmitRepos)
+		planOmitRepos := r.listToStringSlice(planRequiredChecks.OmitRepos)
+		stateOmitRepos := r.listToStringSlice(stateRequiredChecks.OmitRepos)
 		if cmp.Equal(planOmitRepos, stateOmitRepos, cmpopts.SortSlices(func(a, b string) bool { return a < b })) {
-			state.RequiredChecks.OmitRepos = plan.RequiredChecks.OmitRepos
+			stateRequiredChecks.OmitRepos = planRequiredChecks.OmitRepos
+			changed = true
+		}
+		if changed {
+			state.RequiredChecks = encodeChecksConfig(ctx, stateRequiredChecks)
 		}
 	}
 
 	// Update state with plan if the lists are equal for optional checks
-	if plan.OptionalChecks != nil && state.OptionalChecks != nil {
-		planRepos := r.listToStringSlice(plan.OptionalChecks.Repos)
-		stateRepos := r.listToStringSlice(state.OptionalChecks.Repos)
+	if planOptionalChecks != nil && stateOptionalChecks != nil {
+		changed := false
+		planRepos := r.listToStringSlice(planOptionalChecks.Repos)
+		stateRepos := r.listToStringSlice(stateOptionalChecks.Repos)
 		if cmp.Equal(planRepos, stateRepos, cmpopts.SortSlices(func(a, b string) bool { return a < b })) {
-			state.OptionalChecks.Repos = plan.OptionalChecks.Repos
+			stateOptionalChecks.Repos = planOptionalChecks.Repos
+			changed = true
 		}
-		planOmitRepos := r.listToStringSlice(plan.OptionalChecks.OmitRepos)
-		stateOmitRepos := r.listToStringSlice(state.OptionalChecks.OmitRepos)
+		planOmitRepos := r.listToStringSlice(planOptionalChecks.OmitRepos)
+		stateOmitRepos := r.listToStringSlice(stateOptionalChecks.OmitRepos)
 		if cmp.Equal(planOmitRepos, stateOmitRepos, cmpopts.SortSlices(func(a, b string) bool { return a < b })) {
-			state.OptionalChecks.OmitRepos = plan.OptionalChecks.OmitRepos
+			stateOptionalChecks.OmitRepos = planOptionalChecks.OmitRepos
+			changed = true
+		}
+		if changed {
+			state.OptionalChecks = encodeChecksConfig(ctx, stateOptionalChecks)
 		}
 	}
 
 	// Update state with plan if the lists are equal for baseline checks
-	if plan.BaselineCheck != nil && state.BaselineCheck != nil {
-		planRepos := r.listToStringSlice(plan.BaselineCheck.Repos)
-		stateRepos := r.listToStringSlice(state.BaselineCheck.Repos)
+	if planBaselineCheck != nil && stateBaselineCheck != nil {
+		changed := false
+		planRepos := r.listToStringSlice(planBaselineCheck.Repos)
+		stateRepos := r.listToStringSlice(stateBaselineCheck.Repos)
 		if cmp.Equal(planRepos, stateRepos, cmpopts.SortSlices(func(a, b string) bool { return a < b })) {
-			state.BaselineCheck.Repos = plan.BaselineCheck.Repos
+			stateBaselineCheck.Repos = planBaselineCheck.Repos
+			changed = true
 		}
-		planOmitRepos := r.listToStringSlice(plan.BaselineCheck.OmitRepos)
-		stateOmitRepos := r.listToStringSlice(state.BaselineCheck.OmitRepos)
+		planOmitRepos := r.listToStringSlice(planBaselineCheck.OmitRepos)
+		stateOmitRepos := r.listToStringSlice(stateBaselineCheck.OmitRepos)
 		if cmp.Equal(planOmitRepos, stateOmitRepos, cmpopts.SortSlices(func(a, b string) bool { return a < b })) {
-			state.BaselineCheck.OmitRepos = plan.BaselineCheck.OmitRepos
+			stateBaselineCheck.OmitRepos = planBaselineCheck.OmitRepos
+			changed = true
+		}
+		if changed {
+			state.BaselineCheck = encodeChecksConfig(ctx, stateBaselineCheck)
 		}
 	}
 
