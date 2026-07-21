@@ -9,12 +9,14 @@ import (
 
 var (
 	AvailableControls = map[string]string{
-		"NPM Package Compromised Updates":  "npm_package_compromised_updates",
-		"NPM Package Cooldown":             "npm_package_recent_release_guard",
-		"PWN Request":                      "pwn_request_check",
-		"PyPI Package Compromised Updates": "pypi_package_compromised_updates",
-		"PyPI Package Cooldown":            "pypi_package_cooldown",
-		"Script Injection":                 "script_injection_check",
+		"Maven Package Compromised Updates": "maven_package_compromised_updates",
+		"Maven Package Cooldown":            "maven_package_cooldown",
+		"NPM Package Compromised Updates":   "npm_package_compromised_updates",
+		"NPM Package Cooldown":              "npm_package_recent_release_guard",
+		"PWN Request":                       "pwn_request_check",
+		"PyPI Package Compromised Updates":  "pypi_package_compromised_updates",
+		"PyPI Package Cooldown":             "pypi_package_cooldown",
+		"Script Injection":                  "script_injection_check",
 	}
 )
 
@@ -24,6 +26,7 @@ type ChecksConfig struct {
 	EnableBaselineCheckForAllNewRepos  *bool                  `json:"enable_baseline_check_for_all_new_repos"`
 	EnableRequiredChecksForAllNewRepos *bool                  `json:"enable_required_checks_for_all_new_repos"`
 	EnableOptionalChecksForAllNewRepos *bool                  `json:"enable_optional_checks_for_all_new_repos"`
+	CustomDescription                  string                 `json:"custom_description"`
 }
 
 type CheckConfig struct {
@@ -56,6 +59,10 @@ func GetAvailableControls() []string {
 
 func GetControlName(control string) string {
 	switch control {
+	case "maven_package_compromised_updates":
+		return "Maven Package Compromised Updates"
+	case "maven_package_cooldown":
+		return "Maven Package Cooldown"
 	case "npm_package_compromised_updates":
 		return "NPM Package Compromised Updates"
 	case "npm_package_recent_release_guard":
@@ -145,6 +152,7 @@ func (c *APIClient) DeletePRChecksConfig(ctx context.Context, owner string) erro
 	config.ChecksConfig.EnableBaselineCheckForAllNewRepos = toPointer(false)
 	config.ChecksConfig.EnableRequiredChecksForAllNewRepos = toPointer(false)
 	config.ChecksConfig.EnableOptionalChecksForAllNewRepos = toPointer(false)
+	config.ChecksConfig.CustomDescription = ""
 
 	URI := fmt.Sprintf("%s/v1/github/%s/checks/config", c.BaseURL, owner)
 	_, err = c.put(ctx, URI, config)

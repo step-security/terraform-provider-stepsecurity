@@ -175,6 +175,9 @@ func (p *StepSecurityProvider) DataSources(_ context.Context) []func() datasourc
 	return []func() datasource.DataSource{
 		NewUsersDataSource,
 		NewGithubRunPoliciesDataSource,
+		NewDeveloperMDMProfileExportDataSource,
+		NewDeveloperMDMDeviceComplianceDataSource,
+		NewDeveloperMDMProfileComplianceDataSource,
 	}
 }
 
@@ -191,6 +194,9 @@ func (p *StepSecurityProvider) Resources(_ context.Context) []func() resource.Re
 		NewGithubRunPolicyResource,
 		NewGitHubChecksResource,
 		NewGitHubPRTemplateResource,
+		NewSecureRegistryPolicyResource,
+		NewDeveloperMDMIDEExtensionPolicyResource,
+		NewDeveloperMDMProfileResource,
 	}
 }
 
