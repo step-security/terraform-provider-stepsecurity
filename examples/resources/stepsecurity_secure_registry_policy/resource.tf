@@ -11,18 +11,27 @@ provider "stepsecurity" {
   customer = "abcdefg"  # can also be set as env variable STEP_SECURITY_CUSTOMER
 }
 
-# Enable both controls for the npm registry
+# Enable all controls for the npm registry
 resource "stepsecurity_secure_registry_policy" "npm_full" {
   registry = "npm"
 
   cooldown_control = {
     enabled        = true
     period_in_days = 7
-    exemption_list = ["@babel/core@*", "react", "@scope/*", "lodash@4.17.21"]
+    exemption_list = ["@babel/core@*", "react@1.2.3", "@scope/*", "lodash@4.17.21"]
   }
 
   compromised_packages_control = {
     enabled = true
+  }
+
+  custom_block_list_control = {
+    enabled  = true
+    patterns = ["lodash@4.17.20", "@scope/*", "left-pad@*"]
+  }
+
+  npm_settings = {
+    rewrite_tarball_urls = true
   }
 }
 
@@ -52,7 +61,7 @@ import {
   id = "npm"
 }
 
-# Enable both controls for the PyPI registry
+# Enable all controls for the PyPI registry (npm_settings is npm-only, omitted here)
 resource "stepsecurity_secure_registry_policy" "pypi_full" {
   registry = "pypi"
 
@@ -64,6 +73,11 @@ resource "stepsecurity_secure_registry_policy" "pypi_full" {
 
   compromised_packages_control = {
     enabled = true
+  }
+
+  custom_block_list_control = {
+    enabled  = false
+    patterns = ["requests@2.25.0", "insecure-package@*"]
   }
 }
 

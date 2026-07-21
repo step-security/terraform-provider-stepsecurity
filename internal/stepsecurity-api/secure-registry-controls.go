@@ -12,6 +12,8 @@ type SecureRegistryControls struct {
 	Registry            string                      `json:"registry"`
 	CooldownPeriod      *CooldownPeriodControl      `json:"cooldown_period,omitempty"`
 	CompromisedPackages *CompromisedPackagesControl `json:"compromised_packages,omitempty"`
+	CustomBlockList     *CustomBlockListControl     `json:"custom_block_list,omitempty"`
+	NpmSettings         *NpmSettingsControl         `json:"npm_settings,omitempty"`
 	UpdatedBy           string                      `json:"updated_by"`
 	UpdatedAt           string                      `json:"updated_at"`
 }
@@ -28,11 +30,29 @@ type CompromisedPackagesControl struct {
 	Enabled bool `json:"enabled"`
 }
 
+// CustomBlockListControl explicitly blocks packages/versions matching glob patterns
+// (exact names, `pkg@*` version globs, `@scope/*` for npm). Patterns are matched
+// independently by the backend — order has no effect.
+type CustomBlockListControl struct {
+	Enabled  bool     `json:"enabled"`
+	Patterns []string `json:"patterns,omitempty"`
+}
+
+// NpmSettingsControl holds npm-specific non-security registry settings. Unlike the
+// other controls it has no "enabled" toggle — RewriteTarballURLs is itself the
+// setting. Only applicable when Registry == "npm"; the backend rejects any non-nil
+// value for other registries.
+type NpmSettingsControl struct {
+	RewriteTarballURLs bool `json:"rewrite_tarball_urls"`
+}
+
 // UpsertSecureRegistryControlsRequest is the PUT request body. Omitting a control
 // preserves the existing backend value (partial upsert).
 type UpsertSecureRegistryControlsRequest struct {
 	CooldownPeriod      *CooldownPeriodControl      `json:"cooldown_period,omitempty"`
 	CompromisedPackages *CompromisedPackagesControl `json:"compromised_packages,omitempty"`
+	CustomBlockList     *CustomBlockListControl     `json:"custom_block_list,omitempty"`
+	NpmSettings         *NpmSettingsControl         `json:"npm_settings,omitempty"`
 }
 
 func (c *APIClient) GetRegistryControls(ctx context.Context, registry string) (*SecureRegistryControls, error) {
