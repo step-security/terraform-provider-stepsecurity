@@ -223,6 +223,10 @@ func (r *policyDrivenPRResource) Schema(_ context.Context, _ resource.SchemaRequ
 									Optional:    true,
 									Description: "YAML string configuring dependency update groups.",
 								},
+								"options_yaml": schema.StringAttribute{
+									Optional:    true,
+									Description: "YAML string configuring additional dependabot options (e.g. day, time, timezone, allow, assignees, labels, ignore, reviewers, target-branch, versioning-strategy, etc.).",
+								},
 							},
 						},
 					},
@@ -397,12 +401,14 @@ func (r *policyDrivenPRResource) ImportState(ctx context.Context, req resource.I
 					"interval":      types.StringType,
 					"cooldown_yaml": types.StringType,
 					"groups_yaml":   types.StringType,
+					"options_yaml":  types.StringType,
 				},
 				map[string]attr.Value{
 					"package":       types.StringValue(ecosystem.Package),
 					"interval":      types.StringValue(ecosystem.Interval),
 					"cooldown_yaml": types.StringValue(ecosystem.CoolDownYAML),
 					"groups_yaml":   types.StringValue(ecosystem.GroupsYAML),
+					"options_yaml":  types.StringValue(ecosystem.OptionsYAML),
 				},
 			)
 			ecosystemObjects = append(ecosystemObjects, obj)
@@ -414,6 +420,7 @@ func (r *policyDrivenPRResource) ImportState(ctx context.Context, req resource.I
 					"interval":      types.StringType,
 					"cooldown_yaml": types.StringType,
 					"groups_yaml":   types.StringType,
+					"options_yaml":  types.StringType,
 				},
 			},
 			ecosystemObjects,
@@ -425,6 +432,7 @@ func (r *policyDrivenPRResource) ImportState(ctx context.Context, req resource.I
 				"interval":      types.StringType,
 				"cooldown_yaml": types.StringType,
 				"groups_yaml":   types.StringType,
+				"options_yaml":  types.StringType,
 			},
 		})
 	}
@@ -505,6 +513,7 @@ func (r *policyDrivenPRResource) ImportState(ctx context.Context, req resource.I
 						"interval":      types.StringType,
 						"cooldown_yaml": types.StringType,
 						"groups_yaml":   types.StringType,
+						"options_yaml":  types.StringType,
 					},
 				},
 			},
@@ -625,6 +634,7 @@ type packageEcosystemModel struct {
 	Interval     types.String `tfsdk:"interval"`
 	CoolDownYAML types.String `tfsdk:"cooldown_yaml"`
 	GroupsYAML   types.String `tfsdk:"groups_yaml"`
+	OptionsYAML  types.String `tfsdk:"options_yaml"`
 }
 
 type hardenRunnerConfigModel struct {
@@ -950,6 +960,7 @@ func (r *policyDrivenPRResource) Create(ctx context.Context, req resource.Create
 					Interval:     model.Interval.ValueString(),
 					CoolDownYAML: model.CoolDownYAML.ValueString(),
 					GroupsYAML:   model.GroupsYAML.ValueString(),
+					OptionsYAML:  model.OptionsYAML.ValueString(),
 				})
 			}
 		}
@@ -1250,6 +1261,7 @@ func (r *policyDrivenPRResource) Read(ctx context.Context, req resource.ReadRequ
 						Interval:     model.Interval.ValueString(),
 						CoolDownYAML: model.CoolDownYAML.ValueString(),
 						GroupsYAML:   model.GroupsYAML.ValueString(),
+						OptionsYAML:  model.OptionsYAML.ValueString(),
 					},
 				)
 			}
@@ -1511,6 +1523,7 @@ func (r *policyDrivenPRResource) Update(ctx context.Context, req resource.Update
 					Interval:     model.Interval.ValueString(),
 					CoolDownYAML: model.CoolDownYAML.ValueString(),
 					GroupsYAML:   model.GroupsYAML.ValueString(),
+					OptionsYAML:  model.OptionsYAML.ValueString(),
 				})
 			}
 		}
@@ -1769,12 +1782,14 @@ func (r *policyDrivenPRResource) updatePolicyDrivenPRState(ctx context.Context, 
 					"interval":      types.StringType,
 					"cooldown_yaml": types.StringType,
 					"groups_yaml":   types.StringType,
+					"options_yaml":  types.StringType,
 				},
 				map[string]attr.Value{
 					"package":       types.StringValue(ecosystem.Package),
 					"interval":      types.StringValue(ecosystem.Interval),
 					"cooldown_yaml": types.StringValue(ecosystem.CoolDownYAML),
 					"groups_yaml":   types.StringValue(ecosystem.GroupsYAML),
+					"options_yaml":  types.StringValue(ecosystem.OptionsYAML),
 				},
 			)
 			ecosystemObjects = append(ecosystemObjects, obj)
@@ -1786,6 +1801,7 @@ func (r *policyDrivenPRResource) updatePolicyDrivenPRState(ctx context.Context, 
 					"interval":      types.StringType,
 					"cooldown_yaml": types.StringType,
 					"groups_yaml":   types.StringType,
+					"options_yaml":  types.StringType,
 				},
 			},
 			ecosystemObjects,
@@ -1797,6 +1813,7 @@ func (r *policyDrivenPRResource) updatePolicyDrivenPRState(ctx context.Context, 
 				"interval":      types.StringType,
 				"cooldown_yaml": types.StringType,
 				"groups_yaml":   types.StringType,
+				"options_yaml":  types.StringType,
 			},
 		})
 	}
@@ -1877,6 +1894,7 @@ func (r *policyDrivenPRResource) updatePolicyDrivenPRState(ctx context.Context, 
 						"interval":      types.StringType,
 						"cooldown_yaml": types.StringType,
 						"groups_yaml":   types.StringType,
+						"options_yaml":  types.StringType,
 					},
 				},
 			},
