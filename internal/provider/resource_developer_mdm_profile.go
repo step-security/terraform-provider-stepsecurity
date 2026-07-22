@@ -421,8 +421,13 @@ func validateDeveloperMDMProfilePolicyCategories(ctx context.Context, client ste
 }
 
 func developerMDMCategoryTargetKey(category, target string) string {
-	if target == "" && category == stepsecurityapi.DeveloperMDMCategoryIDEExtension {
-		target = stepsecurityapi.DeveloperMDMTargetVSCode
+	if target == "" {
+		switch category {
+		case stepsecurityapi.DeveloperMDMCategoryIDEExtension:
+			target = stepsecurityapi.DeveloperMDMTargetVSCode
+		case stepsecurityapi.DeveloperMDMCategoryPackageConfig:
+			target = stepsecurityapi.DeveloperMDMTargetNPM
+		}
 	}
 	return category + "#" + target
 }
