@@ -14,6 +14,19 @@ const (
 	DeveloperMDMSpecVersionIDEExtension = 1
 	DeveloperMDMModeAllowlist           = "allowlist"
 	DeveloperMDMModeBlocklist           = "blocklist"
+
+	// DeveloperMDMCategoryPackageConfig governs a device's package-manager configuration
+	// file (v1: the npm user-level .npmrc), pointing it at the tenant's StepSecurity secure
+	// registry.
+	DeveloperMDMCategoryPackageConfig = "package_config"
+	// DeveloperMDMTargetNPM is the package_config target for the npm ecosystem. An omitted
+	// package_config target defaults to it.
+	DeveloperMDMTargetNPM = "npm"
+	// DeveloperMDMSpecVersionPackageConfig is the only supported package_config spec version.
+	DeveloperMDMSpecVersionPackageConfig = 1
+	// DeveloperMDMRegistryTypeStepSecurity is the only registry type package_config supports
+	// in v1: the tenant's StepSecurity secure registry.
+	DeveloperMDMRegistryTypeStepSecurity = "stepsecurity"
 )
 
 // DeveloperMDMPolicy is the backend representation of a Developer MDM policy.
@@ -56,6 +69,19 @@ type DeveloperMDMIDEExtensionRule struct {
 	Versions  []string `json:"versions,omitempty"`
 	Stable    bool     `json:"stable,omitempty"`
 	Comment   string   `json:"comment,omitempty"`
+}
+
+// DeveloperMDMPackageConfigSpec is the typed spec for package_config policies. It carries
+// only the registry selector; the concrete registry URL and tenant auth key are injected
+// backend-side when the policy is compiled, so no secret ever travels through the provider.
+type DeveloperMDMPackageConfigSpec struct {
+	Registry DeveloperMDMRegistryRef `json:"registry"`
+}
+
+// DeveloperMDMRegistryRef selects which registry the managed npm config points at. v1
+// accepts only type "stepsecurity" (the tenant's StepSecurity secure registry).
+type DeveloperMDMRegistryRef struct {
+	Type string `json:"type"`
 }
 
 // DeveloperMDMProfile is the backend representation of a Developer MDM profile.
