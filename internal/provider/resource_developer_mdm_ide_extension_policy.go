@@ -4,8 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net/url"
 	"regexp"
 	"sort"
+	"strings"
 
 	"github.com/hashicorp/terraform-plugin-framework-validators/stringvalidator"
 	"github.com/hashicorp/terraform-plugin-framework/attr"
@@ -54,17 +56,18 @@ type developerMDMIDEExtensionPolicyResource struct {
 
 // developerMDMIDEExtensionPolicyModel maps the resource schema data.
 type developerMDMIDEExtensionPolicyModel struct {
-	ID          types.String                        `tfsdk:"id"`
-	PolicyID    types.String                        `tfsdk:"policy_id"`
-	Name        types.String                        `tfsdk:"name"`
-	Description types.String                        `tfsdk:"description"`
-	Target      types.String                        `tfsdk:"target"`
-	Mode        types.String                        `tfsdk:"mode"`
-	Rules       []developerMDMIDEExtensionRuleModel `tfsdk:"rules"`
-	CreatedBy   types.String                        `tfsdk:"created_by"`
-	CreatedAt   types.String                        `tfsdk:"created_at"`
-	UpdatedBy   types.String                        `tfsdk:"updated_by"`
-	UpdatedAt   types.String                        `tfsdk:"updated_at"`
+	ID                types.String                        `tfsdk:"id"`
+	PolicyID          types.String                        `tfsdk:"policy_id"`
+	Name              types.String                        `tfsdk:"name"`
+	Description       types.String                        `tfsdk:"description"`
+	Target            types.String                        `tfsdk:"target"`
+	Mode              types.String                        `tfsdk:"mode"`
+	Rules             []developerMDMIDEExtensionRuleModel `tfsdk:"rules"`
+	GalleryServiceURL types.String                        `tfsdk:"gallery_service_url"`
+	CreatedBy         types.String                        `tfsdk:"created_by"`
+	CreatedAt         types.String                        `tfsdk:"created_at"`
+	UpdatedBy         types.String                        `tfsdk:"updated_by"`
+	UpdatedAt         types.String                        `tfsdk:"updated_at"`
 }
 
 // developerMDMIDEExtensionRuleModel maps a single allow/block rule.
@@ -86,7 +89,8 @@ func (r *developerMDMIDEExtensionPolicyResource) Schema(_ context.Context, _ res
 	resp.Schema = schema.Schema{
 		MarkdownDescription: "Manages a Developer MDM VS Code extension policy in StepSecurity. " +
 			"The policy declares allow/block intent for VS Code extensions; StepSecurity compiles and enforces it on managed devices. " +
-			"An empty `allowlist` blocks every extension and an empty `blocklist` allows every extension, so set `rules` deliberately.",
+			"An empty `allowlist` blocks every extension and an empty `blocklist` allows every extension, so set `rules` deliberately. " +
+			"The policy can also point VS Code at a private extension marketplace instead of the public one; see `gallery_service_url`.",
 		Attributes: map[string]schema.Attribute{
 			"id": schema.StringAttribute{
 				Computed:            true,
@@ -175,6 +179,19 @@ func (r *developerMDMIDEExtensionPolicyResource) Schema(_ context.Context, _ res
 							},
 						},
 					},
+				},
+			},
+			"gallery_service_url": schema.StringAttribute{
+				Optional: true,
+				MarkdownDescription: "Optional private VS Code extension marketplace. Sets VS Code's " +
+					"`ExtensionGalleryServiceUrl` on managed devices so extension browsing and " +
+					"installation resolve against your own gallery instead of the public marketplace. " +
+					"Must be an absolute `https` URL with no credentials and no fragment. " +
+					"Independent of `mode`: valid on both an allowlist and a blocklist. " +
+					"Omit to leave the device on the public marketplace.",
+				Validators: []validator.String{
+					stringvalidator.LengthAtLeast(1),
+					stringvalidator.LengthAtMost(stepsecurityapi.DeveloperMDMMaxGalleryServiceURLLen),
 				},
 			},
 			"created_by": schema.StringAttribute{
@@ -348,6 +365,12 @@ func (r *developerMDMIDEExtensionPolicyResource) ImportState(ctx context.Context
 func validateDeveloperMDMIDEExtensionPolicy(ctx context.Context, model developerMDMIDEExtensionPolicyModel) diag.Diagnostics {
 	var diags diag.Diagnostics
 
+	if !model.GalleryServiceURL.IsNull() && !model.GalleryServiceURL.IsUnknown() {
+		if summary, detail := validateGalleryServiceURL(model.GalleryServiceURL.ValueString()); summary != "" {
+			diags.AddAttributeError(path.Root("gallery_service_url"), summary, detail)
+		}
+	}
+
 	isBlocklist := model.Mode.ValueString() == stepsecurityapi.DeveloperMDMModeBlocklist
 
 	// Track compiled key (publisher + name) to reject mixing stable and explicit versions.
@@ -469,6 +492,49 @@ func validateDeveloperMDMIDEExtensionPolicy(ctx context.Context, model developer
 	return diags
 }
 
+// validateGalleryServiceURL mirrors the backend's URL rules so a bad value fails at plan
+// time instead of as an opaque 400. An empty summary means the value is acceptable.
+func validateGalleryServiceURL(raw string) (summary, detail string) {
+	if len(raw) > stepsecurityapi.DeveloperMDMMaxGalleryServiceURLLen {
+		return "Marketplace URL too long", fmt.Sprintf(
+			"`gallery_service_url` must be at most %d characters.",
+			stepsecurityapi.DeveloperMDMMaxGalleryServiceURLLen)
+	}
+	if raw != strings.TrimSpace(raw) {
+		return "Marketplace URL has surrounding whitespace",
+			"`gallery_service_url` must not have leading or trailing whitespace."
+	}
+	for _, r := range raw {
+		if r < 0x20 || r == 0x7f {
+			return "Marketplace URL contains control characters",
+				"`gallery_service_url` must not contain control characters."
+		}
+	}
+	u, err := url.Parse(raw)
+	if err != nil {
+		return "Invalid marketplace URL",
+			fmt.Sprintf("`gallery_service_url` is not a valid URL: %s", err.Error())
+	}
+	if !strings.EqualFold(u.Scheme, "https") {
+		return "Marketplace URL must use https",
+			"`gallery_service_url` must use the `https` scheme."
+	}
+	if u.Host == "" {
+		return "Marketplace URL has no host",
+			"`gallery_service_url` must include a host."
+	}
+	if u.User != nil {
+		return "Marketplace URL contains credentials",
+			"`gallery_service_url` must not contain userinfo (credentials). " +
+				"Configure gallery authentication on the device, not in the policy."
+	}
+	if u.Fragment != "" || strings.Contains(raw, "#") {
+		return "Marketplace URL contains a fragment",
+			"`gallery_service_url` must not contain a `#` fragment."
+	}
+	return "", ""
+}
+
 // buildDeveloperMDMIDEExtensionPolicyRequest converts the model into an API request body.
 func buildDeveloperMDMIDEExtensionPolicyRequest(ctx context.Context, model developerMDMIDEExtensionPolicyModel, diags *diag.Diagnostics) stepsecurityapi.DeveloperMDMPolicyRequest {
 	rules := make([]stepsecurityapi.DeveloperMDMIDEExtensionRule, 0, len(model.Rules))
@@ -483,7 +549,10 @@ func buildDeveloperMDMIDEExtensionPolicyRequest(ctx context.Context, model devel
 		rules = append(rules, rule)
 	}
 
-	spec := stepsecurityapi.DeveloperMDMIDEExtensionSpec{Rules: rules}
+	spec := stepsecurityapi.DeveloperMDMIDEExtensionSpec{
+		Rules:             rules,
+		GalleryServiceURL: model.GalleryServiceURL.ValueString(),
+	}
 	specJSON, err := json.Marshal(spec)
 	if err != nil {
 		diags.AddError("Failed to encode policy spec", err.Error())
@@ -558,6 +627,12 @@ func applyDeveloperMDMPolicyToModel(ctx context.Context, policy *stepsecurityapi
 			diags.AddError("Failed to decode policy spec", err.Error())
 			return
 		}
+	}
+
+	if spec.GalleryServiceURL != "" {
+		model.GalleryServiceURL = types.StringValue(spec.GalleryServiceURL)
+	} else {
+		model.GalleryServiceURL = types.StringNull()
 	}
 
 	rules := make([]developerMDMIDEExtensionRuleModel, 0, len(spec.Rules))

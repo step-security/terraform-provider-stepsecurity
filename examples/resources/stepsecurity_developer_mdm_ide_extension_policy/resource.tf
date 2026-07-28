@@ -23,3 +23,17 @@ resource "stepsecurity_developer_mdm_ide_extension_policy" "engineering_vscode" 
     { publisher = "redhat", name = "vscode-yaml", versions = ["1.15.0"] },                                      # pinned version
   ]
 }
+
+# Points VS Code at a private extension marketplace instead of the public one. The URL is
+# independent of mode, so it works on a blocklist just as well as on an allowlist.
+resource "stepsecurity_developer_mdm_ide_extension_policy" "private_marketplace" {
+  name        = "Private marketplace"
+  description = "Resolve extension browsing and installs against the internal gallery"
+  mode        = "blocklist"
+
+  gallery_service_url = "https://gallery.example.com/_apis/public/gallery"
+
+  rules = [
+    { publisher = "unapproved-publisher", comment = "Blocked pending security review" },
+  ]
+}

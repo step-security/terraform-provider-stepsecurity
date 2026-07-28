@@ -65,9 +65,14 @@ type DeveloperMDMPolicyRequest struct {
 	Spec        json.RawMessage `json:"spec"`
 }
 
-// DeveloperMDMIDEExtensionSpec is the typed spec for ide_extension policies.
+// DeveloperMDMMaxGalleryServiceURLLen mirrors the backend cap on gallery_service_url.
+const DeveloperMDMMaxGalleryServiceURLLen = 2048
+
+// DeveloperMDMIDEExtensionSpec is the typed spec for ide_extension policies. An unset
+// GalleryServiceURL is omitted rather than stored as an empty key.
 type DeveloperMDMIDEExtensionSpec struct {
-	Rules []DeveloperMDMIDEExtensionRule `json:"rules"`
+	Rules             []DeveloperMDMIDEExtensionRule `json:"rules"`
+	GalleryServiceURL string                         `json:"gallery_service_url,omitempty"`
 }
 
 // DeveloperMDMIDEExtensionRule is a single IDE extension allow/block rule.

@@ -42,7 +42,7 @@ func TestDeveloperMDMIDEExtensionPolicyResource_Schema(t *testing.T) {
 	assert.False(t, schemaResp.Diagnostics.HasError(), "Schema() errors: %v", schemaResp.Diagnostics)
 
 	attrs := schemaResp.Schema.Attributes
-	for _, name := range []string{"id", "policy_id", "name", "description", "target", "mode", "rules", "created_by", "created_at", "updated_by", "updated_at"} {
+	for _, name := range []string{"id", "policy_id", "name", "description", "target", "mode", "rules", "gallery_service_url", "created_by", "created_at", "updated_by", "updated_at"} {
 		assert.Contains(t, attrs, name, "missing attribute %q", name)
 	}
 }
@@ -344,6 +344,197 @@ func TestDeveloperMDMIDEExtensionPolicy_ApplyAPIToModel(t *testing.T) {
 	var versions []string
 	model.Rules[1].Versions.ElementsAs(ctx, &versions, false)
 	assert.Equal(t, []string{"1.15.0"}, versions)
+}
+
+// TestDeveloperMDMIDEExtensionPolicy_BuildRequestGalleryServiceURL pins the wire shape of
+// an unset marketplace URL. An unset attribute reaches the builder as null and stringifies
+// to "", so only omitempty keeps a URL-less policy storing the same spec it stored before
+// the field existed.
+func TestDeveloperMDMIDEExtensionPolicy_BuildRequestGalleryServiceURL(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	base := func(url types.String) developerMDMIDEExtensionPolicyModel {
+		return developerMDMIDEExtensionPolicyModel{
+			Name:              types.StringValue("eng"),
+			Target:            types.StringValue(stepsecurityapi.DeveloperMDMTargetVSCode),
+			Mode:              types.StringValue("allowlist"),
+			GalleryServiceURL: url,
+			Rules: []developerMDMIDEExtensionRuleModel{
+				{
+					Publisher: types.StringValue("ms-python"),
+					Name:      types.StringValue("python"),
+					Versions:  types.SetNull(types.StringType),
+					Stable:    types.BoolValue(true),
+				},
+			},
+		}
+	}
+
+	t.Run("unset omits the key", func(t *testing.T) {
+		t.Parallel()
+		var diags diag.Diagnostics
+		req := buildDeveloperMDMIDEExtensionPolicyRequest(ctx, base(types.StringNull()), &diags)
+		require.False(t, diags.HasError(), "build errors: %v", diags)
+
+		assert.NotContains(t, string(req.Spec), "gallery_service_url")
+
+		var raw map[string]json.RawMessage
+		require.NoError(t, json.Unmarshal(req.Spec, &raw))
+		assert.NotContains(t, raw, "gallery_service_url")
+	})
+
+	t.Run("set is sent verbatim", func(t *testing.T) {
+		t.Parallel()
+		const wantURL = "https://gallery.example.com/_apis/public/gallery"
+
+		var diags diag.Diagnostics
+		req := buildDeveloperMDMIDEExtensionPolicyRequest(ctx, base(types.StringValue(wantURL)), &diags)
+		require.False(t, diags.HasError(), "build errors: %v", diags)
+
+		var spec stepsecurityapi.DeveloperMDMIDEExtensionSpec
+		require.NoError(t, json.Unmarshal(req.Spec, &spec))
+		assert.Equal(t, wantURL, spec.GalleryServiceURL)
+	})
+}
+
+func TestValidateGalleryServiceURL(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name      string
+		raw       string
+		wantError bool
+	}{
+		{"valid https URL", "https://gallery.example.com/_apis/public/gallery", false},
+		{"scheme match is case-insensitive", "HTTPS://gallery.example.com/gallery", false},
+		{"space inside the path is allowed", "https://gallery.example.com/a b", false},
+		{"http scheme", "http://gallery.example.com/gallery", true},
+		{"missing host", "https:///gallery", true},
+		{"userinfo", "https://user:pass@gallery.example.com/gallery", true},
+		{"fragment", "https://gallery.example.com/gallery#frag", true},
+		{"bare hash", "https://gallery.example.com/gallery#", true},
+		{"leading space", " https://gallery.example.com/gallery", true},
+		{"control byte", "https://gallery.example.com/gal\x01lery", true},
+		// Reaches url.Parse's error branch: it passes every earlier check and fails to
+		// parse. The control-byte row cannot cover it, because the control-character loop
+		// runs first and intercepts those inputs.
+		{"unparseable escape", "https://example.com/%zz", true},
+		{"too long", "https://gallery.example.com/" + strings.Repeat("a", 2049), true},
+	}
+
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			summary, detail := validateGalleryServiceURL(tc.raw)
+			if tc.wantError {
+				assert.NotEmpty(t, summary, "expected %q to be rejected", tc.raw)
+				assert.NotEmpty(t, detail, "a rejection should explain itself")
+				return
+			}
+			assert.Empty(t, summary, "expected %q to be accepted, got: %s", tc.raw, detail)
+		})
+	}
+}
+
+func TestDeveloperMDMIDEExtensionPolicy_ApplyGalleryServiceURL(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	const wantURL = "https://gallery.example.com/_apis/public/gallery"
+
+	cases := []struct {
+		name     string
+		spec     string
+		wantNull bool
+	}{
+		{"URL round-trips", `{"rules":[],"gallery_service_url":"` + wantURL + `"}`, false},
+		{"absent URL becomes null", `{"rules":[]}`, true},
+		{"empty URL becomes null", `{"rules":[],"gallery_service_url":""}`, true},
+	}
+
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			policy := &stepsecurityapi.DeveloperMDMPolicy{
+				PolicyID: "p1",
+				Name:     "eng",
+				Category: "ide_extension",
+				Target:   "vscode",
+				Mode:     "allowlist",
+				Spec:     json.RawMessage(tc.spec),
+			}
+
+			model := &developerMDMIDEExtensionPolicyModel{}
+			var diags diag.Diagnostics
+			applyDeveloperMDMPolicyToModel(ctx, policy, model, &diags)
+			require.False(t, diags.HasError(), "apply errors: %v", diags)
+
+			assert.Equal(t, tc.wantNull, model.GalleryServiceURL.IsNull())
+			if !tc.wantNull {
+				assert.Equal(t, wantURL, model.GalleryServiceURL.ValueString())
+			}
+		})
+	}
+}
+
+func TestDeveloperMDMIDEExtensionPolicy_ValidateGalleryServiceURLIsModeIndependent(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+
+	for _, mode := range []string{stepsecurityapi.DeveloperMDMModeAllowlist, stepsecurityapi.DeveloperMDMModeBlocklist} {
+		t.Run(mode, func(t *testing.T) {
+			t.Parallel()
+			model := developerMDMIDEExtensionPolicyModel{
+				Name:              types.StringValue("eng"),
+				Mode:              types.StringValue(mode),
+				GalleryServiceURL: types.StringValue("https://gallery.example.com/_apis/public/gallery"),
+				Rules: []developerMDMIDEExtensionRuleModel{
+					{Publisher: types.StringValue("github"), Versions: types.SetNull(types.StringType)},
+				},
+			}
+
+			diags := validateDeveloperMDMIDEExtensionPolicy(ctx, model)
+			assert.False(t, diags.HasError(), "a marketplace URL should be valid on a %s: %v", mode, diags)
+		})
+	}
+}
+
+// TestDeveloperMDMIDEExtensionPolicy_GalleryServiceURLRejectsEmpty exercises the schema
+// validator on `gallery_service_url`. An unset marketplace is expressed by omitting the
+// attribute, not by ""; an empty string would be dropped by omitempty and read back as
+// null, causing an apply inconsistency, so it is rejected at plan time.
+func TestDeveloperMDMIDEExtensionPolicy_GalleryServiceURLRejectsEmpty(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	schemaResp := &fwresource.SchemaResponse{}
+	NewDeveloperMDMIDEExtensionPolicyResource().Schema(ctx, fwresource.SchemaRequest{}, schemaResp)
+	require.False(t, schemaResp.Diagnostics.HasError())
+
+	urlAttr, ok := schemaResp.Schema.Attributes["gallery_service_url"].(schema.StringAttribute)
+	require.True(t, ok, "gallery_service_url should be a StringAttribute")
+	require.NotEmpty(t, urlAttr.Validators, "gallery_service_url should have length validators")
+
+	validate := func(value string) diag.Diagnostics {
+		var all diag.Diagnostics
+		for _, v := range urlAttr.Validators {
+			resp := &validator.StringResponse{}
+			v.ValidateString(ctx, validator.StringRequest{
+				Path:        path.Root("gallery_service_url"),
+				ConfigValue: types.StringValue(value),
+			}, resp)
+			all.Append(resp.Diagnostics...)
+		}
+		return all
+	}
+
+	assert.True(t, validate("").HasError(), "empty URL should be rejected (omit the attribute instead)")
+	assert.False(t, validate("https://gallery.example.com/gallery").HasError(), "a real URL should be accepted")
+	assert.True(t, validate("https://gallery.example.com/"+strings.Repeat("a", 2049)).HasError(), "over the 2048 cap should be rejected")
 }
 
 // TestDeveloperMDMIDEExtensionPolicy_CommentLengthValidator exercises the schema
