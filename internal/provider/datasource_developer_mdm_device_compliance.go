@@ -70,7 +70,9 @@ func developerMDMComplianceSchemaAttribute(description string) schema.ListNested
 					"`drift_detected` (the on-disk value differed from what the agent wrote, and the agent re-applied); " +
 					"`agent_unsupported` (the agent version predates the enforcement floor); " +
 					"`agent_stale` (the agent has not reported recently enough); " +
-					"`mdm_managed` (`enforcement = \"mdm\"`: an OS-managed policy governs the device and matches); " +
+					"`mdm_managed` (the agent found an OS-managed policy already governing the device and skipped writing; " +
+						"under `enforcement = \"mdm\"` the reported evidence also matched the desired policy, while under `dmg` it is " +
+						"a presence skip with no content comparison); " +
 					"`mdm_drift` (`enforcement = \"mdm\"`: an OS-managed policy is present but differs from desired, and always carries `diff_json`); " +
 					"`write_failed` (the agent could not write the managed file); " +
 					"`verification_failed` (the agent wrote but read-back verification failed, or MDM-mode evidence was malformed)."},

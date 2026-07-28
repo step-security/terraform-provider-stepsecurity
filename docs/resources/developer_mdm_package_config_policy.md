@@ -34,8 +34,10 @@ resource "stepsecurity_developer_mdm_package_config_policy" "npm_secure_registry
 }
 
 # A policy on its own enforces nothing; it has to be bundled into a profile and assigned.
-# npm secure-registry enforcement runs on the agent channel, so this profile must use
-# enforcement = "dmg" — an "mdm" profile never writes .npmrc.
+# This profile uses enforcement = "dmg" so the agent writes .npmrc itself. "mdm" is also
+# valid for this category, with the package script deployed through the console and the
+# agent only verifying what it observes — but Terraform cannot export that script, because
+# the compiled artifact embeds the tenant's registry auth key.
 resource "stepsecurity_developer_mdm_profile" "npm_secure_registry" {
   name        = "npm secure registry"
   enforcement = "dmg"
