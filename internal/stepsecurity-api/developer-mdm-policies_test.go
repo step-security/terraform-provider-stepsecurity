@@ -131,6 +131,7 @@ func TestDeveloperMDMPolicyClient_ProfileCRUD(t *testing.T) {
 	t.Parallel()
 
 	var createBody map[string]any
+	var updateBody map[string]any
 	var methods []string
 	var paths []string
 
@@ -150,8 +151,9 @@ func TestDeveloperMDMPolicyClient_ProfileCRUD(t *testing.T) {
 			//nolint:errcheck
 			w.Write([]byte(`{"profile_id":"prof1","name":"eng","policy_ids":["p1"],"assignment":{"all_devices":true}}`))
 		case r.Method == http.MethodPut:
+			require.NoError(t, json.NewDecoder(r.Body).Decode(&updateBody))
 			//nolint:errcheck
-			w.Write([]byte(`{"profile_id":"prof1","name":"eng2","policy_ids":["p1"],"assignment":{"all_devices":false,"device_ids":["d1"]}}`))
+			w.Write([]byte(`{"profile_id":"prof1","name":"eng2","policy_ids":["p1"],"enforcement":"mdm","assignment":{"all_devices":false,"device_ids":["d1"]}}`))
 		case r.Method == http.MethodDelete:
 			w.WriteHeader(http.StatusNoContent)
 		}
@@ -184,17 +186,43 @@ func TestDeveloperMDMPolicyClient_ProfileCRUD(t *testing.T) {
 	assert.Equal(t, []string{"p1"}, got.PolicyIDs)
 
 	updated, err := c.UpdateDeveloperMDMProfile(ctx, "prof1", DeveloperMDMProfileRequest{
-		Name:       "eng2",
-		PolicyIDs:  []string{"p1"},
-		Assignment: DeveloperMDMAssignment{DeviceIDs: []string{"d1"}},
+		Name:        "eng2",
+		PolicyIDs:   []string{"p1"},
+		Enforcement: DeveloperMDMEnforcementMDM,
+		Assignment:  DeveloperMDMAssignment{DeviceIDs: []string{"d1"}},
 	})
 	require.NoError(t, err)
 	assert.Equal(t, []string{"d1"}, updated.Assignment.DeviceIDs)
+	assert.Equal(t, "mdm", updateBody["enforcement"], "a channel switch must reach the update request")
+	assert.Equal(t, "mdm", updated.Enforcement)
 
 	require.NoError(t, c.DeleteDeveloperMDMProfile(ctx, "prof1"))
 
 	assert.Contains(t, paths, "/v1/test-customer/developer-mdm/profiles")
 	assert.Contains(t, paths, "/v1/test-customer/developer-mdm/profiles/prof1")
+}
+
+func TestDeveloperMDMPolicyClient_ProfileEnforcementAlwaysSent(t *testing.T) {
+	t.Parallel()
+
+	var body map[string]any
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		require.NoError(t, json.NewDecoder(r.Body).Decode(&body))
+		//nolint:errcheck
+		w.Write([]byte(`{"profile_id":"prof1","name":"eng","policy_ids":["p1"],"assignment":{"all_devices":true}}`))
+	}))
+	defer server.Close()
+
+	_, err := newTestClient(server).CreateDeveloperMDMProfile(context.Background(), DeveloperMDMProfileRequest{
+		Name:       "eng",
+		PolicyIDs:  []string{"p1"},
+		Assignment: DeveloperMDMAssignment{AllDevices: true},
+	})
+	require.NoError(t, err)
+
+	require.Contains(t, body, "enforcement", "an unset channel must still be sent so the backend's 400 surfaces")
+	assert.Equal(t, "", body["enforcement"])
 }
 
 func TestDeveloperMDMPolicyClient_ExportProfile(t *testing.T) {
