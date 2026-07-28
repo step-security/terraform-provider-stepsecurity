@@ -214,13 +214,14 @@ func TestDeveloperMDMPolicyClient_ExportProfile(t *testing.T) {
 	defer server.Close()
 
 	c := newTestClient(server)
-	got, err := c.ExportDeveloperMDMProfile(context.Background(), "prof1", "linux", DeveloperMDMCategoryIDEExtension, DeveloperMDMTargetVSCode)
+	got, err := c.ExportDeveloperMDMProfile(context.Background(), "prof1", "linux", DeveloperMDMCategoryIDEExtension, DeveloperMDMTargetVSCode, "")
 	require.NoError(t, err)
 
 	assert.Equal(t, "/v1/test-customer/developer-mdm/profiles/prof1/export", gotPath)
 	assert.Equal(t, []string{"linux"}, gotQuery["os"])
 	assert.Equal(t, []string{"ide_extension"}, gotQuery["category"])
 	assert.Equal(t, []string{"vscode"}, gotQuery["target"])
+	assert.NotContains(t, gotQuery, "format", "an empty format must not reach the query string")
 
 	assert.Equal(t, "policy.json", got.Filename)
 	assert.Equal(t, "vscode", got.Target)
@@ -229,6 +230,29 @@ func TestDeveloperMDMPolicyClient_ExportProfile(t *testing.T) {
 	assert.Contains(t, got.Content, "\n")
 	assert.Contains(t, got.Content, `"AllowedExtensions"`)
 	assert.NotContains(t, got.Content, `\n`)
+}
+
+func TestDeveloperMDMPolicyClient_ExportProfileFormat(t *testing.T) {
+	t.Parallel()
+
+	var gotQuery map[string][]string
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotQuery = r.URL.Query()
+		//nolint:errcheck
+		w.Write([]byte(`{"os":"macos","os_display_name":"macOS","category":"ide_extension","target":"vscode","format":"plist","filename":"com.microsoft.VSCode.plist","content_type":"application/xml","content":"<plist/>","hash":"sha256:abc","preference_domain":"com.microsoft.VSCode"}`))
+	}))
+	defer server.Close()
+
+	c := newTestClient(server)
+	got, err := c.ExportDeveloperMDMProfile(context.Background(), "prof1", "macos", DeveloperMDMCategoryIDEExtension, DeveloperMDMTargetVSCode, DeveloperMDMExportFormatPlist)
+	require.NoError(t, err)
+
+	assert.Equal(t, []string{"plist"}, gotQuery["format"])
+
+	assert.Equal(t, "macOS", got.OSDisplayName)
+	assert.Equal(t, "plist", got.Format)
+	assert.Equal(t, "com.microsoft.VSCode", got.PreferenceDomain)
 }
 
 func TestDeveloperMDMPolicyClient_Compliance(t *testing.T) {

@@ -128,17 +128,28 @@ type DeveloperMDMAssignment struct {
 	DeviceIDs  []string `json:"device_ids,omitempty"`
 }
 
+// Export artifact formats for ide_extension. mobileconfig is the default; plist is the bare
+// macOS preferences file, available only for os=macos.
+const (
+	DeveloperMDMExportFormatMobileconfig = "mobileconfig"
+	DeveloperMDMExportFormatPlist        = "plist"
+)
+
 // DeveloperMDMExportArtifact is a compiled MDM artifact for a given OS/category.
 // Content holds the decoded artifact body, not the escaped HTTP JSON string.
+// Format and PreferenceDomain are set by the backend for macOS only.
 type DeveloperMDMExportArtifact struct {
-	OS          string `json:"os"`
-	Category    string `json:"category"`
-	Target      string `json:"target"`
-	Filename    string `json:"filename"`
-	ContentType string `json:"content_type"`
-	Content     string `json:"content"`
-	Hash        string `json:"hash"`
-	Notes       string `json:"notes,omitempty"`
+	OS               string `json:"os"`
+	OSDisplayName    string `json:"os_display_name"`
+	Category         string `json:"category"`
+	Target           string `json:"target"`
+	Format           string `json:"format,omitempty"`
+	Filename         string `json:"filename"`
+	ContentType      string `json:"content_type"`
+	Content          string `json:"content"`
+	Hash             string `json:"hash"`
+	PreferenceDomain string `json:"preference_domain,omitempty"`
+	Notes            string `json:"notes,omitempty"`
 }
 
 // DeveloperMDMComplianceView is one runtime compliance row.
@@ -297,7 +308,7 @@ func (c *APIClient) DeleteDeveloperMDMProfile(ctx context.Context, profileID str
 // ExportDeveloperMDMProfile fetches the compiled MDM artifact for a profile.
 // The HTTP response encodes the artifact body as a JSON string; json.Unmarshal
 // decodes it so DeveloperMDMExportArtifact.Content holds the real file body.
-func (c *APIClient) ExportDeveloperMDMProfile(ctx context.Context, profileID, os, category, target string) (*DeveloperMDMExportArtifact, error) {
+func (c *APIClient) ExportDeveloperMDMProfile(ctx context.Context, profileID, os, category, target, format string) (*DeveloperMDMExportArtifact, error) {
 	uri := c.developerMDMPath("/profiles/%s/export", url.PathEscape(profileID))
 	query := url.Values{}
 	query.Set("os", os)
@@ -306,6 +317,9 @@ func (c *APIClient) ExportDeveloperMDMProfile(ctx context.Context, profileID, os
 	}
 	if target != "" {
 		query.Set("target", target)
+	}
+	if format != "" {
+		query.Set("format", format)
 	}
 	uri += "?" + query.Encode()
 

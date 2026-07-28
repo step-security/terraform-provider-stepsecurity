@@ -37,3 +37,24 @@ resource "stepsecurity_developer_mdm_ide_extension_policy" "private_marketplace"
     { publisher = "unapproved-publisher", comment = "Blocked pending security review" },
   ]
 }
+
+# Delivering the private marketplace through an MDM you already run. On the "mdm" channel
+# the StepSecurity agent never writes, so the artifact below is what actually configures
+# the device; StepSecurity reports drift against it.
+resource "stepsecurity_developer_mdm_profile" "private_marketplace" {
+  name        = "Private marketplace"
+  enforcement = "mdm"
+
+  policy_ids = [
+    stepsecurity_developer_mdm_ide_extension_policy.private_marketplace.policy_id,
+  ]
+}
+
+# The bare macOS preferences file, for MDMs that take a preference domain plus a plist.
+# Jamf and Intune need preference_domain alongside it. Omit format for the full
+# .mobileconfig profile instead.
+data "stepsecurity_developer_mdm_profile_export" "private_marketplace_macos" {
+  profile_id = stepsecurity_developer_mdm_profile.private_marketplace.profile_id
+  os         = "macos"
+  format     = "plist"
+}
