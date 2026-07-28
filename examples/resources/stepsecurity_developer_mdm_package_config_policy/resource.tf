@@ -17,3 +17,19 @@ resource "stepsecurity_developer_mdm_package_config_policy" "npm_secure_registry
   name        = "npm secure registry"
   description = "Route npm installs through the StepSecurity secure registry"
 }
+
+# A policy on its own enforces nothing; it has to be bundled into a profile and assigned.
+# npm secure-registry enforcement runs on the agent channel, so this profile must use
+# enforcement = "dmg" — an "mdm" profile never writes .npmrc.
+resource "stepsecurity_developer_mdm_profile" "npm_secure_registry" {
+  name        = "npm secure registry"
+  enforcement = "dmg"
+
+  policy_ids = [
+    stepsecurity_developer_mdm_package_config_policy.npm_secure_registry.policy_id,
+  ]
+
+  assignment = {
+    all_devices = true
+  }
+}

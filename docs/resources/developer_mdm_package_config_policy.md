@@ -3,12 +3,12 @@
 page_title: "stepsecurity_developer_mdm_package_config_policy Resource - stepsecurity"
 subcategory: ""
 description: |-
-  Manages a Developer MDM package manager configuration policy in StepSecurity. The policy points a managed device's npm configuration (the user-level .npmrc) at the tenant's StepSecurity secure registry; StepSecurity compiles and enforces it on assigned devices. The registry URL and per-device auth token are injected by StepSecurity at compile time and are never part of this resource. Creating a policy requires the tenant's StepSecurity secure registry to be onboarded.
+  Manages a Developer MDM package manager configuration policy in StepSecurity. The policy points a managed device's npm configuration (the user-level .npmrc) at the tenant's StepSecurity secure registry; StepSecurity compiles and enforces it on assigned devices. The registry URL and the tenant's registry auth key are injected by StepSecurity at compile time and are never part of this resource. Creating or updating a policy fails with a 409 while the tenant's StepSecurity secure registry is not onboarded.
 ---
 
 # stepsecurity_developer_mdm_package_config_policy (Resource)
 
-Manages a Developer MDM package manager configuration policy in StepSecurity. The policy points a managed device's npm configuration (the user-level `.npmrc`) at the tenant's StepSecurity secure registry; StepSecurity compiles and enforces it on assigned devices. The registry URL and per-device auth token are injected by StepSecurity at compile time and are never part of this resource. Creating a policy requires the tenant's StepSecurity secure registry to be onboarded.
+Manages a Developer MDM package manager configuration policy in StepSecurity. The policy points a managed device's npm configuration (the user-level `.npmrc`) at the tenant's StepSecurity secure registry; StepSecurity compiles and enforces it on assigned devices. The registry URL and the tenant's registry auth key are injected by StepSecurity at compile time and are never part of this resource. Creating or updating a policy fails with a 409 while the tenant's StepSecurity secure registry is not onboarded.
 
 ## Example Usage
 
@@ -27,10 +27,26 @@ provider "stepsecurity" {
 }
 
 # Points managed devices' npm config (~/.npmrc) at the tenant's StepSecurity secure registry.
-# The registry URL and per-device auth token are injected by StepSecurity at compile time.
+# The registry URL and the tenant's registry auth key are injected by StepSecurity at compile time.
 resource "stepsecurity_developer_mdm_package_config_policy" "npm_secure_registry" {
   name        = "npm secure registry"
   description = "Route npm installs through the StepSecurity secure registry"
+}
+
+# A policy on its own enforces nothing; it has to be bundled into a profile and assigned.
+# npm secure-registry enforcement runs on the agent channel, so this profile must use
+# enforcement = "dmg" — an "mdm" profile never writes .npmrc.
+resource "stepsecurity_developer_mdm_profile" "npm_secure_registry" {
+  name        = "npm secure registry"
+  enforcement = "dmg"
+
+  policy_ids = [
+    stepsecurity_developer_mdm_package_config_policy.npm_secure_registry.policy_id,
+  ]
+
+  assignment = {
+    all_devices = true
+  }
 }
 ```
 
