@@ -64,7 +64,7 @@ func (r *developerMDMPackageConfigPolicyResource) Schema(_ context.Context, _ re
 		MarkdownDescription: "Manages a Developer MDM package manager configuration policy in StepSecurity. " +
 			"The policy points a managed device's npm configuration (the user-level `.npmrc`) at the tenant's " +
 			"StepSecurity secure registry; StepSecurity compiles and enforces it on assigned devices. The registry " +
-			"URL and per-device auth token are injected by StepSecurity at compile time and are never part of this " +
+			"URL and the tenant's registry auth key are injected by StepSecurity at compile time and are never part of this " +
 			"resource. Creating or updating a policy fails with a 409 while the tenant's StepSecurity secure " +
 			"registry is not onboarded.",
 		Attributes: map[string]schema.Attribute{

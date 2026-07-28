@@ -12,7 +12,7 @@ provider "stepsecurity" {
 }
 
 # Points managed devices' npm config (~/.npmrc) at the tenant's StepSecurity secure registry.
-# The registry URL and per-device auth token are injected by StepSecurity at compile time.
+# The registry URL and the tenant's registry auth key are injected by StepSecurity at compile time.
 resource "stepsecurity_developer_mdm_package_config_policy" "npm_secure_registry" {
   name        = "npm secure registry"
   description = "Route npm installs through the StepSecurity secure registry"
