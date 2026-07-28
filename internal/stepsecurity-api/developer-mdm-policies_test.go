@@ -162,14 +162,17 @@ func TestDeveloperMDMPolicyClient_ProfileCRUD(t *testing.T) {
 	ctx := context.Background()
 
 	created, err := c.CreateDeveloperMDMProfile(ctx, DeveloperMDMProfileRequest{
-		Name:       "eng",
-		PolicyIDs:  []string{"p1"},
-		Assignment: DeveloperMDMAssignment{AllDevices: true},
+		Name:        "eng",
+		PolicyIDs:   []string{"p1"},
+		Enforcement: DeveloperMDMEnforcementDMG,
+		Assignment:  DeveloperMDMAssignment{AllDevices: true},
 	})
 	require.NoError(t, err)
 	assert.Equal(t, "prof1", created.ProfileID)
 	assert.True(t, created.Assignment.AllDevices)
 	assert.Equal(t, []any{"p1"}, createBody["policy_ids"])
+	// enforcement carries no omitempty, so it is always on the wire — the backend requires it.
+	assert.Equal(t, "dmg", createBody["enforcement"])
 
 	list, err := c.ListDeveloperMDMProfiles(ctx)
 	require.NoError(t, err)

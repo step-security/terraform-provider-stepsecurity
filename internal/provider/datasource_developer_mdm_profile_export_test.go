@@ -192,8 +192,9 @@ resource "stepsecurity_developer_mdm_ide_extension_policy" "test" {
 }
 
 resource "stepsecurity_developer_mdm_profile" "test" {
-  name       = "tf-acc export profile"
-  policy_ids = [stepsecurity_developer_mdm_ide_extension_policy.test.policy_id]
+  name        = "tf-acc export profile"
+  enforcement = "dmg"
+  policy_ids  = [stepsecurity_developer_mdm_ide_extension_policy.test.policy_id]
 }
 
 data "stepsecurity_developer_mdm_profile_export" "linux" {
