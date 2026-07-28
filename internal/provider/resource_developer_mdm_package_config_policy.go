@@ -65,7 +65,8 @@ func (r *developerMDMPackageConfigPolicyResource) Schema(_ context.Context, _ re
 			"The policy points a managed device's npm configuration (the user-level `.npmrc`) at the tenant's " +
 			"StepSecurity secure registry; StepSecurity compiles and enforces it on assigned devices. The registry " +
 			"URL and per-device auth token are injected by StepSecurity at compile time and are never part of this " +
-			"resource. Creating a policy requires the tenant's StepSecurity secure registry to be onboarded.",
+			"resource. Creating or updating a policy fails with a 409 while the tenant's StepSecurity secure " +
+			"registry is not onboarded.",
 		Attributes: map[string]schema.Attribute{
 			"id": schema.StringAttribute{
 				Computed:            true,
@@ -166,7 +167,9 @@ func (r *developerMDMPackageConfigPolicyResource) Create(ctx context.Context, re
 	if err != nil {
 		resp.Diagnostics.AddError(
 			"Error creating Developer MDM package config policy",
-			"Could not create policy, unexpected error: "+err.Error(),
+			"Could not create policy, unexpected error: "+err.Error()+
+				"\n\nA 409 here means the tenant's StepSecurity secure registry is not onboarded. "+
+				"Onboard it in the StepSecurity console before creating this policy.",
 		)
 		return
 	}

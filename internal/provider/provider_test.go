@@ -105,6 +105,7 @@ func TestStepSecurityProvider_DeveloperMDMRegistration(t *testing.T) {
 	}
 	for _, name := range []string{
 		"stepsecurity_developer_mdm_ide_extension_policy",
+		"stepsecurity_developer_mdm_package_config_policy",
 		"stepsecurity_developer_mdm_profile",
 	} {
 		if !resourceNames[name] {
