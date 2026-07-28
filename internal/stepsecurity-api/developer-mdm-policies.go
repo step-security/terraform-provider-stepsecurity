@@ -152,19 +152,24 @@ type DeveloperMDMExportArtifact struct {
 	Notes            string `json:"notes,omitempty"`
 }
 
-// DeveloperMDMComplianceView is one runtime compliance row.
+// DeveloperMDMComplianceView is one runtime compliance row. EvaluatedEnforcement is the
+// channel the last report ran under, which can lag a profile's current channel while a
+// switch propagates. Diff stays raw JSON because its per-setting values are a union of
+// bool, string, and array that no single Terraform type expresses.
 type DeveloperMDMComplianceView struct {
-	DeviceID     string `json:"device_id"`
-	Category     string `json:"category"`
-	Target       string `json:"target"`
-	ProfileID    string `json:"profile_id,omitempty"`
-	State        string `json:"state"`
-	DesiredHash  string `json:"desired_hash,omitempty"`
-	AppliedHash  string `json:"applied_hash,omitempty"`
-	LastSeenAt   int64  `json:"last_seen_at,omitempty"`
-	AgentVersion string `json:"agent_version,omitempty"`
-	Platform     string `json:"platform,omitempty"`
-	EvaluatedAt  string `json:"evaluated_at,omitempty"`
+	DeviceID             string          `json:"device_id"`
+	Category             string          `json:"category"`
+	Target               string          `json:"target"`
+	ProfileID            string          `json:"profile_id,omitempty"`
+	State                string          `json:"state"`
+	DesiredHash          string          `json:"desired_hash,omitempty"`
+	AppliedHash          string          `json:"applied_hash,omitempty"`
+	LastSeenAt           int64           `json:"last_seen_at,omitempty"`
+	AgentVersion         string          `json:"agent_version,omitempty"`
+	Platform             string          `json:"platform,omitempty"`
+	EvaluatedAt          string          `json:"evaluated_at,omitempty"`
+	EvaluatedEnforcement string          `json:"evaluated_enforcement,omitempty"`
+	Diff                 json.RawMessage `json:"diff,omitempty"`
 }
 
 // DeveloperMDMDeviceComplianceResponse wraps compliance rows for one device.
