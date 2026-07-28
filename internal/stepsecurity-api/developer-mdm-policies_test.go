@@ -171,7 +171,6 @@ func TestDeveloperMDMPolicyClient_ProfileCRUD(t *testing.T) {
 	assert.Equal(t, "prof1", created.ProfileID)
 	assert.True(t, created.Assignment.AllDevices)
 	assert.Equal(t, []any{"p1"}, createBody["policy_ids"])
-	// enforcement carries no omitempty, so it is always on the wire — the backend requires it.
 	assert.Equal(t, "dmg", createBody["enforcement"])
 
 	list, err := c.ListDeveloperMDMProfiles(ctx)

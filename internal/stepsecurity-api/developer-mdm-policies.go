@@ -29,10 +29,9 @@ const (
 	DeveloperMDMRegistryTypeStepSecurity = "stepsecurity"
 )
 
-// Enforcement channels for a Developer MDM profile. dmg means the StepSecurity agent
-// writes the managed settings itself; mdm means the agent only verifies what the
-// organization's own MDM already delivered and never writes. Required on create and
-// update.
+// Enforcement channels for a Developer MDM profile. dmg means the StepSecurity agent writes
+// the managed settings itself; mdm means it only verifies what the organization's own MDM
+// delivered. Required by the backend on create and update.
 const (
 	DeveloperMDMEnforcementDMG = "dmg"
 	DeveloperMDMEnforcementMDM = "mdm"
@@ -108,14 +107,12 @@ type DeveloperMDMProfile struct {
 	UpdatedAt   string                 `json:"updated_at,omitempty"`
 }
 
-// DeveloperMDMProfileRequest is the create/update request body.
+// DeveloperMDMProfileRequest is the create/update request body. Enforcement is always sent
+// so an unset channel surfaces the backend's 400 instead of being dropped from the request.
 type DeveloperMDMProfileRequest struct {
-	Name        string   `json:"name"`
-	Description string   `json:"description,omitempty"`
-	PolicyIDs   []string `json:"policy_ids"`
-	// Enforcement carries no omitempty on purpose: the backend requires the field, so an
-	// empty value must reach it and surface the 400 rather than vanish into a request
-	// that looks valid.
+	Name        string                 `json:"name"`
+	Description string                 `json:"description,omitempty"`
+	PolicyIDs   []string               `json:"policy_ids"`
 	Enforcement string                 `json:"enforcement"`
 	Assignment  DeveloperMDMAssignment `json:"assignment"`
 }

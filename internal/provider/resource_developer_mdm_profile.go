@@ -483,11 +483,8 @@ func applyDeveloperMDMProfileToModel(ctx context.Context, profile *stepsecuritya
 	model.ID = types.StringValue(profile.ProfileID)
 	model.ProfileID = types.StringValue(profile.ProfileID)
 	model.Name = types.StringValue(profile.Name)
-	// Mapped unconditionally, with no empty-value guard. A profile stored before the
-	// enforcement feature has no such attribute and comes back as "", and state must record
-	// that verbatim: the next plan then shows a diff against the configured channel and the
-	// next apply writes it. A tolerant guard would instead leave the planned channel in
-	// state while the backend has none, and stay wrong indefinitely.
+	// Deliberately unguarded: a record with no stored channel must reach state as "" so the
+	// next plan shows the diff, rather than leaving a channel the backend does not have.
 	model.Enforcement = types.StringValue(profile.Enforcement)
 	model.CreatedBy = types.StringValue(profile.CreatedBy)
 	model.CreatedAt = types.StringValue(profile.CreatedAt)

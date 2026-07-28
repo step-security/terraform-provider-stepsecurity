@@ -147,8 +147,6 @@ func TestDeveloperMDMProfile_BuildRequestDeviceIDs(t *testing.T) {
 	assert.Equal(t, []string{"d1", "d2"}, req.Assignment.DeviceIDs)
 }
 
-// TestDeveloperMDMProfile_BuildRequestEnforcement pins that the required enforcement
-// channel reaches the request body. The backend rejects a create or update that omits it.
 func TestDeveloperMDMProfile_BuildRequestEnforcement(t *testing.T) {
 	t.Parallel()
 
@@ -176,7 +174,6 @@ func TestDeveloperMDMProfile_BuildRequestEnforcement(t *testing.T) {
 	}
 }
 
-// TestDeveloperMDMProfile_ApplyEnforcement covers the plain round-trip of the channel.
 func TestDeveloperMDMProfile_ApplyEnforcement(t *testing.T) {
 	t.Parallel()
 
@@ -204,23 +201,21 @@ func TestDeveloperMDMProfile_ApplyEnforcement(t *testing.T) {
 	}
 }
 
-// TestDeveloperMDMProfile_ApplyEnforcementIsUnguarded is a regression guard, not a value
-// check. The mapping of enforcement must stay unconditional: a profile stored before the
-// enforcement feature has no such attribute, so a GET on it decodes "", and state has to
-// record that verbatim even when the model already holds a channel. Reintroducing an
-// `if profile.Enforcement != ""` guard would leave the prior value in place, reporting a
-// clean plan while state asserts a channel the backend never stored.
+// TestDeveloperMDMProfile_ApplyEnforcementIsUnguarded guards the mapping against an
+// `if profile.Enforcement != ""` guard being reintroduced. A record with no stored channel
+// must overwrite whatever the model holds, so the drift shows up on the next plan instead
+// of state asserting a channel the backend never had.
 func TestDeveloperMDMProfile_ApplyEnforcementIsUnguarded(t *testing.T) {
 	t.Parallel()
 
 	ctx := context.Background()
-	legacyRecord := &stepsecurityapi.DeveloperMDMProfile{ProfileID: "prof1", Name: "eng"}
+	noStoredChannel := &stepsecurityapi.DeveloperMDMProfile{ProfileID: "prof1", Name: "eng"}
 
 	model := &developerMDMProfileModel{
 		Enforcement: types.StringValue(stepsecurityapi.DeveloperMDMEnforcementMDM),
 	}
 	var diags diag.Diagnostics
-	applyDeveloperMDMProfileToModel(ctx, legacyRecord, model, &diags)
+	applyDeveloperMDMProfileToModel(ctx, noStoredChannel, model, &diags)
 	require.False(t, diags.HasError(), "apply errors: %v", diags)
 
 	assert.Equal(t, types.StringValue(""), model.Enforcement,

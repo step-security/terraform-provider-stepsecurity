@@ -25,9 +25,8 @@ resource "stepsecurity_developer_mdm_profile" "engineering" {
   name        = "Engineering"
   description = "Approved IDE extensions for engineering"
 
-  # Required. "dmg": the StepSecurity agent writes the managed configuration itself.
-  # "mdm": verify only — your own MDM delivers the configuration and the agent reports drift.
-  # The channel applies to every policy in the profile.
+  # "dmg" lets the StepSecurity agent write the managed configuration; "mdm" is verify-only,
+  # for fleets whose own MDM delivers it. Applies to every policy in the profile.
   enforcement = "dmg"
 
   policy_ids = [
