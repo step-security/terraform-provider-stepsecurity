@@ -167,6 +167,43 @@ func TestDeveloperMDMIDEExtensionPolicy_BuildRequestBlocklist(t *testing.T) {
 	assert.Empty(t, spec.Rules[0].Versions)
 }
 
+// TestDeveloperMDMIDEExtensionPolicy_BuildRequestPreservesRuleOrder pins the wire order of a
+// multi-rule policy now that rules round-trip through a framework list. Order is part of the
+// contract -- the backend compiles rules in sequence -- and a list preserves it where a set
+// would not. It also checks that null optional fields still reach the API as zero values.
+func TestDeveloperMDMIDEExtensionPolicy_BuildRequestPreservesRuleOrder(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	model := developerMDMIDEExtensionPolicyModel{
+		Name:   types.StringValue("eng"),
+		Target: types.StringValue(stepsecurityapi.DeveloperMDMTargetVSCode),
+		Mode:   types.StringValue("allowlist"),
+		Rules: ideExtensionRulesList(t,
+			developerMDMIDEExtensionRuleModel{Publisher: types.StringValue("zulu"), Name: types.StringValue("last"), Versions: types.SetNull(types.StringType), Stable: types.BoolValue(true)},
+			developerMDMIDEExtensionRuleModel{Publisher: types.StringValue("alpha"), Name: types.StringValue("first"), Versions: types.SetNull(types.StringType), Stable: types.BoolValue(true)},
+			// Every optional field null: they must reach the API as zero values.
+			developerMDMIDEExtensionRuleModel{Publisher: types.StringValue("mike"), Name: types.StringNull(), Versions: types.SetNull(types.StringType), Stable: types.BoolValue(false), Comment: types.StringNull()},
+		),
+	}
+
+	var diags diag.Diagnostics
+	req := buildDeveloperMDMIDEExtensionPolicyRequest(ctx, model, &diags)
+	require.False(t, diags.HasError(), "build errors: %v", diags)
+
+	var spec stepsecurityapi.DeveloperMDMIDEExtensionSpec
+	require.NoError(t, json.Unmarshal(req.Spec, &spec))
+	require.Len(t, spec.Rules, 3)
+
+	// Declaration order, not sorted order.
+	assert.Equal(t, []string{"zulu", "alpha", "mike"}, []string{spec.Rules[0].Publisher, spec.Rules[1].Publisher, spec.Rules[2].Publisher})
+
+	assert.Empty(t, spec.Rules[2].Name)
+	assert.Empty(t, spec.Rules[2].Versions)
+	assert.Empty(t, spec.Rules[2].Comment)
+	assert.False(t, spec.Rules[2].Stable)
+}
+
 func TestDeveloperMDMIDEExtensionPolicy_ValidateRejectsInvalidRules(t *testing.T) {
 	t.Parallel()
 
