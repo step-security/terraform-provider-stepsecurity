@@ -25,6 +25,10 @@ resource "stepsecurity_developer_mdm_profile" "engineering" {
   name        = "Engineering"
   description = "Approved IDE extensions for engineering"
 
+  # "dmg" lets the StepSecurity agent write the managed configuration; "mdm" is verify-only,
+  # for fleets whose own MDM delivers it. Applies to every policy in the profile.
+  enforcement = "dmg"
+
   policy_ids = [
     stepsecurity_developer_mdm_ide_extension_policy.engineering_vscode.policy_id,
   ]

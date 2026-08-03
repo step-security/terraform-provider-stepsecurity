@@ -2,6 +2,7 @@ package provider
 
 import (
 	"context"
+	"encoding/json"
 	"testing"
 
 	fwdatasource "github.com/hashicorp/terraform-plugin-framework/datasource"
@@ -67,4 +68,38 @@ func TestDeveloperMDMDeviceComplianceDataSource_Read(t *testing.T) {
 	assert.Equal(t, "compliant", rows[0].State.ValueString())
 	assert.Equal(t, int64(1780000000), rows[0].LastSeenAt.ValueInt64())
 	assert.Equal(t, "darwin", rows[0].Platform.ValueString())
+}
+
+func TestDeveloperMDMComplianceListValue_EnforcementAndDiff(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	const diff = `{"changes":[{"path":"extensions.allowed","op":"set_diff","missing":{"ms-python.python":true}}]}`
+
+	rows := []stepsecurityapi.DeveloperMDMComplianceView{
+		{
+			DeviceID:             "dev1",
+			State:                "mdm_drift",
+			EvaluatedEnforcement: "mdm",
+			Diff:                 json.RawMessage(diff),
+		},
+		{
+			DeviceID:             "dev2",
+			State:                "compliant",
+			EvaluatedEnforcement: "dmg",
+		},
+	}
+
+	listValue, diags := developerMDMComplianceListValue(rows)
+	require.False(t, diags.HasError(), "list errors: %v", diags)
+
+	var got []developerMDMComplianceRowModel
+	require.False(t, listValue.ElementsAs(ctx, &got, false).HasError())
+	require.Len(t, got, 2)
+
+	assert.Equal(t, "mdm", got[0].EvaluatedEnforcement.ValueString())
+	assert.Equal(t, diff, got[0].DiffJSON.ValueString(), "the diff must be passed through verbatim")
+
+	assert.Equal(t, "dmg", got[1].EvaluatedEnforcement.ValueString())
+	assert.True(t, got[1].DiffJSON.IsNull(), "a row with no diff must be null, not an empty string")
 }

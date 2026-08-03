@@ -52,6 +52,7 @@ type developerMDMProfileModel struct {
 	Name        types.String `tfsdk:"name"`
 	Description types.String `tfsdk:"description"`
 	PolicyIDs   types.Set    `tfsdk:"policy_ids"`
+	Enforcement types.String `tfsdk:"enforcement"`
 	Assignment  types.Object `tfsdk:"assignment"`
 	CreatedBy   types.String `tfsdk:"created_by"`
 	CreatedAt   types.String `tfsdk:"created_at"`
@@ -74,7 +75,9 @@ func (r *developerMDMProfileResource) Metadata(_ context.Context, req resource.M
 func (r *developerMDMProfileResource) Schema(_ context.Context, _ resource.SchemaRequest, resp *resource.SchemaResponse) {
 	resp.Schema = schema.Schema{
 		MarkdownDescription: "Manages a Developer MDM profile in StepSecurity. A profile bundles one or more Developer MDM " +
-			"policies and optionally assigns them to devices. The backend allows at most one policy per category/target per profile.",
+			"policies and optionally assigns them to devices. The backend allows at most one policy per category/target per profile. " +
+			"Every policy in the profile shares the one `enforcement` channel: either the StepSecurity agent writes the managed " +
+			"configuration for all of them (`dmg`), or it writes none of them and only verifies what your own MDM delivered (`mdm`).",
 		Attributes: map[string]schema.Attribute{
 			"id": schema.StringAttribute{
 				Computed:            true,
@@ -109,6 +112,21 @@ func (r *developerMDMProfileResource) Schema(_ context.Context, _ resource.Schem
 				Validators: []validator.Set{
 					setvalidator.SizeAtLeast(1),
 					setvalidator.ValueStringsAre(stringvalidator.LengthAtLeast(1)),
+				},
+			},
+			"enforcement": schema.StringAttribute{
+				Required: true,
+				MarkdownDescription: "On-device enforcement channel for every policy in this profile. " +
+					"`dmg`: the StepSecurity agent writes the managed configuration itself. " +
+					"`mdm`: verify only — the agent never writes, and instead reports the configuration " +
+					"your own MDM (Jamf, Intune, Iru, …) delivered, so StepSecurity can report drift " +
+					"against the policy. Use `mdm` together with the " +
+					"`stepsecurity_developer_mdm_profile_export` data source.",
+				Validators: []validator.String{
+					stringvalidator.OneOf(
+						stepsecurityapi.DeveloperMDMEnforcementDMG,
+						stepsecurityapi.DeveloperMDMEnforcementMDM,
+					),
 				},
 			},
 			"assignment": schema.SingleNestedAttribute{
@@ -421,8 +439,13 @@ func validateDeveloperMDMProfilePolicyCategories(ctx context.Context, client ste
 }
 
 func developerMDMCategoryTargetKey(category, target string) string {
-	if target == "" && category == stepsecurityapi.DeveloperMDMCategoryIDEExtension {
-		target = stepsecurityapi.DeveloperMDMTargetVSCode
+	if target == "" {
+		switch category {
+		case stepsecurityapi.DeveloperMDMCategoryIDEExtension:
+			target = stepsecurityapi.DeveloperMDMTargetVSCode
+		case stepsecurityapi.DeveloperMDMCategoryPackageConfig:
+			target = stepsecurityapi.DeveloperMDMTargetNPM
+		}
 	}
 	return category + "#" + target
 }
@@ -433,6 +456,7 @@ func buildDeveloperMDMProfileRequest(ctx context.Context, model developerMDMProf
 		Name:        model.Name.ValueString(),
 		Description: model.Description.ValueString(),
 		PolicyIDs:   sortedStringSet(ctx, model.PolicyIDs, diags),
+		Enforcement: model.Enforcement.ValueString(),
 	}
 
 	if model.Assignment.IsNull() || model.Assignment.IsUnknown() {
@@ -459,6 +483,9 @@ func applyDeveloperMDMProfileToModel(ctx context.Context, profile *stepsecuritya
 	model.ID = types.StringValue(profile.ProfileID)
 	model.ProfileID = types.StringValue(profile.ProfileID)
 	model.Name = types.StringValue(profile.Name)
+	// Deliberately unguarded: a record with no stored channel must reach state as "" so the
+	// next plan shows the diff, rather than leaving a channel the backend does not have.
+	model.Enforcement = types.StringValue(profile.Enforcement)
 	model.CreatedBy = types.StringValue(profile.CreatedBy)
 	model.CreatedAt = types.StringValue(profile.CreatedAt)
 	model.UpdatedBy = types.StringValue(profile.UpdatedBy)

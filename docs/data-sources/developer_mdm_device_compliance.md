@@ -58,9 +58,11 @@ Read-Only:
 - `category` (String) Policy category, e.g. `ide_extension`.
 - `desired_hash` (String) Backend desired policy hash.
 - `device_id` (String) Device identifier.
+- `diff_json` (String) Desired-vs-observed difference as a JSON document, set only on an `mdm_drift` row. Decode with `jsondecode()`. Shape: `{"changes":[{"path":…,"op":"replace"|"set_diff",…}]}`. It is a string because a per-extension value can be a bool, `"stable"`, or a list of versions.
 - `evaluated_at` (String) When the row was evaluated.
+- `evaluated_enforcement` (String) Enforcement channel the last report ran under (`dmg` or `mdm`). May lag the profile's current channel while a switch propagates.
 - `last_seen_at` (Number) Unix timestamp the device was last seen.
 - `platform` (String) Device platform, e.g. `darwin`.
 - `profile_id` (String) Profile that governs this row, if any.
-- `state` (String) Compliance state such as `compliant`, `pending`, `drift_detected`, or `mdm_managed`.
+- `state` (String) Compliance state. One of: `compliant` (applied hash equals desired hash); `pending` (assigned, no report yet for the current desired state); `not_assigned` (no profile governs this device for the category/target); `policy_not_applied` (the agent ran and found no policy in effect); `drift_detected` (the on-disk value differed from what the agent wrote, and the agent re-applied); `agent_unsupported` (the agent version predates the enforcement floor); `agent_stale` (the agent has not reported recently enough); `mdm_managed` (the agent found an OS-managed policy already governing the device and skipped writing; under `enforcement = "mdm"` the reported evidence also matched the desired policy, while under `dmg` it is a presence skip with no content comparison); `mdm_drift` (`enforcement = "mdm"`: an OS-managed policy is present but differs from desired, and always carries `diff_json`); `write_failed` (the agent could not write the managed file); `verification_failed` (the agent wrote but read-back verification failed, or MDM-mode evidence was malformed).
 - `target` (String) Policy target, e.g. `vscode`.

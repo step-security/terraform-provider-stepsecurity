@@ -82,7 +82,7 @@ func TestDeveloperMDMProfileResource_Schema(t *testing.T) {
 	assert.False(t, schemaResp.Diagnostics.HasError(), "Schema() errors: %v", schemaResp.Diagnostics)
 
 	attrs := schemaResp.Schema.Attributes
-	for _, name := range []string{"id", "profile_id", "name", "description", "policy_ids", "assignment", "created_by", "created_at", "updated_by", "updated_at"} {
+	for _, name := range []string{"id", "profile_id", "name", "description", "policy_ids", "enforcement", "assignment", "created_by", "created_at", "updated_by", "updated_at"} {
 		assert.Contains(t, attrs, name, "missing attribute %q", name)
 	}
 }
@@ -145,6 +145,81 @@ func TestDeveloperMDMProfile_BuildRequestDeviceIDs(t *testing.T) {
 	assert.Equal(t, []string{"p1", "p2"}, req.PolicyIDs)
 	assert.False(t, req.Assignment.AllDevices)
 	assert.Equal(t, []string{"d1", "d2"}, req.Assignment.DeviceIDs)
+}
+
+func TestDeveloperMDMProfile_BuildRequestEnforcement(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+
+	for _, enforcement := range []string{
+		stepsecurityapi.DeveloperMDMEnforcementDMG,
+		stepsecurityapi.DeveloperMDMEnforcementMDM,
+	} {
+		t.Run(enforcement, func(t *testing.T) {
+			t.Parallel()
+			model := developerMDMProfileModel{
+				Name:        types.StringValue("eng"),
+				PolicyIDs:   stringSet(t, "p1"),
+				Enforcement: types.StringValue(enforcement),
+				Assignment:  types.ObjectNull(developerMDMAssignmentAttrTypes),
+			}
+
+			var diags diag.Diagnostics
+			req := buildDeveloperMDMProfileRequest(ctx, model, &diags)
+			require.False(t, diags.HasError(), "build errors: %v", diags)
+
+			assert.Equal(t, enforcement, req.Enforcement)
+		})
+	}
+}
+
+func TestDeveloperMDMProfile_ApplyEnforcement(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+
+	for _, enforcement := range []string{
+		stepsecurityapi.DeveloperMDMEnforcementDMG,
+		stepsecurityapi.DeveloperMDMEnforcementMDM,
+	} {
+		t.Run(enforcement, func(t *testing.T) {
+			t.Parallel()
+			profile := &stepsecurityapi.DeveloperMDMProfile{
+				ProfileID:   "prof1",
+				Name:        "eng",
+				Enforcement: enforcement,
+			}
+
+			model := &developerMDMProfileModel{}
+			var diags diag.Diagnostics
+			applyDeveloperMDMProfileToModel(ctx, profile, model, &diags)
+			require.False(t, diags.HasError(), "apply errors: %v", diags)
+
+			assert.Equal(t, enforcement, model.Enforcement.ValueString())
+		})
+	}
+}
+
+// TestDeveloperMDMProfile_ApplyEnforcementIsUnguarded guards the mapping against an
+// `if profile.Enforcement != ""` guard being reintroduced. A record with no stored channel
+// must overwrite whatever the model holds, so the drift shows up on the next plan instead
+// of state asserting a channel the backend never had.
+func TestDeveloperMDMProfile_ApplyEnforcementIsUnguarded(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	noStoredChannel := &stepsecurityapi.DeveloperMDMProfile{ProfileID: "prof1", Name: "eng"}
+
+	model := &developerMDMProfileModel{
+		Enforcement: types.StringValue(stepsecurityapi.DeveloperMDMEnforcementMDM),
+	}
+	var diags diag.Diagnostics
+	applyDeveloperMDMProfileToModel(ctx, noStoredChannel, model, &diags)
+	require.False(t, diags.HasError(), "apply errors: %v", diags)
+
+	assert.Equal(t, types.StringValue(""), model.Enforcement,
+		"an empty backend enforcement must overwrite the prior value, not be skipped")
 }
 
 func TestDeveloperMDMProfile_ValidateRejectsInvalidAssignment(t *testing.T) {
@@ -378,8 +453,9 @@ resource "stepsecurity_developer_mdm_ide_extension_policy" "test" {
 }
 
 resource "stepsecurity_developer_mdm_profile" "test" {
-  name       = "tf-acc profile"
-  policy_ids = [stepsecurity_developer_mdm_ide_extension_policy.test.policy_id]
+  name        = "tf-acc profile"
+  enforcement = "dmg"
+  policy_ids  = [stepsecurity_developer_mdm_ide_extension_policy.test.policy_id]
 %s}
 `, assignment)
 }

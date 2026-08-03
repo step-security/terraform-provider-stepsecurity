@@ -39,7 +39,7 @@ func TestDeveloperMDMProfileExportDataSource_Schema(t *testing.T) {
 	t.Parallel()
 
 	attrs := exportDataSourceSchema(t).Attributes
-	for _, name := range []string{"profile_id", "os", "category", "target", "filename", "content_type", "content", "hash", "notes"} {
+	for _, name := range []string{"profile_id", "os", "os_display_name", "category", "target", "format", "filename", "content_type", "content", "hash", "preference_domain", "notes"} {
 		assert.Contains(t, attrs, name, "missing attribute %q", name)
 	}
 }
@@ -49,7 +49,7 @@ func TestDeveloperMDMProfileExportDataSource_Read(t *testing.T) {
 
 	ctx := context.Background()
 	mockClient := &stepsecurityapi.MockStepSecurityClient{}
-	mockClient.On("ExportDeveloperMDMProfile", mock.Anything, "prof1", "linux", "ide_extension", "vscode").Return(&stepsecurityapi.DeveloperMDMExportArtifact{
+	mockClient.On("ExportDeveloperMDMProfile", mock.Anything, "prof1", "linux", "ide_extension", "vscode", "mobileconfig").Return(&stepsecurityapi.DeveloperMDMExportArtifact{
 		OS:          "linux",
 		Category:    "ide_extension",
 		Target:      "vscode",
@@ -88,7 +88,7 @@ func TestDeveloperMDMProfileExportDataSource_DefaultCategoryAndTarget(t *testing
 	ctx := context.Background()
 	mockClient := &stepsecurityapi.MockStepSecurityClient{}
 	// Null category and target must resolve before calling the API.
-	mockClient.On("ExportDeveloperMDMProfile", mock.Anything, "prof1", "macos", "ide_extension", "vscode").Return(&stepsecurityapi.DeveloperMDMExportArtifact{
+	mockClient.On("ExportDeveloperMDMProfile", mock.Anything, "prof1", "macos", "ide_extension", "vscode", "mobileconfig").Return(&stepsecurityapi.DeveloperMDMExportArtifact{
 		OS:       "macos",
 		Category: "ide_extension",
 		Target:   "vscode",
@@ -121,7 +121,7 @@ func TestDeveloperMDMProfileExportDataSource_ContentIsDecodedArtifact(t *testing
 	decoded := "{\n  \"AllowedExtensions\": \"{\\\"*\\\":false}\"\n}\n"
 
 	mockClient := &stepsecurityapi.MockStepSecurityClient{}
-	mockClient.On("ExportDeveloperMDMProfile", mock.Anything, "prof1", "linux", "ide_extension", "vscode").Return(&stepsecurityapi.DeveloperMDMExportArtifact{
+	mockClient.On("ExportDeveloperMDMProfile", mock.Anything, "prof1", "linux", "ide_extension", "vscode", "mobileconfig").Return(&stepsecurityapi.DeveloperMDMExportArtifact{
 		OS:       "linux",
 		Category: "ide_extension",
 		Target:   "vscode",
@@ -148,6 +148,99 @@ func TestDeveloperMDMProfileExportDataSource_ContentIsDecodedArtifact(t *testing
 	assert.Contains(t, state.Content.ValueString(), "\n")
 	assert.Contains(t, state.Content.ValueString(), `"AllowedExtensions"`)
 	assert.NotContains(t, state.Content.ValueString(), `\n`)
+}
+
+func TestDeveloperMDMProfileExportDataSource_FormatDefaultsToMobileconfig(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	mockClient := &stepsecurityapi.MockStepSecurityClient{}
+	mockClient.On("ExportDeveloperMDMProfile", mock.Anything, "prof1", "macos", "ide_extension", "vscode", "mobileconfig").Return(&stepsecurityapi.DeveloperMDMExportArtifact{
+		OS:               "macos",
+		OSDisplayName:    "macOS",
+		Category:         "ide_extension",
+		Target:           "vscode",
+		Format:           "mobileconfig",
+		Filename:         "policy.mobileconfig",
+		PreferenceDomain: "com.microsoft.VSCode",
+	}, nil).Once()
+
+	d := &developerMDMProfileExportDataSource{client: mockClient}
+	req, resp := exportReadRequest(t, developerMDMProfileExportDataSourceModel{
+		ProfileID: types.StringValue("prof1"),
+		OS:        types.StringValue("macos"),
+		Format:    types.StringNull(),
+	})
+
+	d.Read(ctx, req, resp)
+	require.False(t, resp.Diagnostics.HasError(), "read errors: %v", resp.Diagnostics)
+	mockClient.AssertExpectations(t)
+
+	var state developerMDMProfileExportDataSourceModel
+	require.False(t, resp.State.Get(ctx, &state).HasError())
+	assert.Equal(t, "mobileconfig", state.Format.ValueString())
+	assert.Equal(t, "macOS", state.OSDisplayName.ValueString())
+	assert.Equal(t, "com.microsoft.VSCode", state.PreferenceDomain.ValueString())
+}
+
+// TestDeveloperMDMProfileExportDataSource_PlistRequiresMacOS pins that the macOS-only
+// format is rejected locally, before any API call is made.
+func TestDeveloperMDMProfileExportDataSource_PlistRequiresMacOS(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	mockClient := &stepsecurityapi.MockStepSecurityClient{}
+
+	d := &developerMDMProfileExportDataSource{client: mockClient}
+	req, resp := exportReadRequest(t, developerMDMProfileExportDataSourceModel{
+		ProfileID: types.StringValue("prof1"),
+		OS:        types.StringValue("windows"),
+		Format:    types.StringValue("plist"),
+	})
+
+	d.Read(ctx, req, resp)
+	assert.True(t, resp.Diagnostics.HasError(), "plist on windows should be rejected")
+	mockClient.AssertNotCalled(t, "ExportDeveloperMDMProfile")
+}
+
+// TestDeveloperMDMProfileExportDataSource_FormatFallsBackToRequested covers the shape the
+// backend omits. Windows and Linux artifacts carry no format, but the attribute is Optional
+// as well as Computed, so a config-set value has to survive the round-trip verbatim rather
+// than coming back null.
+func TestDeveloperMDMProfileExportDataSource_FormatFallsBackToRequested(t *testing.T) {
+	t.Parallel()
+
+	for _, os := range []string{"windows", "linux"} {
+		t.Run(os, func(t *testing.T) {
+			t.Parallel()
+			ctx := context.Background()
+			mockClient := &stepsecurityapi.MockStepSecurityClient{}
+			// No Format on the artifact: the backend sets it only in its macOS branch.
+			mockClient.On("ExportDeveloperMDMProfile", mock.Anything, "prof1", os, "ide_extension", "vscode", "mobileconfig").Return(&stepsecurityapi.DeveloperMDMExportArtifact{
+				OS:       os,
+				Category: "ide_extension",
+				Target:   "vscode",
+				Filename: "artifact",
+			}, nil).Once()
+
+			d := &developerMDMProfileExportDataSource{client: mockClient}
+			req, resp := exportReadRequest(t, developerMDMProfileExportDataSourceModel{
+				ProfileID: types.StringValue("prof1"),
+				OS:        types.StringValue(os),
+				Format:    types.StringValue("mobileconfig"),
+			})
+
+			d.Read(ctx, req, resp)
+			require.False(t, resp.Diagnostics.HasError(), "read errors: %v", resp.Diagnostics)
+			mockClient.AssertExpectations(t)
+
+			var state developerMDMProfileExportDataSourceModel
+			require.False(t, resp.State.Get(ctx, &state).HasError())
+			assert.False(t, state.Format.IsNull(), "a config-set format must not come back null")
+			assert.Equal(t, "mobileconfig", state.Format.ValueString())
+			assert.Empty(t, state.PreferenceDomain.ValueString())
+		})
+	}
 }
 
 // TestAccDeveloperMDMProfileExportDataSource runs against the real API.
@@ -192,8 +285,9 @@ resource "stepsecurity_developer_mdm_ide_extension_policy" "test" {
 }
 
 resource "stepsecurity_developer_mdm_profile" "test" {
-  name       = "tf-acc export profile"
-  policy_ids = [stepsecurity_developer_mdm_ide_extension_policy.test.policy_id]
+  name        = "tf-acc export profile"
+  enforcement = "dmg"
+  policy_ids  = [stepsecurity_developer_mdm_ide_extension_policy.test.policy_id]
 }
 
 data "stepsecurity_developer_mdm_profile_export" "linux" {
