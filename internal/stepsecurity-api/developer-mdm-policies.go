@@ -14,6 +14,27 @@ const (
 	DeveloperMDMSpecVersionIDEExtension = 1
 	DeveloperMDMModeAllowlist           = "allowlist"
 	DeveloperMDMModeBlocklist           = "blocklist"
+
+	// DeveloperMDMCategoryPackageConfig governs a device's package-manager configuration
+	// file (v1: the npm user-level .npmrc), pointing it at the tenant's StepSecurity secure
+	// registry.
+	DeveloperMDMCategoryPackageConfig = "package_config"
+	// DeveloperMDMTargetNPM is the package_config target for the npm ecosystem. An omitted
+	// package_config target defaults to it.
+	DeveloperMDMTargetNPM = "npm"
+	// DeveloperMDMSpecVersionPackageConfig is the only supported package_config spec version.
+	DeveloperMDMSpecVersionPackageConfig = 1
+	// DeveloperMDMRegistryTypeStepSecurity is the only registry type package_config supports
+	// in v1: the tenant's StepSecurity secure registry.
+	DeveloperMDMRegistryTypeStepSecurity = "stepsecurity"
+)
+
+// Enforcement channels for a Developer MDM profile. dmg means the StepSecurity agent writes
+// the managed settings itself; mdm means it only verifies what the organization's own MDM
+// delivered. Required by the backend on create and update.
+const (
+	DeveloperMDMEnforcementDMG = "dmg"
+	DeveloperMDMEnforcementMDM = "mdm"
 )
 
 // DeveloperMDMPolicy is the backend representation of a Developer MDM policy.
@@ -44,9 +65,14 @@ type DeveloperMDMPolicyRequest struct {
 	Spec        json.RawMessage `json:"spec"`
 }
 
-// DeveloperMDMIDEExtensionSpec is the typed spec for ide_extension policies.
+// DeveloperMDMMaxGalleryServiceURLLen mirrors the backend cap on gallery_service_url.
+const DeveloperMDMMaxGalleryServiceURLLen = 2048
+
+// DeveloperMDMIDEExtensionSpec is the typed spec for ide_extension policies. An unset
+// GalleryServiceURL is omitted rather than stored as an empty key.
 type DeveloperMDMIDEExtensionSpec struct {
-	Rules []DeveloperMDMIDEExtensionRule `json:"rules"`
+	Rules             []DeveloperMDMIDEExtensionRule `json:"rules"`
+	GalleryServiceURL string                         `json:"gallery_service_url,omitempty"`
 }
 
 // DeveloperMDMIDEExtensionRule is a single IDE extension allow/block rule.
@@ -58,6 +84,19 @@ type DeveloperMDMIDEExtensionRule struct {
 	Comment   string   `json:"comment,omitempty"`
 }
 
+// DeveloperMDMPackageConfigSpec is the typed spec for package_config policies. It carries
+// only the registry selector; the concrete registry URL and tenant auth key are injected
+// backend-side when the policy is compiled, so no secret ever travels through the provider.
+type DeveloperMDMPackageConfigSpec struct {
+	Registry DeveloperMDMRegistryRef `json:"registry"`
+}
+
+// DeveloperMDMRegistryRef selects which registry the managed npm config points at. v1
+// accepts only type "stepsecurity" (the tenant's StepSecurity secure registry).
+type DeveloperMDMRegistryRef struct {
+	Type string `json:"type"`
+}
+
 // DeveloperMDMProfile is the backend representation of a Developer MDM profile.
 type DeveloperMDMProfile struct {
 	CustomerID  string                 `json:"customer_id,omitempty"`
@@ -65,6 +104,7 @@ type DeveloperMDMProfile struct {
 	Name        string                 `json:"name,omitempty"`
 	Description string                 `json:"description,omitempty"`
 	PolicyIDs   []string               `json:"policy_ids,omitempty"`
+	Enforcement string                 `json:"enforcement,omitempty"`
 	Assignment  DeveloperMDMAssignment `json:"assignment"`
 	CreatedBy   string                 `json:"created_by,omitempty"`
 	CreatedAt   string                 `json:"created_at,omitempty"`
@@ -72,11 +112,13 @@ type DeveloperMDMProfile struct {
 	UpdatedAt   string                 `json:"updated_at,omitempty"`
 }
 
-// DeveloperMDMProfileRequest is the create/update request body.
+// DeveloperMDMProfileRequest is the create/update request body. Enforcement is always sent
+// so an unset channel surfaces the backend's 400 instead of being dropped from the request.
 type DeveloperMDMProfileRequest struct {
 	Name        string                 `json:"name"`
 	Description string                 `json:"description,omitempty"`
 	PolicyIDs   []string               `json:"policy_ids"`
+	Enforcement string                 `json:"enforcement"`
 	Assignment  DeveloperMDMAssignment `json:"assignment"`
 }
 
@@ -86,32 +128,48 @@ type DeveloperMDMAssignment struct {
 	DeviceIDs  []string `json:"device_ids,omitempty"`
 }
 
+// Export artifact formats for ide_extension. mobileconfig is the default; plist is the bare
+// macOS preferences file, available only for os=macos.
+const (
+	DeveloperMDMExportFormatMobileconfig = "mobileconfig"
+	DeveloperMDMExportFormatPlist        = "plist"
+)
+
 // DeveloperMDMExportArtifact is a compiled MDM artifact for a given OS/category.
 // Content holds the decoded artifact body, not the escaped HTTP JSON string.
+// Format and PreferenceDomain are set by the backend for macOS only.
 type DeveloperMDMExportArtifact struct {
-	OS          string `json:"os"`
-	Category    string `json:"category"`
-	Target      string `json:"target"`
-	Filename    string `json:"filename"`
-	ContentType string `json:"content_type"`
-	Content     string `json:"content"`
-	Hash        string `json:"hash"`
-	Notes       string `json:"notes,omitempty"`
+	OS               string `json:"os"`
+	OSDisplayName    string `json:"os_display_name"`
+	Category         string `json:"category"`
+	Target           string `json:"target"`
+	Format           string `json:"format,omitempty"`
+	Filename         string `json:"filename"`
+	ContentType      string `json:"content_type"`
+	Content          string `json:"content"`
+	Hash             string `json:"hash"`
+	PreferenceDomain string `json:"preference_domain,omitempty"`
+	Notes            string `json:"notes,omitempty"`
 }
 
-// DeveloperMDMComplianceView is one runtime compliance row.
+// DeveloperMDMComplianceView is one runtime compliance row. EvaluatedEnforcement is the
+// channel the last report ran under, which can lag a profile's current channel while a
+// switch propagates. Diff stays raw JSON because its per-setting values are a union of
+// bool, string, and array that no single Terraform type expresses.
 type DeveloperMDMComplianceView struct {
-	DeviceID     string `json:"device_id"`
-	Category     string `json:"category"`
-	Target       string `json:"target"`
-	ProfileID    string `json:"profile_id,omitempty"`
-	State        string `json:"state"`
-	DesiredHash  string `json:"desired_hash,omitempty"`
-	AppliedHash  string `json:"applied_hash,omitempty"`
-	LastSeenAt   int64  `json:"last_seen_at,omitempty"`
-	AgentVersion string `json:"agent_version,omitempty"`
-	Platform     string `json:"platform,omitempty"`
-	EvaluatedAt  string `json:"evaluated_at,omitempty"`
+	DeviceID             string          `json:"device_id"`
+	Category             string          `json:"category"`
+	Target               string          `json:"target"`
+	ProfileID            string          `json:"profile_id,omitempty"`
+	State                string          `json:"state"`
+	DesiredHash          string          `json:"desired_hash,omitempty"`
+	AppliedHash          string          `json:"applied_hash,omitempty"`
+	LastSeenAt           int64           `json:"last_seen_at,omitempty"`
+	AgentVersion         string          `json:"agent_version,omitempty"`
+	Platform             string          `json:"platform,omitempty"`
+	EvaluatedAt          string          `json:"evaluated_at,omitempty"`
+	EvaluatedEnforcement string          `json:"evaluated_enforcement,omitempty"`
+	Diff                 json.RawMessage `json:"diff,omitempty"`
 }
 
 // DeveloperMDMDeviceComplianceResponse wraps compliance rows for one device.
@@ -255,7 +313,7 @@ func (c *APIClient) DeleteDeveloperMDMProfile(ctx context.Context, profileID str
 // ExportDeveloperMDMProfile fetches the compiled MDM artifact for a profile.
 // The HTTP response encodes the artifact body as a JSON string; json.Unmarshal
 // decodes it so DeveloperMDMExportArtifact.Content holds the real file body.
-func (c *APIClient) ExportDeveloperMDMProfile(ctx context.Context, profileID, os, category, target string) (*DeveloperMDMExportArtifact, error) {
+func (c *APIClient) ExportDeveloperMDMProfile(ctx context.Context, profileID, os, category, target, format string) (*DeveloperMDMExportArtifact, error) {
 	uri := c.developerMDMPath("/profiles/%s/export", url.PathEscape(profileID))
 	query := url.Values{}
 	query.Set("os", os)
@@ -264,6 +322,9 @@ func (c *APIClient) ExportDeveloperMDMProfile(ctx context.Context, profileID, os
 	}
 	if target != "" {
 		query.Set("target", target)
+	}
+	if format != "" {
+		query.Set("format", format)
 	}
 	uri += "?" + query.Encode()
 

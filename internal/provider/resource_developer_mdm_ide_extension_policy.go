@@ -4,8 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net/url"
 	"regexp"
 	"sort"
+	"strings"
 
 	"github.com/hashicorp/terraform-plugin-framework-validators/stringvalidator"
 	"github.com/hashicorp/terraform-plugin-framework/attr"
@@ -54,26 +56,74 @@ type developerMDMIDEExtensionPolicyResource struct {
 
 // developerMDMIDEExtensionPolicyModel maps the resource schema data.
 type developerMDMIDEExtensionPolicyModel struct {
-	ID          types.String                        `tfsdk:"id"`
-	PolicyID    types.String                        `tfsdk:"policy_id"`
-	Name        types.String                        `tfsdk:"name"`
-	Description types.String                        `tfsdk:"description"`
-	Target      types.String                        `tfsdk:"target"`
-	Mode        types.String                        `tfsdk:"mode"`
-	Rules       []developerMDMIDEExtensionRuleModel `tfsdk:"rules"`
-	CreatedBy   types.String                        `tfsdk:"created_by"`
-	CreatedAt   types.String                        `tfsdk:"created_at"`
-	UpdatedBy   types.String                        `tfsdk:"updated_by"`
-	UpdatedAt   types.String                        `tfsdk:"updated_at"`
+	ID          types.String `tfsdk:"id"`
+	PolicyID    types.String `tfsdk:"policy_id"`
+	Name        types.String `tfsdk:"name"`
+	Description types.String `tfsdk:"description"`
+	Target      types.String `tfsdk:"target"`
+	Mode        types.String `tfsdk:"mode"`
+	// Rules is a framework list rather than a Go slice so the whole list can be unknown.
+	// A slice cannot represent that state, and a config sourcing rules from an unresolved
+	// expression (a local, a module output, another resource's computed attribute) arrives
+	// with the entire list unknown on the first plan.
+	Rules             types.List   `tfsdk:"rules"`
+	GalleryServiceURL types.String `tfsdk:"gallery_service_url"`
+	CreatedBy         types.String `tfsdk:"created_by"`
+	CreatedAt         types.String `tfsdk:"created_at"`
+	UpdatedBy         types.String `tfsdk:"updated_by"`
+	UpdatedAt         types.String `tfsdk:"updated_at"`
 }
 
-// developerMDMIDEExtensionRuleModel maps a single allow/block rule.
+// developerMDMIDEExtensionRuleModel maps a single allow/block rule. It is the decoded
+// representation of one known element of the rules list; its framework value types still
+// carry attribute-level unknowns.
 type developerMDMIDEExtensionRuleModel struct {
 	Publisher types.String `tfsdk:"publisher"`
 	Name      types.String `tfsdk:"name"`
 	Versions  types.Set    `tfsdk:"versions"`
 	Stable    types.Bool   `tfsdk:"stable"`
 	Comment   types.String `tfsdk:"comment"`
+}
+
+// developerMDMIDEExtensionRuleObjectType is the element type of the rules list. It must
+// stay in lockstep with the nested schema object above.
+func developerMDMIDEExtensionRuleObjectType() types.ObjectType {
+	return types.ObjectType{
+		AttrTypes: map[string]attr.Type{
+			"publisher": types.StringType,
+			"name":      types.StringType,
+			"versions":  types.SetType{ElemType: types.StringType},
+			"stable":    types.BoolType,
+			"comment":   types.StringType,
+		},
+	}
+}
+
+// decodeDeveloperMDMIDEExtensionRules decodes the rules list into rule models. The bool
+// reports whether the list and its elements are structurally known; false means the caller
+// must defer anything that needs the rules rather than treat them as an empty list.
+// Unknown fields *inside* a known element still decode: those are deferred individually.
+func decodeDeveloperMDMIDEExtensionRules(ctx context.Context, value types.List) ([]developerMDMIDEExtensionRuleModel, bool, diag.Diagnostics) {
+	// rules is required, so a real config never sends null; schema validation rejects that.
+	// Treating it as not-known here just keeps an unsafe conversion from being attempted.
+	if value.IsNull() || value.IsUnknown() {
+		return nil, false, nil
+	}
+
+	// A known list can still hold an entirely unknown object, which has no attributes to
+	// decode into the struct. ElementsAs would fail on it, so check before calling it.
+	for _, element := range value.Elements() {
+		if element.IsUnknown() {
+			return nil, false, nil
+		}
+	}
+
+	var rules []developerMDMIDEExtensionRuleModel
+	diags := value.ElementsAs(ctx, &rules, false)
+	if diags.HasError() {
+		return nil, false, diags
+	}
+	return rules, true, diags
 }
 
 // Metadata returns the resource type name.
@@ -86,7 +136,8 @@ func (r *developerMDMIDEExtensionPolicyResource) Schema(_ context.Context, _ res
 	resp.Schema = schema.Schema{
 		MarkdownDescription: "Manages a Developer MDM VS Code extension policy in StepSecurity. " +
 			"The policy declares allow/block intent for VS Code extensions; StepSecurity compiles and enforces it on managed devices. " +
-			"An empty `allowlist` blocks every extension and an empty `blocklist` allows every extension, so set `rules` deliberately.",
+			"An empty `allowlist` blocks every extension and an empty `blocklist` allows every extension, so set `rules` deliberately. " +
+			"The policy can also point VS Code at a private extension marketplace instead of the public one; see `gallery_service_url`.",
 		Attributes: map[string]schema.Attribute{
 			"id": schema.StringAttribute{
 				Computed:            true,
@@ -175,6 +226,19 @@ func (r *developerMDMIDEExtensionPolicyResource) Schema(_ context.Context, _ res
 							},
 						},
 					},
+				},
+			},
+			"gallery_service_url": schema.StringAttribute{
+				Optional: true,
+				MarkdownDescription: "Optional private VS Code extension marketplace. Sets VS Code's " +
+					"`ExtensionGalleryServiceUrl` on managed devices so extension browsing and " +
+					"installation resolve against your own gallery instead of the public marketplace. " +
+					"Must be an absolute `https` URL with no credentials and no fragment. " +
+					"Independent of `mode`: valid on both an allowlist and a blocklist. " +
+					"Omit to leave the device on the public marketplace.",
+				Validators: []validator.String{
+					stringvalidator.LengthAtLeast(1),
+					stringvalidator.LengthAtMost(stepsecurityapi.DeveloperMDMMaxGalleryServiceURLLen),
 				},
 			},
 			"created_by": schema.StringAttribute{
@@ -348,13 +412,29 @@ func (r *developerMDMIDEExtensionPolicyResource) ImportState(ctx context.Context
 func validateDeveloperMDMIDEExtensionPolicy(ctx context.Context, model developerMDMIDEExtensionPolicyModel) diag.Diagnostics {
 	var diags diag.Diagnostics
 
+	if !model.GalleryServiceURL.IsNull() && !model.GalleryServiceURL.IsUnknown() {
+		if summary, detail := validateGalleryServiceURL(model.GalleryServiceURL.ValueString()); summary != "" {
+			diags.AddAttributeError(path.Root("gallery_service_url"), summary, detail)
+		}
+	}
+
+	// Rule-level and cross-rule checks need the rules themselves. When the list is not yet
+	// known there is nothing to check: defer rather than read it as an empty list, which
+	// would invent duplicate-rule and missing-name diagnostics from values Terraform has
+	// not resolved. Create and update re-validate once it is known.
+	rules, rulesKnown, ruleDiags := decodeDeveloperMDMIDEExtensionRules(ctx, model.Rules)
+	diags.Append(ruleDiags...)
+	if diags.HasError() || !rulesKnown {
+		return diags
+	}
+
 	isBlocklist := model.Mode.ValueString() == stepsecurityapi.DeveloperMDMModeBlocklist
 
 	// Track compiled key (publisher + name) to reject mixing stable and explicit versions.
 	type keyState struct{ stable, versions bool }
 	states := map[string]*keyState{}
 
-	for idx, rule := range model.Rules {
+	for idx, rule := range rules {
 		rulePath := path.Root("rules").AtListIndex(idx)
 
 		publisher := rule.Publisher.ValueString()
@@ -469,10 +549,71 @@ func validateDeveloperMDMIDEExtensionPolicy(ctx context.Context, model developer
 	return diags
 }
 
+// validateGalleryServiceURL mirrors the backend's URL rules so a bad value fails at plan
+// time instead of as an opaque 400. An empty summary means the value is acceptable.
+func validateGalleryServiceURL(raw string) (summary, detail string) {
+	if len(raw) > stepsecurityapi.DeveloperMDMMaxGalleryServiceURLLen {
+		return "Marketplace URL too long", fmt.Sprintf(
+			"`gallery_service_url` must be at most %d characters.",
+			stepsecurityapi.DeveloperMDMMaxGalleryServiceURLLen)
+	}
+	if raw != strings.TrimSpace(raw) {
+		return "Marketplace URL has surrounding whitespace",
+			"`gallery_service_url` must not have leading or trailing whitespace."
+	}
+	for _, r := range raw {
+		if r < 0x20 || r == 0x7f {
+			return "Marketplace URL contains control characters",
+				"`gallery_service_url` must not contain control characters."
+		}
+	}
+	u, err := url.Parse(raw)
+	if err != nil {
+		return "Invalid marketplace URL",
+			fmt.Sprintf("`gallery_service_url` is not a valid URL: %s", err.Error())
+	}
+	if !strings.EqualFold(u.Scheme, "https") {
+		return "Marketplace URL must use https",
+			"`gallery_service_url` must use the `https` scheme."
+	}
+	if u.Host == "" {
+		return "Marketplace URL has no host",
+			"`gallery_service_url` must include a host."
+	}
+	if u.User != nil {
+		return "Marketplace URL contains credentials",
+			"`gallery_service_url` must not contain userinfo (credentials). " +
+				"Configure gallery authentication on the device, not in the policy."
+	}
+	if u.Fragment != "" || strings.Contains(raw, "#") {
+		return "Marketplace URL contains a fragment",
+			"`gallery_service_url` must not contain a `#` fragment."
+	}
+	return "", ""
+}
+
 // buildDeveloperMDMIDEExtensionPolicyRequest converts the model into an API request body.
 func buildDeveloperMDMIDEExtensionPolicyRequest(ctx context.Context, model developerMDMIDEExtensionPolicyModel, diags *diag.Diagnostics) stepsecurityapi.DeveloperMDMPolicyRequest {
-	rules := make([]stepsecurityapi.DeveloperMDMIDEExtensionRule, 0, len(model.Rules))
-	for _, r := range model.Rules {
+	ruleModels, rulesKnown, ruleDiags := decodeDeveloperMDMIDEExtensionRules(ctx, model.Rules)
+	diags.Append(ruleDiags...)
+	if diags.HasError() {
+		return stepsecurityapi.DeveloperMDMPolicyRequest{}
+	}
+	// Terraform resolves a required attribute before create or update, so this is a guard
+	// rather than a reachable path today. It exists so a future lifecycle change surfaces as
+	// an explicit error instead of silently shipping an empty rule list to the backend --
+	// which on an allowlist would block every extension.
+	if !rulesKnown {
+		diags.AddAttributeError(
+			path.Root("rules"),
+			"Rules are not fully known",
+			"`rules` must be fully known before the IDE extension policy can be created or updated.",
+		)
+		return stepsecurityapi.DeveloperMDMPolicyRequest{}
+	}
+
+	rules := make([]stepsecurityapi.DeveloperMDMIDEExtensionRule, 0, len(ruleModels))
+	for _, r := range ruleModels {
 		rule := stepsecurityapi.DeveloperMDMIDEExtensionRule{
 			Publisher: r.Publisher.ValueString(),
 			Name:      r.Name.ValueString(),
@@ -483,7 +624,10 @@ func buildDeveloperMDMIDEExtensionPolicyRequest(ctx context.Context, model devel
 		rules = append(rules, rule)
 	}
 
-	spec := stepsecurityapi.DeveloperMDMIDEExtensionSpec{Rules: rules}
+	spec := stepsecurityapi.DeveloperMDMIDEExtensionSpec{
+		Rules:             rules,
+		GalleryServiceURL: model.GalleryServiceURL.ValueString(),
+	}
 	specJSON, err := json.Marshal(spec)
 	if err != nil {
 		diags.AddError("Failed to encode policy spec", err.Error())
@@ -560,6 +704,12 @@ func applyDeveloperMDMPolicyToModel(ctx context.Context, policy *stepsecurityapi
 		}
 	}
 
+	if spec.GalleryServiceURL != "" {
+		model.GalleryServiceURL = types.StringValue(spec.GalleryServiceURL)
+	} else {
+		model.GalleryServiceURL = types.StringNull()
+	}
+
 	rules := make([]developerMDMIDEExtensionRuleModel, 0, len(spec.Rules))
 	for _, r := range spec.Rules {
 		rule := developerMDMIDEExtensionRuleModel{
@@ -589,5 +739,14 @@ func applyDeveloperMDMPolicyToModel(ctx context.Context, policy *stepsecurityapi
 		}
 		rules = append(rules, rule)
 	}
-	model.Rules = rules
+
+	// A policy with no rules must read back as a known empty list, never null: an empty
+	// allowlist blocks every extension and an empty blocklist allows every extension, so the
+	// distinction is meaningful. `rules` is non-nil above, which is what keeps it known.
+	rulesValue, rulesDiags := types.ListValueFrom(ctx, developerMDMIDEExtensionRuleObjectType(), rules)
+	diags.Append(rulesDiags...)
+	if diags.HasError() {
+		return
+	}
+	model.Rules = rulesValue
 }

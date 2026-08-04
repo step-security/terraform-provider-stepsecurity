@@ -3,12 +3,12 @@
 page_title: "stepsecurity_developer_mdm_profile Resource - stepsecurity"
 subcategory: ""
 description: |-
-  Manages a Developer MDM profile in StepSecurity. A profile bundles one or more Developer MDM policies and optionally assigns them to devices. The backend allows at most one policy per category/target per profile.
+  Manages a Developer MDM profile in StepSecurity. A profile bundles one or more Developer MDM policies and optionally assigns them to devices. The backend allows at most one policy per category/target per profile. Every policy in the profile shares the one enforcement channel: either the StepSecurity agent writes the managed configuration for all of them (dmg), or it writes none of them and only verifies what your own MDM delivered (mdm).
 ---
 
 # stepsecurity_developer_mdm_profile (Resource)
 
-Manages a Developer MDM profile in StepSecurity. A profile bundles one or more Developer MDM policies and optionally assigns them to devices. The backend allows at most one policy per category/target per profile.
+Manages a Developer MDM profile in StepSecurity. A profile bundles one or more Developer MDM policies and optionally assigns them to devices. The backend allows at most one policy per category/target per profile. Every policy in the profile shares the one `enforcement` channel: either the StepSecurity agent writes the managed configuration for all of them (`dmg`), or it writes none of them and only verifies what your own MDM delivered (`mdm`).
 
 ## Example Usage
 
@@ -40,6 +40,10 @@ resource "stepsecurity_developer_mdm_profile" "engineering" {
   name        = "Engineering"
   description = "Approved IDE extensions for engineering"
 
+  # "dmg" lets the StepSecurity agent write the managed configuration; "mdm" is verify-only,
+  # for fleets whose own MDM delivers it. Applies to every policy in the profile.
+  enforcement = "dmg"
+
   policy_ids = [
     stepsecurity_developer_mdm_ide_extension_policy.engineering_vscode.policy_id,
   ]
@@ -55,6 +59,7 @@ resource "stepsecurity_developer_mdm_profile" "engineering" {
 
 ### Required
 
+- `enforcement` (String) On-device enforcement channel for every policy in this profile. `dmg`: the StepSecurity agent writes the managed configuration itself. `mdm`: verify only — the agent never writes, and instead reports the configuration your own MDM (Jamf, Intune, Iru, …) delivered, so StepSecurity can report drift against the policy. Use `mdm` together with the `stepsecurity_developer_mdm_profile_export` data source.
 - `name` (String) The name of the profile.
 - `policy_ids` (Set of String) Set of Developer MDM policy IDs bundled by this profile. Must contain at least one ID. The backend allows at most one policy per category/target.
 

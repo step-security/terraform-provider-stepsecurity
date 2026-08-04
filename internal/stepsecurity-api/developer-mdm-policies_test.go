@@ -131,6 +131,7 @@ func TestDeveloperMDMPolicyClient_ProfileCRUD(t *testing.T) {
 	t.Parallel()
 
 	var createBody map[string]any
+	var updateBody map[string]any
 	var methods []string
 	var paths []string
 
@@ -150,8 +151,9 @@ func TestDeveloperMDMPolicyClient_ProfileCRUD(t *testing.T) {
 			//nolint:errcheck
 			w.Write([]byte(`{"profile_id":"prof1","name":"eng","policy_ids":["p1"],"assignment":{"all_devices":true}}`))
 		case r.Method == http.MethodPut:
+			require.NoError(t, json.NewDecoder(r.Body).Decode(&updateBody))
 			//nolint:errcheck
-			w.Write([]byte(`{"profile_id":"prof1","name":"eng2","policy_ids":["p1"],"assignment":{"all_devices":false,"device_ids":["d1"]}}`))
+			w.Write([]byte(`{"profile_id":"prof1","name":"eng2","policy_ids":["p1"],"enforcement":"mdm","assignment":{"all_devices":false,"device_ids":["d1"]}}`))
 		case r.Method == http.MethodDelete:
 			w.WriteHeader(http.StatusNoContent)
 		}
@@ -162,14 +164,16 @@ func TestDeveloperMDMPolicyClient_ProfileCRUD(t *testing.T) {
 	ctx := context.Background()
 
 	created, err := c.CreateDeveloperMDMProfile(ctx, DeveloperMDMProfileRequest{
-		Name:       "eng",
-		PolicyIDs:  []string{"p1"},
-		Assignment: DeveloperMDMAssignment{AllDevices: true},
+		Name:        "eng",
+		PolicyIDs:   []string{"p1"},
+		Enforcement: DeveloperMDMEnforcementDMG,
+		Assignment:  DeveloperMDMAssignment{AllDevices: true},
 	})
 	require.NoError(t, err)
 	assert.Equal(t, "prof1", created.ProfileID)
 	assert.True(t, created.Assignment.AllDevices)
 	assert.Equal(t, []any{"p1"}, createBody["policy_ids"])
+	assert.Equal(t, "dmg", createBody["enforcement"])
 
 	list, err := c.ListDeveloperMDMProfiles(ctx)
 	require.NoError(t, err)
@@ -182,17 +186,43 @@ func TestDeveloperMDMPolicyClient_ProfileCRUD(t *testing.T) {
 	assert.Equal(t, []string{"p1"}, got.PolicyIDs)
 
 	updated, err := c.UpdateDeveloperMDMProfile(ctx, "prof1", DeveloperMDMProfileRequest{
-		Name:       "eng2",
-		PolicyIDs:  []string{"p1"},
-		Assignment: DeveloperMDMAssignment{DeviceIDs: []string{"d1"}},
+		Name:        "eng2",
+		PolicyIDs:   []string{"p1"},
+		Enforcement: DeveloperMDMEnforcementMDM,
+		Assignment:  DeveloperMDMAssignment{DeviceIDs: []string{"d1"}},
 	})
 	require.NoError(t, err)
 	assert.Equal(t, []string{"d1"}, updated.Assignment.DeviceIDs)
+	assert.Equal(t, "mdm", updateBody["enforcement"], "a channel switch must reach the update request")
+	assert.Equal(t, "mdm", updated.Enforcement)
 
 	require.NoError(t, c.DeleteDeveloperMDMProfile(ctx, "prof1"))
 
 	assert.Contains(t, paths, "/v1/test-customer/developer-mdm/profiles")
 	assert.Contains(t, paths, "/v1/test-customer/developer-mdm/profiles/prof1")
+}
+
+func TestDeveloperMDMPolicyClient_ProfileEnforcementAlwaysSent(t *testing.T) {
+	t.Parallel()
+
+	var body map[string]any
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		require.NoError(t, json.NewDecoder(r.Body).Decode(&body))
+		//nolint:errcheck
+		w.Write([]byte(`{"profile_id":"prof1","name":"eng","policy_ids":["p1"],"assignment":{"all_devices":true}}`))
+	}))
+	defer server.Close()
+
+	_, err := newTestClient(server).CreateDeveloperMDMProfile(context.Background(), DeveloperMDMProfileRequest{
+		Name:       "eng",
+		PolicyIDs:  []string{"p1"},
+		Assignment: DeveloperMDMAssignment{AllDevices: true},
+	})
+	require.NoError(t, err)
+
+	require.Contains(t, body, "enforcement", "an unset channel must still be sent so the backend's 400 surfaces")
+	assert.Equal(t, "", body["enforcement"])
 }
 
 func TestDeveloperMDMPolicyClient_ExportProfile(t *testing.T) {
@@ -212,13 +242,14 @@ func TestDeveloperMDMPolicyClient_ExportProfile(t *testing.T) {
 	defer server.Close()
 
 	c := newTestClient(server)
-	got, err := c.ExportDeveloperMDMProfile(context.Background(), "prof1", "linux", DeveloperMDMCategoryIDEExtension, DeveloperMDMTargetVSCode)
+	got, err := c.ExportDeveloperMDMProfile(context.Background(), "prof1", "linux", DeveloperMDMCategoryIDEExtension, DeveloperMDMTargetVSCode, "")
 	require.NoError(t, err)
 
 	assert.Equal(t, "/v1/test-customer/developer-mdm/profiles/prof1/export", gotPath)
 	assert.Equal(t, []string{"linux"}, gotQuery["os"])
 	assert.Equal(t, []string{"ide_extension"}, gotQuery["category"])
 	assert.Equal(t, []string{"vscode"}, gotQuery["target"])
+	assert.NotContains(t, gotQuery, "format", "an empty format must not reach the query string")
 
 	assert.Equal(t, "policy.json", got.Filename)
 	assert.Equal(t, "vscode", got.Target)
@@ -227,6 +258,29 @@ func TestDeveloperMDMPolicyClient_ExportProfile(t *testing.T) {
 	assert.Contains(t, got.Content, "\n")
 	assert.Contains(t, got.Content, `"AllowedExtensions"`)
 	assert.NotContains(t, got.Content, `\n`)
+}
+
+func TestDeveloperMDMPolicyClient_ExportProfileFormat(t *testing.T) {
+	t.Parallel()
+
+	var gotQuery map[string][]string
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotQuery = r.URL.Query()
+		//nolint:errcheck
+		w.Write([]byte(`{"os":"macos","os_display_name":"macOS","category":"ide_extension","target":"vscode","format":"plist","filename":"com.microsoft.VSCode.plist","content_type":"application/xml","content":"<plist/>","hash":"sha256:abc","preference_domain":"com.microsoft.VSCode"}`))
+	}))
+	defer server.Close()
+
+	c := newTestClient(server)
+	got, err := c.ExportDeveloperMDMProfile(context.Background(), "prof1", "macos", DeveloperMDMCategoryIDEExtension, DeveloperMDMTargetVSCode, DeveloperMDMExportFormatPlist)
+	require.NoError(t, err)
+
+	assert.Equal(t, []string{"plist"}, gotQuery["format"])
+
+	assert.Equal(t, "macOS", got.OSDisplayName)
+	assert.Equal(t, "plist", got.Format)
+	assert.Equal(t, "com.microsoft.VSCode", got.PreferenceDomain)
 }
 
 func TestDeveloperMDMPolicyClient_Compliance(t *testing.T) {
