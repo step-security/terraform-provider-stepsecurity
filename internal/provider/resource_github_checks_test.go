@@ -88,6 +88,36 @@ func mustChecksConfigObject(cfg *checksConfig) types.Object {
 	return encodeChecksConfig(context.Background(), cfg)
 }
 
+// mustValidateConfigRequest builds the ValidateConfigRequest for a githubChecksModel so tests can
+// exercise the real ValidateConfig rather than a copy of its logic. Test cases leave attributes
+// they don't care about as the Go zero value; those carry no element/attribute type, which the
+// framework's strict type check rejects, so they are normalized to typed nulls here.
+func mustValidateConfigRequest(t *testing.T, ctx context.Context, r *githubChecksResource, model githubChecksModel) resource.ValidateConfigRequest {
+	t.Helper()
+
+	schemaResp := &resource.SchemaResponse{}
+	r.Schema(ctx, resource.SchemaRequest{}, schemaResp)
+	if schemaResp.Diagnostics.HasError() {
+		t.Fatalf("unexpected schema diagnostics: %v", schemaResp.Diagnostics)
+	}
+
+	if model.Controls.IsNull() && model.Controls.ElementType(ctx) == nil {
+		model.Controls = types.ListNull(controlObjectType())
+	}
+	for _, obj := range []*types.Object{&model.RequiredChecks, &model.OptionalChecks, &model.BaselineCheck} {
+		if obj.IsNull() && len(obj.AttributeTypes(ctx)) == 0 {
+			*obj = types.ObjectNull(checksConfigAttrTypes())
+		}
+	}
+
+	plan := tfsdk.Plan{Schema: schemaResp.Schema}
+	if diags := plan.Set(ctx, model); diags.HasError() {
+		t.Fatalf("unexpected diagnostics building config: %v", diags)
+	}
+
+	return resource.ValidateConfigRequest{Config: tfsdk.Config{Raw: plan.Raw, Schema: schemaResp.Schema}}
+}
+
 // checksConfigFromObject decodes a required_checks/optional_checks/baseline_check types.Object
 // back into a *checksConfig for assertions.
 func checksConfigFromObject(obj types.Object) *checksConfig {
@@ -556,91 +586,114 @@ func TestGithubChecksResource_ValidateConfig(t *testing.T) {
 			expectedError: true,
 			errorContains: "can't provide settings",
 		},
+		{
+			name: "valid_nuget_cooldown",
+			config: githubChecksModel{
+				Owner: types.StringValue(testOwner),
+				Controls: mustControlsList([]control{
+					{
+						Control:  types.StringValue("NuGet Package Cooldown"),
+						Enable:   types.BoolValue(true),
+						Type:     types.StringValue("required"),
+						Settings: createSettingsObject(func() *int64 { v := int64(3); return &v }(), []string{"MyCompany.Internal.Lib"}),
+					},
+				}),
+				RequiredChecks: mustChecksConfigObject(&checksConfig{
+					Repos: func() types.List {
+						elements := []attr.Value{types.StringValue("*")}
+						list, _ := types.ListValue(types.StringType, elements)
+						return list
+					}(),
+				}),
+			},
+			expectedError: false,
+		},
+		{
+			name: "valid_nuget_compromised_updates",
+			config: githubChecksModel{
+				Owner: types.StringValue(testOwner),
+				Controls: mustControlsList([]control{
+					{
+						Control:  types.StringValue("NuGet Package Compromised Updates"),
+						Enable:   types.BoolValue(true),
+						Type:     types.StringValue("required"),
+						Settings: createNullSettingsObject(),
+					},
+				}),
+				RequiredChecks: mustChecksConfigObject(&checksConfig{
+					Repos: func() types.List {
+						elements := []attr.Value{types.StringValue("*")}
+						list, _ := types.ListValue(types.StringType, elements)
+						return list
+					}(),
+				}),
+			},
+			expectedError: false,
+		},
+		{
+			name: "nuget_cooldown_period_out_of_range",
+			config: githubChecksModel{
+				Owner: types.StringValue(testOwner),
+				Controls: mustControlsList([]control{
+					{
+						Control:  types.StringValue("NuGet Package Cooldown"),
+						Enable:   types.BoolValue(true),
+						Type:     types.StringValue("required"),
+						Settings: createSettingsObject(func() *int64 { v := int64(50); return &v }(), nil),
+					},
+				}),
+			},
+			expectedError: true,
+			errorContains: "cool_down_period should be between 1 and 30",
+		},
+		{
+			name: "settings_provided_for_nuget_compromised_updates",
+			config: githubChecksModel{
+				Owner: types.StringValue(testOwner),
+				Controls: mustControlsList([]control{
+					{
+						Control:  types.StringValue("NuGet Package Compromised Updates"),
+						Enable:   types.BoolValue(true),
+						Type:     types.StringValue("required"),
+						Settings: createSettingsObject(func() *int64 { v := int64(3); return &v }(), nil),
+					},
+				}),
+			},
+			expectedError: true,
+			errorContains: "can't provide settings",
+		},
 	}
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 
-			// We can't easily mock the Config.Get() method, so we'll test the validation logic directly
-			// This is a common pattern in Terraform provider unit tests
-			mockResp := &resource.ValidateConfigResponse{}
+			ctx := context.Background()
+			r := &githubChecksResource{}
 
-			// Simulate the validation logic that would be called
-			if tc.config.Owner.ValueString() == "" {
-				mockResp.Diagnostics.AddError(
-					"Owner is required",
-					"Owner is required to create a GitHub Checks resource",
-				)
-			}
-
-			configControls := controlsListToSlice(tc.config.Controls)
-
-			if len(configControls) == 0 {
-				mockResp.Diagnostics.AddError(
-					"Controls are required",
-					"Controls are required to create a GitHub Checks resource",
-				)
-			}
-
-			for _, control := range configControls {
-				if _, ok := stepsecurityapi.AvailableControls[control.Control.ValueString()]; !ok {
-					mockResp.Diagnostics.AddError(
-						"Invalid control provided",
-						"only the following controls are accepted to configure: "+strings.Join(stepsecurityapi.GetAvailableControls(), ", \n"),
-					)
-				}
-
-				if control.Type.ValueString() != "required" && control.Type.ValueString() != "optional" {
-					mockResp.Diagnostics.AddError(
-						"Type can only be 'required' or 'optional'",
-						"Type can only be 'required' or 'optional'",
-					)
-				}
-
-				isCooldownControl := control.Control.ValueString() == "NPM Package Cooldown" ||
-					control.Control.ValueString() == "PyPI Package Cooldown"
-				if !isCooldownControl && !control.Settings.IsNull() && !control.Settings.IsUnknown() {
-					mockResp.Diagnostics.AddError(
-						"can't provide settings",
-						"can't provide settings for control "+control.Control.ValueString(),
-					)
-				}
-				if isCooldownControl && !control.Settings.IsNull() {
-					if cooldownAttr := control.Settings.Attributes()["cool_down_period"]; cooldownAttr != nil {
-						if cooldownValue, ok := cooldownAttr.(types.Int64); ok {
-							period := cooldownValue.ValueInt64()
-							if period != 0 && (period < 1 || period > 30) {
-								mockResp.Diagnostics.AddError(
-									"cool_down_period should be between 1 and 30",
-									"cool_down_period should be between 1 and 30 for control "+control.Control.ValueString(),
-								)
-							}
-						}
-					}
-				}
-			}
+			resp := &resource.ValidateConfigResponse{}
+			r.ValidateConfig(ctx, mustValidateConfigRequest(t, ctx, r, tc.config), resp)
 
 			if tc.expectedError {
-				if !mockResp.Diagnostics.HasError() {
+				if !resp.Diagnostics.HasError() {
 					t.Error("Expected error but got none")
 				}
 
 				if tc.errorContains != "" {
 					found := false
-					for _, diag := range mockResp.Diagnostics.Errors() {
+					for _, diag := range resp.Diagnostics.Errors() {
 						if strings.Contains(diag.Summary(), tc.errorContains) || strings.Contains(diag.Detail(), tc.errorContains) {
 							found = true
 							break
 						}
 					}
 					if !found {
-						t.Errorf("Expected error to contain '%s', but got: %v", tc.errorContains, mockResp.Diagnostics)
+						t.Errorf("Expected error to contain '%s', but got: %v", tc.errorContains, resp.Diagnostics)
 					}
 				}
 			} else {
-				if mockResp.Diagnostics.HasError() {
-					t.Errorf("Expected no error but got: %v", mockResp.Diagnostics)
+				if resp.Diagnostics.HasError() {
+					t.Errorf("Expected no error but got: %v", resp.Diagnostics)
 				}
 			}
 		})
@@ -1031,6 +1084,57 @@ func TestGithubChecksResource_ConvertToCreateRequest(t *testing.T) {
 			expectError: false,
 		},
 		{
+			name: "nuget_cooldown_and_compromised_updates",
+			input: githubChecksModel{
+				Owner: types.StringValue("test-org"),
+				Controls: mustControlsList([]control{
+					{
+						Control:  types.StringValue("NuGet Package Cooldown"),
+						Enable:   types.BoolValue(true),
+						Type:     types.StringValue("required"),
+						Settings: createSettingsObject(func() *int64 { v := int64(3); return &v }(), []string{"MyCompany.Internal.Lib"}),
+					},
+					{
+						Control:  types.StringValue("NuGet Package Compromised Updates"),
+						Enable:   types.BoolValue(true),
+						Type:     types.StringValue("required"),
+						Settings: createNullSettingsObject(),
+					},
+				}),
+				RequiredChecks: mustChecksConfigObject(&checksConfig{
+					Repos: func() types.List {
+						elements := []attr.Value{types.StringValue("*")}
+						list, _ := types.ListValue(types.StringType, elements)
+						return list
+					}(),
+				}),
+			},
+			expected: stepsecurityapi.GitHubPRChecksConfig{
+				ChecksConfig: stepsecurityapi.ChecksConfig{
+					Checks: map[string]stepsecurityapi.CheckConfig{
+						"nuget_package_cooldown": {
+							Enabled: true,
+							Type:    "required",
+							Settings: map[string]any{
+								"cooldown_period_in_days": int64(3),
+								"exempted_packages":       []string{"MyCompany.Internal.Lib"},
+							},
+						},
+						"nuget_package_compromised_updates": {
+							Enabled:  true,
+							Type:     "required",
+							Settings: nil,
+						},
+					},
+					EnableRequiredChecksForAllNewRepos: func() *bool { b := true; return &b }(),
+					EnableOptionalChecksForAllNewRepos: func() *bool { b := false; return &b }(),
+					EnableBaselineCheckForAllNewRepos:  func() *bool { b := false; return &b }(),
+				},
+				Repos: map[string]stepsecurityapi.CheckOptions{},
+			},
+			expectError: false,
+		},
+		{
 			name: "omit_repos_configuration",
 			input: githubChecksModel{
 				Owner: types.StringValue("test-org"),
@@ -1383,6 +1487,64 @@ func TestGithubChecksResource_ConvertToState(t *testing.T) {
 						Enable:   types.BoolValue(true),
 						Type:     types.StringValue("required"),
 						Settings: createNullSettingsObject(),
+					},
+				}),
+				RequiredChecks: mustChecksConfigObject(&checksConfig{
+					Repos: func() types.List {
+						elements := []attr.Value{types.StringValue("*")}
+						list, _ := types.ListValue(types.StringType, elements)
+						return list
+					}(),
+					OmitRepos: types.ListNull(types.StringType),
+				}),
+				OptionalChecks: mustChecksConfigObject(nil),
+				BaselineCheck:  mustChecksConfigObject(nil),
+			},
+		},
+		{
+			// The API returns cooldown_period_in_days as a float64 after JSON decoding, so this
+			// case also covers the float64 branch in convertToState.
+			name:  "nuget_cooldown_and_compromised_updates",
+			owner: "test-org",
+			input: stepsecurityapi.GitHubPRChecksConfig{
+				ChecksConfig: stepsecurityapi.ChecksConfig{
+					Checks: map[string]stepsecurityapi.CheckConfig{
+						"nuget_package_cooldown": {
+							Enabled: true,
+							Type:    "required",
+							Settings: map[string]any{
+								"cooldown_period_in_days": float64(3),
+								"exempted_packages":       []any{"MyCompany.Internal.Lib"},
+							},
+						},
+						"nuget_package_compromised_updates": {
+							Enabled:  true,
+							Type:     "required",
+							Settings: map[string]any{},
+						},
+					},
+					EnableRequiredChecksForAllNewRepos: func() *bool { b := true; return &b }(),
+					EnableOptionalChecksForAllNewRepos: func() *bool { b := false; return &b }(),
+					EnableBaselineCheckForAllNewRepos:  func() *bool { b := false; return &b }(),
+				},
+				Repos: map[string]stepsecurityapi.CheckOptions{},
+			},
+			expected: githubChecksModel{
+				Owner: types.StringValue("test-org"),
+				// convertToState sorts controls by display name, so "Compromised Updates"
+				// sorts before "Cooldown".
+				Controls: mustControlsList([]control{
+					{
+						Control:  types.StringValue("NuGet Package Compromised Updates"),
+						Enable:   types.BoolValue(true),
+						Type:     types.StringValue("required"),
+						Settings: createNullSettingsObject(),
+					},
+					{
+						Control:  types.StringValue("NuGet Package Cooldown"),
+						Enable:   types.BoolValue(true),
+						Type:     types.StringValue("required"),
+						Settings: createSettingsObject(func() *int64 { v := int64(3); return &v }(), []string{"MyCompany.Internal.Lib"}),
 					},
 				}),
 				RequiredChecks: mustChecksConfigObject(&checksConfig{
