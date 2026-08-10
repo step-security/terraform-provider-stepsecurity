@@ -35,7 +35,7 @@ func TestSecureRegistryPolicyResource_Schema(t *testing.T) {
 	assert.False(t, schemaResp.Diagnostics.HasError(), "Schema() returned errors: %v", schemaResp.Diagnostics)
 
 	attrs := schemaResp.Schema.Attributes
-	for _, required := range []string{"registry", "cooldown_control", "compromised_packages_control", "custom_block_list_control", "npm_settings"} {
+	for _, required := range []string{"registry", "cooldown_control", "compromised_packages_control", "typosquatting_control", "custom_block_list_control", "npm_settings"} {
 		assert.Contains(t, attrs, required, "expected attribute %q in schema", required)
 	}
 }
@@ -168,6 +168,129 @@ func TestSecureRegistryPolicyResource_buildUpsertRequest_DisablesRemovedCustomBl
 	assert.Equal(t, []string{}, req.CustomBlockList.Patterns)
 	assert.NotNil(t, req.NpmSettings)
 	assert.False(t, req.NpmSettings.RewriteTarballURLs)
+}
+
+// TestSecureRegistryPolicyResource_buildUpsertRequest_Typosquatting verifies the request
+// builder includes the typosquatting control when present in the plan.
+func TestSecureRegistryPolicyResource_buildUpsertRequest_Typosquatting(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	r := &secureRegistryPolicyResource{}
+
+	typosquattingObj, typosquattingDiag := buildTestTyposquattingObject(ctx, true, []string{"reactt", "lodashh"})
+	assert.False(t, typosquattingDiag.HasError())
+
+	plan := &secureRegistryPolicyResourceModel{
+		Registry:             types.StringValue("npm"),
+		TyposquattingControl: typosquattingObj,
+	}
+
+	var diags diag.Diagnostics
+	req := r.buildUpsertRequest(ctx, plan, nil, &diags)
+
+	assert.False(t, diags.HasError())
+	assert.NotNil(t, req.Typosquatting)
+	assert.True(t, req.Typosquatting.Enabled)
+	assert.ElementsMatch(t, []string{"reactt", "lodashh"}, req.Typosquatting.Whitelist)
+}
+
+// TestSecureRegistryPolicyResource_buildUpsertRequest_DisablesRemovedTyposquatting verifies that
+// removing typosquatting_control from plan (null) while state had it causes an explicit disable.
+func TestSecureRegistryPolicyResource_buildUpsertRequest_DisablesRemovedTyposquatting(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	r := &secureRegistryPolicyResource{}
+
+	prevTyposquattingObj, _ := buildTestTyposquattingObject(ctx, true, []string{"reactt"})
+	prevState := &secureRegistryPolicyResourceModel{
+		Registry:             types.StringValue("npm"),
+		TyposquattingControl: prevTyposquattingObj,
+	}
+
+	plan := &secureRegistryPolicyResourceModel{
+		Registry:             types.StringValue("npm"),
+		TyposquattingControl: types.ObjectNull(typosquattingControlAttrTypes),
+	}
+
+	var diags diag.Diagnostics
+	req := r.buildUpsertRequest(ctx, plan, prevState, &diags)
+
+	assert.False(t, diags.HasError())
+	assert.NotNil(t, req.Typosquatting)
+	assert.False(t, req.Typosquatting.Enabled)
+	assert.Equal(t, []string{}, req.Typosquatting.Whitelist)
+}
+
+// TestSecureRegistryPolicyResource_applyAPIResponse_TyposquattingDisabledNotInRefStaysNull verifies
+// that a disabled typosquatting control does not get populated in state when not tracked.
+func TestSecureRegistryPolicyResource_applyAPIResponse_TyposquattingDisabledNotInRefStaysNull(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	r := &secureRegistryPolicyResource{}
+
+	ref := &secureRegistryPolicyResourceModel{
+		TyposquattingControl: types.ObjectNull(typosquattingControlAttrTypes),
+	}
+
+	apiResponse := &stepsecurityapi.SecureRegistryControls{
+		Registry:  "npm",
+		UpdatedBy: "api",
+		UpdatedAt: "2024-01-01T00:00:00Z",
+		Typosquatting: &stepsecurityapi.TyposquattingControl{
+			Enabled: false,
+		},
+	}
+
+	model := &secureRegistryPolicyResourceModel{
+		TyposquattingControl: types.ObjectNull(typosquattingControlAttrTypes),
+	}
+
+	var diags diag.Diagnostics
+	r.applyAPIResponseToModel(ctx, ref, model, apiResponse, &diags)
+
+	assert.False(t, diags.HasError())
+	assert.True(t, model.TyposquattingControl.IsNull(), "disabled typosquatting should remain null when not tracked")
+}
+
+// TestSecureRegistryPolicyResource_applyAPIResponse_TyposquattingEnabledPopulatesState verifies
+// that an enabled typosquatting control is reflected in state.
+func TestSecureRegistryPolicyResource_applyAPIResponse_TyposquattingEnabledPopulatesState(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	r := &secureRegistryPolicyResource{}
+
+	ref := &secureRegistryPolicyResourceModel{
+		TyposquattingControl: types.ObjectNull(typosquattingControlAttrTypes),
+	}
+
+	apiResponse := &stepsecurityapi.SecureRegistryControls{
+		Registry:  "npm",
+		UpdatedBy: "api",
+		UpdatedAt: "2024-01-01T00:00:00Z",
+		Typosquatting: &stepsecurityapi.TyposquattingControl{
+			Enabled:   true,
+			Whitelist: []string{"reactt"},
+		},
+	}
+
+	model := &secureRegistryPolicyResourceModel{
+		TyposquattingControl: types.ObjectNull(typosquattingControlAttrTypes),
+	}
+
+	var diags diag.Diagnostics
+	r.applyAPIResponseToModel(ctx, ref, model, apiResponse, &diags)
+
+	assert.False(t, diags.HasError())
+	assert.False(t, model.TyposquattingControl.IsNull(), "enabled typosquatting should be in state")
+
+	var typosquatting typosquattingControlModel
+	diags = model.TyposquattingControl.As(ctx, &typosquatting, basetypes.ObjectAsOptions{})
+	assert.False(t, diags.HasError())
+	assert.True(t, typosquatting.Enabled.ValueBool())
 }
 
 // TestSecureRegistryPolicyResource_applyAPIResponse_CustomBlockListDisabledNotInRefStaysNull verifies
@@ -369,33 +492,91 @@ func TestSecureRegistryPolicyResource_applyAPIResponse_NpmSettingsNullForNonNpm(
 }
 
 // TestSecureRegistryPolicyResource_ValidateConfig_NpmSettings exercises the real ValidateConfig
-// method, asserting npm_settings is rejected for non-npm registries and allowed for npm.
+// method, asserting registry-gated controls (npm_settings, typosquatting_control,
+// custom_block_list_control on maven) are rejected for unsupported registries and allowed
+// where supported.
 func TestSecureRegistryPolicyResource_ValidateConfig_NpmSettings(t *testing.T) {
 	t.Parallel()
 
 	testCases := []struct {
-		name          string
-		registry      string
-		npmSettings   types.Object
-		expectedError bool
+		name                   string
+		registry               string
+		npmSettings            types.Object
+		typosquattingControl   types.Object
+		customBlockListControl types.Object
+		expectedError          bool
 	}{
 		{
-			name:          "npm_settings_allowed_for_npm",
-			registry:      "npm",
-			npmSettings:   mustBuildTestNpmSettingsObject(t, true),
-			expectedError: false,
+			name:                   "npm_settings_allowed_for_npm",
+			registry:               "npm",
+			npmSettings:            mustBuildTestNpmSettingsObject(t, true),
+			typosquattingControl:   types.ObjectNull(typosquattingControlAttrTypes),
+			customBlockListControl: types.ObjectNull(customBlockListControlAttrTypes),
+			expectedError:          false,
 		},
 		{
-			name:          "npm_settings_rejected_for_pypi",
-			registry:      "pypi",
-			npmSettings:   mustBuildTestNpmSettingsObject(t, true),
-			expectedError: true,
+			name:                   "npm_settings_rejected_for_pypi",
+			registry:               "pypi",
+			npmSettings:            mustBuildTestNpmSettingsObject(t, true),
+			typosquattingControl:   types.ObjectNull(typosquattingControlAttrTypes),
+			customBlockListControl: types.ObjectNull(customBlockListControlAttrTypes),
+			expectedError:          true,
 		},
 		{
-			name:          "npm_settings_absent_for_pypi",
-			registry:      "pypi",
-			npmSettings:   types.ObjectNull(npmSettingsAttrTypes),
-			expectedError: false,
+			name:                   "npm_settings_absent_for_pypi",
+			registry:               "pypi",
+			npmSettings:            types.ObjectNull(npmSettingsAttrTypes),
+			typosquattingControl:   types.ObjectNull(typosquattingControlAttrTypes),
+			customBlockListControl: types.ObjectNull(customBlockListControlAttrTypes),
+			expectedError:          false,
+		},
+		{
+			name:                   "typosquatting_control_allowed_for_npm",
+			registry:               "npm",
+			npmSettings:            types.ObjectNull(npmSettingsAttrTypes),
+			typosquattingControl:   mustBuildTestTyposquattingObject(t, true),
+			customBlockListControl: types.ObjectNull(customBlockListControlAttrTypes),
+			expectedError:          false,
+		},
+		{
+			name:                   "typosquatting_control_rejected_for_pypi",
+			registry:               "pypi",
+			npmSettings:            types.ObjectNull(npmSettingsAttrTypes),
+			typosquattingControl:   mustBuildTestTyposquattingObject(t, true),
+			customBlockListControl: types.ObjectNull(customBlockListControlAttrTypes),
+			expectedError:          true,
+		},
+		{
+			name:                   "typosquatting_control_rejected_for_maven",
+			registry:               "maven",
+			npmSettings:            types.ObjectNull(npmSettingsAttrTypes),
+			typosquattingControl:   mustBuildTestTyposquattingObject(t, true),
+			customBlockListControl: types.ObjectNull(customBlockListControlAttrTypes),
+			expectedError:          true,
+		},
+		{
+			name:                   "typosquatting_control_rejected_for_nuget",
+			registry:               "nuget",
+			npmSettings:            types.ObjectNull(npmSettingsAttrTypes),
+			typosquattingControl:   mustBuildTestTyposquattingObject(t, true),
+			customBlockListControl: types.ObjectNull(customBlockListControlAttrTypes),
+			expectedError:          true,
+		},
+		{
+			name:                   "custom_block_list_control_rejected_for_maven",
+			registry:               "maven",
+			npmSettings:            types.ObjectNull(npmSettingsAttrTypes),
+			typosquattingControl:   types.ObjectNull(typosquattingControlAttrTypes),
+			customBlockListControl: mustBuildTestCustomBlockListObject(t, true, []string{"left-pad"}),
+			expectedError:          true,
+		},
+		{
+			name:                   "custom_block_list_control_allowed_for_nuget",
+			registry:               "nuget",
+			npmSettings:            types.ObjectNull(npmSettingsAttrTypes),
+			typosquattingControl:   types.ObjectNull(typosquattingControlAttrTypes),
+			customBlockListControl: mustBuildTestCustomBlockListObject(t, true, []string{"left-pad"}),
+			expectedError:          false,
 		},
 	}
 
@@ -411,7 +592,8 @@ func TestSecureRegistryPolicyResource_ValidateConfig_NpmSettings(t *testing.T) {
 				Registry:                   types.StringValue(tc.registry),
 				CooldownControl:            types.ObjectNull(cooldownControlAttrTypes),
 				CompromisedPackagesControl: types.ObjectNull(compromisedPackagesControlAttrTypes),
-				CustomBlockListControl:     types.ObjectNull(customBlockListControlAttrTypes),
+				TyposquattingControl:       tc.typosquattingControl,
+				CustomBlockListControl:     tc.customBlockListControl,
 				NpmSettings:                tc.npmSettings,
 			}
 
@@ -425,6 +607,69 @@ func TestSecureRegistryPolicyResource_ValidateConfig_NpmSettings(t *testing.T) {
 			} else {
 				assert.False(t, resp.Diagnostics.HasError(), "unexpected diagnostics: %v", resp.Diagnostics)
 			}
+		})
+	}
+}
+
+// TestSecureRegistryPolicyResource_ValidateConfig_UnknownBlocksDeferValidation verifies that
+// ValidateConfig does not raise a false-positive error when a gated block's value is Unknown
+// (e.g. derived from a not-yet-computed reference) rather than concretely configured — Unknown
+// is distinct from Null and must not be treated as "the user set this block".
+func TestSecureRegistryPolicyResource_ValidateConfig_UnknownBlocksDeferValidation(t *testing.T) {
+	t.Parallel()
+
+	testCases := []struct {
+		name     string
+		registry string
+		model    func(m *secureRegistryPolicyResourceModel)
+	}{
+		{
+			name:     "unknown_npm_settings_on_pypi",
+			registry: "pypi",
+			model: func(m *secureRegistryPolicyResourceModel) {
+				m.NpmSettings = types.ObjectUnknown(npmSettingsAttrTypes)
+			},
+		},
+		{
+			name:     "unknown_typosquatting_control_on_pypi",
+			registry: "pypi",
+			model: func(m *secureRegistryPolicyResourceModel) {
+				m.TyposquattingControl = types.ObjectUnknown(typosquattingControlAttrTypes)
+			},
+		},
+		{
+			name:     "unknown_custom_block_list_control_on_maven",
+			registry: "maven",
+			model: func(m *secureRegistryPolicyResourceModel) {
+				m.CustomBlockListControl = types.ObjectUnknown(customBlockListControlAttrTypes)
+			},
+		},
+	}
+
+	for _, tc := range testCases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			ctx := context.Background()
+			r := &secureRegistryPolicyResource{}
+
+			model := secureRegistryPolicyResourceModel{
+				Registry:                   types.StringValue(tc.registry),
+				CooldownControl:            types.ObjectNull(cooldownControlAttrTypes),
+				CompromisedPackagesControl: types.ObjectNull(compromisedPackagesControlAttrTypes),
+				TyposquattingControl:       types.ObjectNull(typosquattingControlAttrTypes),
+				CustomBlockListControl:     types.ObjectNull(customBlockListControlAttrTypes),
+				NpmSettings:                types.ObjectNull(npmSettingsAttrTypes),
+			}
+			tc.model(&model)
+
+			config := testSecureRegistryPolicyConfig(t, model)
+			resp := &fwresource.ValidateConfigResponse{}
+
+			r.ValidateConfig(ctx, fwresource.ValidateConfigRequest{Config: config}, resp)
+
+			assert.False(t, resp.Diagnostics.HasError(), "unknown block should defer validation, got: %v", resp.Diagnostics)
 		})
 	}
 }
@@ -570,6 +815,62 @@ func TestSecureRegistryPolicyResource_MockUpsert(t *testing.T) {
 	mockClient.AssertExpectations(t)
 }
 
+// TestSecureRegistryPolicyResource_MockUpsert_Maven unit-tests Create flow for the maven
+// registry, which only supports cooldown_control and compromised_packages_control.
+func TestSecureRegistryPolicyResource_MockUpsert_Maven(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	mockClient := &stepsecurityapi.MockStepSecurityClient{}
+
+	expectedResult := &stepsecurityapi.SecureRegistryControls{
+		Customer:  "test-customer",
+		Registry:  "maven",
+		UpdatedBy: "test@example.com",
+		UpdatedAt: "2024-01-01T00:00:00Z",
+		CooldownPeriod: &stepsecurityapi.CooldownPeriodControl{
+			Enabled:      true,
+			PeriodInDays: 7,
+		},
+		CompromisedPackages: &stepsecurityapi.CompromisedPackagesControl{
+			Enabled: true,
+		},
+	}
+
+	mockClient.On("UpsertRegistryControls", ctx, "maven", mock.AnythingOfType("stepsecurityapi.UpsertSecureRegistryControlsRequest")).
+		Return(expectedResult, nil)
+
+	r := &secureRegistryPolicyResource{client: mockClient}
+
+	cooldownObj, _ := buildTestCooldownObject(ctx, true, 7, nil)
+	compPkgObj, _ := buildTestCompromisedPackagesObject(true)
+
+	plan := &secureRegistryPolicyResourceModel{
+		Registry:                   types.StringValue("maven"),
+		CooldownControl:            cooldownObj,
+		CompromisedPackagesControl: compPkgObj,
+	}
+
+	upsertReq := stepsecurityapi.UpsertSecureRegistryControlsRequest{
+		CooldownPeriod:      &stepsecurityapi.CooldownPeriodControl{Enabled: true, PeriodInDays: 7},
+		CompromisedPackages: &stepsecurityapi.CompromisedPackagesControl{Enabled: true},
+	}
+
+	result, err := r.client.UpsertRegistryControls(ctx, "maven", upsertReq)
+	assert.NoError(t, err)
+	assert.NotNil(t, result)
+	assert.True(t, result.CooldownPeriod.Enabled)
+	assert.True(t, result.CompromisedPackages.Enabled)
+
+	var diags diag.Diagnostics
+	r.applyAPIResponseToModel(ctx, plan, plan, result, &diags)
+	assert.False(t, diags.HasError())
+	assert.False(t, plan.CooldownControl.IsNull())
+	assert.False(t, plan.CompromisedPackagesControl.IsNull())
+
+	mockClient.AssertExpectations(t)
+}
+
 // TestAccSecureRegistryPolicyResource is an acceptance test that runs against the real API.
 // Requires TF_ACC=1 and env vars STEP_SECURITY_API_KEY, STEP_SECURITY_CUSTOMER.
 func TestAccSecureRegistryPolicyResource(t *testing.T) {
@@ -662,6 +963,91 @@ func TestAccSecureRegistryPolicyResource_PypiBlockList(t *testing.T) {
 	})
 }
 
+// TestAccSecureRegistryPolicyResource_Typosquatting is an acceptance test covering
+// typosquatting_control on npm, including plan-time rejection on other registries.
+// Requires TF_ACC=1 and env vars STEP_SECURITY_API_KEY, STEP_SECURITY_CUSTOMER.
+func TestAccSecureRegistryPolicyResource_Typosquatting(t *testing.T) {
+	resourcehelper.Test(t, resourcehelper.TestCase{
+		PreCheck:                 func() { testAccPreCheck(t) },
+		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+		Steps: []resourcehelper.TestStep{
+			{
+				Config: testAccSecureRegistryPolicyTyposquattingConfig(true, []string{"reactt", "lodashh"}),
+				Check: resourcehelper.ComposeAggregateTestCheckFunc(
+					resourcehelper.TestCheckResourceAttr("stepsecurity_secure_registry_policy.typosquatting_test", "registry", "npm"),
+					resourcehelper.TestCheckResourceAttr("stepsecurity_secure_registry_policy.typosquatting_test", "typosquatting_control.enabled", "true"),
+					resourcehelper.TestCheckResourceAttr("stepsecurity_secure_registry_policy.typosquatting_test", "typosquatting_control.exemption_list.#", "2"),
+				),
+			},
+			{
+				ResourceName:      "stepsecurity_secure_registry_policy.typosquatting_test",
+				ImportState:       true,
+				ImportStateVerify: true,
+			},
+			// typosquatting_control is not applicable to pypi — plan-time ValidateConfig error.
+			{
+				Config:      testAccSecureRegistryPolicyPypiWithTyposquattingConfig(),
+				ExpectError: regexp.MustCompile(`typosquatting_control is not applicable`),
+			},
+		},
+	})
+}
+
+// TestAccSecureRegistryPolicyResource_Maven is an acceptance test covering the maven registry,
+// which supports cooldown_control/compromised_packages_control but not custom_block_list_control.
+// Requires TF_ACC=1 and env vars STEP_SECURITY_API_KEY, STEP_SECURITY_CUSTOMER.
+func TestAccSecureRegistryPolicyResource_Maven(t *testing.T) {
+	resourcehelper.Test(t, resourcehelper.TestCase{
+		PreCheck:                 func() { testAccPreCheck(t) },
+		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+		Steps: []resourcehelper.TestStep{
+			{
+				Config: testAccSecureRegistryPolicyMavenConfig(true, 7, true),
+				Check: resourcehelper.ComposeAggregateTestCheckFunc(
+					resourcehelper.TestCheckResourceAttr("stepsecurity_secure_registry_policy.maven_test", "registry", "maven"),
+					resourcehelper.TestCheckResourceAttr("stepsecurity_secure_registry_policy.maven_test", "cooldown_control.period_in_days", "7"),
+					resourcehelper.TestCheckResourceAttr("stepsecurity_secure_registry_policy.maven_test", "compromised_packages_control.enabled", "true"),
+				),
+			},
+			{
+				ResourceName:      "stepsecurity_secure_registry_policy.maven_test",
+				ImportState:       true,
+				ImportStateVerify: true,
+			},
+			// custom_block_list_control is not applicable to maven — plan-time ValidateConfig error.
+			{
+				Config:      testAccSecureRegistryPolicyMavenWithBlockListConfig(),
+				ExpectError: regexp.MustCompile(`custom_block_list_control is not applicable`),
+			},
+		},
+	})
+}
+
+// TestAccSecureRegistryPolicyResource_Nuget is an acceptance test covering the nuget registry,
+// which supports the same controls as npm minus typosquatting_control/npm_settings.
+// Requires TF_ACC=1 and env vars STEP_SECURITY_API_KEY, STEP_SECURITY_CUSTOMER.
+func TestAccSecureRegistryPolicyResource_Nuget(t *testing.T) {
+	resourcehelper.Test(t, resourcehelper.TestCase{
+		PreCheck:                 func() { testAccPreCheck(t) },
+		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+		Steps: []resourcehelper.TestStep{
+			{
+				Config: testAccSecureRegistryPolicyNugetBlockListConfig(true, []string{"Newtonsoft.Json@1*"}),
+				Check: resourcehelper.ComposeAggregateTestCheckFunc(
+					resourcehelper.TestCheckResourceAttr("stepsecurity_secure_registry_policy.nuget_test", "registry", "nuget"),
+					resourcehelper.TestCheckResourceAttr("stepsecurity_secure_registry_policy.nuget_test", "custom_block_list_control.enabled", "true"),
+					resourcehelper.TestCheckResourceAttr("stepsecurity_secure_registry_policy.nuget_test", "custom_block_list_control.patterns.#", "1"),
+				),
+			},
+			{
+				ResourceName:      "stepsecurity_secure_registry_policy.nuget_test",
+				ImportState:       true,
+				ImportStateVerify: true,
+			},
+		},
+	})
+}
+
 // --- helpers ---
 
 func buildTestCooldownObject(ctx context.Context, enabled bool, periodInDays int64, exemptions []string) (types.Object, diag.Diagnostics) {
@@ -689,6 +1075,27 @@ func buildTestCooldownObject(ctx context.Context, enabled bool, periodInDays int
 func buildTestCompromisedPackagesObject(enabled bool) (types.Object, diag.Diagnostics) {
 	return types.ObjectValue(compromisedPackagesControlAttrTypes, map[string]attr.Value{
 		"enabled": types.BoolValue(enabled),
+	})
+}
+
+func buildTestTyposquattingObject(ctx context.Context, enabled bool, exemptions []string) (types.Object, diag.Diagnostics) {
+	var exemptionList types.Set
+	var diags diag.Diagnostics
+	if exemptions != nil {
+		vals := make([]attr.Value, len(exemptions))
+		for i, v := range exemptions {
+			vals[i] = types.StringValue(v)
+		}
+		exemptionList, diags = types.SetValue(types.StringType, vals)
+		if diags.HasError() {
+			return types.ObjectNull(typosquattingControlAttrTypes), diags
+		}
+	} else {
+		exemptionList = types.SetNull(types.StringType)
+	}
+	return types.ObjectValue(typosquattingControlAttrTypes, map[string]attr.Value{
+		"enabled":        types.BoolValue(enabled),
+		"exemption_list": exemptionList,
 	})
 }
 
@@ -722,6 +1129,20 @@ func buildTestNpmSettingsObject(rewriteTarballURLs bool) (types.Object, diag.Dia
 func mustBuildTestNpmSettingsObject(t *testing.T, rewriteTarballURLs bool) types.Object {
 	t.Helper()
 	obj, diags := buildTestNpmSettingsObject(rewriteTarballURLs)
+	require.False(t, diags.HasError())
+	return obj
+}
+
+func mustBuildTestTyposquattingObject(t *testing.T, enabled bool) types.Object {
+	t.Helper()
+	obj, diags := buildTestTyposquattingObject(context.Background(), enabled, nil)
+	require.False(t, diags.HasError())
+	return obj
+}
+
+func mustBuildTestCustomBlockListObject(t *testing.T, enabled bool, patterns []string) types.Object {
+	t.Helper()
+	obj, diags := buildTestCustomBlockListObject(context.Background(), enabled, patterns)
 	require.False(t, diags.HasError())
 	return obj
 }
@@ -829,4 +1250,72 @@ resource "stepsecurity_secure_registry_policy" "pypi_test" {
   }
 }
 `
+}
+
+func testAccSecureRegistryPolicyTyposquattingConfig(enabled bool, exemptions []string) string {
+	return testProviderConfig() + fmt.Sprintf(`
+resource "stepsecurity_secure_registry_policy" "typosquatting_test" {
+  registry = "npm"
+
+  typosquatting_control = {
+    enabled        = %t
+    exemption_list = %s
+  }
+}
+`, enabled, quotedPatternsList(exemptions))
+}
+
+func testAccSecureRegistryPolicyPypiWithTyposquattingConfig() string {
+	return testProviderConfig() + `
+resource "stepsecurity_secure_registry_policy" "pypi_test" {
+  registry = "pypi"
+
+  typosquatting_control = {
+    enabled = true
+  }
+}
+`
+}
+
+func testAccSecureRegistryPolicyMavenConfig(cooldownEnabled bool, periodInDays int, compromisedEnabled bool) string {
+	return testProviderConfig() + fmt.Sprintf(`
+resource "stepsecurity_secure_registry_policy" "maven_test" {
+  registry = "maven"
+
+  cooldown_control = {
+    enabled        = %t
+    period_in_days = %d
+  }
+
+  compromised_packages_control = {
+    enabled = %t
+  }
+}
+`, cooldownEnabled, periodInDays, compromisedEnabled)
+}
+
+func testAccSecureRegistryPolicyMavenWithBlockListConfig() string {
+	return testProviderConfig() + `
+resource "stepsecurity_secure_registry_policy" "maven_test" {
+  registry = "maven"
+
+  custom_block_list_control = {
+    enabled  = true
+    patterns = ["left-pad@*"]
+  }
+}
+`
+}
+
+func testAccSecureRegistryPolicyNugetBlockListConfig(blockListEnabled bool, patterns []string) string {
+	return testProviderConfig() + fmt.Sprintf(`
+resource "stepsecurity_secure_registry_policy" "nuget_test" {
+  registry = "nuget"
+
+  custom_block_list_control = {
+    enabled  = %t
+    patterns = %s
+  }
+}
+`, blockListEnabled, quotedPatternsList(patterns))
 }

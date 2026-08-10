@@ -12,6 +12,7 @@ type SecureRegistryControls struct {
 	Registry            string                      `json:"registry"`
 	CooldownPeriod      *CooldownPeriodControl      `json:"cooldown_period,omitempty"`
 	CompromisedPackages *CompromisedPackagesControl `json:"compromised_packages,omitempty"`
+	Typosquatting       *TyposquattingControl       `json:"typosquatting,omitempty"`
 	CustomBlockList     *CustomBlockListControl     `json:"custom_block_list,omitempty"`
 	NpmSettings         *NpmSettingsControl         `json:"npm_settings,omitempty"`
 	UpdatedBy           string                      `json:"updated_by"`
@@ -28,6 +29,15 @@ type CooldownPeriodControl struct {
 // CompromisedPackagesControl blocks packages flagged as compromised.
 type CompromisedPackagesControl struct {
 	Enabled bool `json:"enabled"`
+}
+
+// TyposquattingControl blocks package names that are heuristically similar to
+// popular packages. It is an advisory control (fails open on detection errors).
+// Only applicable when Registry == "npm"; the backend rejects enabling it for
+// other registries. Whitelist entries override false-positive detections.
+type TyposquattingControl struct {
+	Enabled   bool     `json:"enabled"`
+	Whitelist []string `json:"whitelist,omitempty"`
 }
 
 // CustomBlockListControl explicitly blocks packages/versions matching glob patterns
@@ -51,6 +61,7 @@ type NpmSettingsControl struct {
 type UpsertSecureRegistryControlsRequest struct {
 	CooldownPeriod      *CooldownPeriodControl      `json:"cooldown_period,omitempty"`
 	CompromisedPackages *CompromisedPackagesControl `json:"compromised_packages,omitempty"`
+	Typosquatting       *TyposquattingControl       `json:"typosquatting,omitempty"`
 	CustomBlockList     *CustomBlockListControl     `json:"custom_block_list,omitempty"`
 	NpmSettings         *NpmSettingsControl         `json:"npm_settings,omitempty"`
 }

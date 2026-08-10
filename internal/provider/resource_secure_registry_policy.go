@@ -40,6 +40,12 @@ var compromisedPackagesControlAttrTypes = map[string]attr.Type{
 	"enabled": types.BoolType,
 }
 
+// typosquattingControlAttrTypes defines the types for the typosquatting_control nested object.
+var typosquattingControlAttrTypes = map[string]attr.Type{
+	"enabled":        types.BoolType,
+	"exemption_list": types.SetType{ElemType: types.StringType},
+}
+
 // customBlockListControlAttrTypes defines the types for the custom_block_list_control nested object.
 var customBlockListControlAttrTypes = map[string]attr.Type{
 	"enabled":  types.BoolType,
@@ -63,6 +69,7 @@ type secureRegistryPolicyResourceModel struct {
 	Registry                   types.String `tfsdk:"registry"`
 	CooldownControl            types.Object `tfsdk:"cooldown_control"`
 	CompromisedPackagesControl types.Object `tfsdk:"compromised_packages_control"`
+	TyposquattingControl       types.Object `tfsdk:"typosquatting_control"`
 	CustomBlockListControl     types.Object `tfsdk:"custom_block_list_control"`
 	NpmSettings                types.Object `tfsdk:"npm_settings"`
 }
@@ -75,6 +82,11 @@ type cooldownControlModel struct {
 
 type compromisedPackagesControlModel struct {
 	Enabled types.Bool `tfsdk:"enabled"`
+}
+
+type typosquattingControlModel struct {
+	Enabled       types.Bool `tfsdk:"enabled"`
+	ExemptionList types.Set  `tfsdk:"exemption_list"`
 }
 
 type customBlockListControlModel struct {
@@ -96,12 +108,12 @@ func (r *secureRegistryPolicyResource) Schema(_ context.Context, _ resource.Sche
 		Attributes: map[string]schema.Attribute{
 			"registry": schema.StringAttribute{
 				Required:            true,
-				MarkdownDescription: "The package registry to configure. Currently supported: `npm`, `pypi`.",
+				MarkdownDescription: "The package registry to configure. Currently supported: `npm`, `pypi`, `maven`, `nuget`.",
 				PlanModifiers: []planmodifier.String{
 					stringplanmodifier.RequiresReplace(),
 				},
 				Validators: []validator.String{
-					stringvalidator.OneOf("npm", "pypi"),
+					stringvalidator.OneOf("npm", "pypi", "maven", "nuget"),
 				},
 			},
 			"cooldown_control": schema.SingleNestedAttribute{
@@ -138,9 +150,24 @@ func (r *secureRegistryPolicyResource) Schema(_ context.Context, _ resource.Sche
 					},
 				},
 			},
+			"typosquatting_control": schema.SingleNestedAttribute{
+				Optional:            true,
+				MarkdownDescription: "Blocks packages whose names are heuristically similar to popular packages (advisory typosquatting detection). Only applicable when `registry = \"npm\"`; setting this for any other registry raises a plan-time error.",
+				Attributes: map[string]schema.Attribute{
+					"enabled": schema.BoolAttribute{
+						Required:            true,
+						MarkdownDescription: "Whether the typosquatting control is enabled.",
+					},
+					"exemption_list": schema.SetAttribute{
+						ElementType:         types.StringType,
+						Optional:            true,
+						MarkdownDescription: "Package names exempt from typosquatting detection, overriding false positives. Order-insensitive — reordering entries produces no plan diff.",
+					},
+				},
+			},
 			"custom_block_list_control": schema.SingleNestedAttribute{
 				Optional:            true,
-				MarkdownDescription: "Explicitly blocks packages or versions matching configured glob patterns. Supported for both `npm` and `pypi`.",
+				MarkdownDescription: "Explicitly blocks packages or versions matching configured glob patterns. Supported for `npm`, `pypi`, and `nuget`; not applicable to `maven`.",
 				Attributes: map[string]schema.Attribute{
 					"enabled": schema.BoolAttribute{
 						Required:            true,
@@ -167,8 +194,8 @@ func (r *secureRegistryPolicyResource) Schema(_ context.Context, _ resource.Sche
 	}
 }
 
-// ValidateConfig rejects npm_settings on non-npm registries at plan time, giving a
-// clearer error than the backend's 400 ("npm_settings is not applicable to registry %s").
+// ValidateConfig rejects controls that the backend does not support for the given
+// registry at plan time, giving a clearer error than the backend's 400s.
 func (r *secureRegistryPolicyResource) ValidateConfig(ctx context.Context, req resource.ValidateConfigRequest, resp *resource.ValidateConfigResponse) {
 	var model secureRegistryPolicyResourceModel
 	resp.Diagnostics.Append(req.Config.Get(ctx, &model)...)
@@ -180,11 +207,32 @@ func (r *secureRegistryPolicyResource) ValidateConfig(ctx context.Context, req r
 		return
 	}
 
-	if model.Registry.ValueString() != "npm" && !model.NpmSettings.IsNull() {
+	registry := model.Registry.ValueString()
+
+	// Unknown blocks (e.g. derived from a not-yet-computed reference) can't be
+	// validated at plan time — defer to the backend's own validation on apply
+	// rather than risk a false-positive plan-time error.
+	if registry != "npm" && !model.NpmSettings.IsNull() && !model.NpmSettings.IsUnknown() {
 		resp.Diagnostics.AddAttributeError(
 			path.Root("npm_settings"),
 			"npm_settings not applicable",
-			fmt.Sprintf("npm_settings is not applicable to registry %q. Remove this block or set registry to \"npm\".", model.Registry.ValueString()),
+			fmt.Sprintf("npm_settings is not applicable to registry %q. Remove this block or set registry to \"npm\".", registry),
+		)
+	}
+
+	if registry != "npm" && !model.TyposquattingControl.IsNull() && !model.TyposquattingControl.IsUnknown() {
+		resp.Diagnostics.AddAttributeError(
+			path.Root("typosquatting_control"),
+			"typosquatting_control not applicable",
+			fmt.Sprintf("typosquatting_control is not applicable to registry %q. Remove this block or set registry to \"npm\".", registry),
+		)
+	}
+
+	if registry == "maven" && !model.CustomBlockListControl.IsNull() && !model.CustomBlockListControl.IsUnknown() {
+		resp.Diagnostics.AddAttributeError(
+			path.Root("custom_block_list_control"),
+			"custom_block_list_control not applicable",
+			"custom_block_list_control is not applicable to registry \"maven\". Remove this block or use a different registry.",
 		)
 	}
 }
@@ -363,6 +411,27 @@ func (r *secureRegistryPolicyResource) buildUpsertRequest(
 		req.CompromisedPackages = &stepsecurityapi.CompromisedPackagesControl{Enabled: false}
 	}
 
+	// typosquatting_control
+	if !plan.TyposquattingControl.IsNull() {
+		var m typosquattingControlModel
+		diags.Append(plan.TyposquattingControl.As(ctx, &m, basetypes.ObjectAsOptions{})...)
+		if diags.HasError() {
+			return req
+		}
+		ctrl := &stepsecurityapi.TyposquattingControl{
+			Enabled: m.Enabled.ValueBool(),
+		}
+		if !m.ExemptionList.IsNull() {
+			var exemptions []string
+			diags.Append(m.ExemptionList.ElementsAs(ctx, &exemptions, false)...)
+			ctrl.Whitelist = exemptions
+		}
+		req.Typosquatting = ctrl
+	} else if prevState != nil && !prevState.TyposquattingControl.IsNull() {
+		// Control was previously tracked — disable it on the backend.
+		req.Typosquatting = &stepsecurityapi.TyposquattingControl{Enabled: false, Whitelist: []string{}}
+	}
+
 	// custom_block_list_control
 	if !plan.CustomBlockListControl.IsNull() {
 		var m customBlockListControlModel
@@ -416,6 +485,9 @@ func (r *secureRegistryPolicyResource) applyAPIResponseToModel(
 
 	// compromised_packages_control
 	model.CompromisedPackagesControl = r.buildCompromisedPackagesControlObject(controls.CompromisedPackages, ref, diags)
+
+	// typosquatting_control
+	model.TyposquattingControl = r.buildTyposquattingControlObject(ctx, controls.Typosquatting, ref, diags)
 
 	// custom_block_list_control
 	model.CustomBlockListControl = r.buildCustomBlockListControlObject(ctx, controls.CustomBlockList, ref, diags)
@@ -494,6 +566,58 @@ func (r *secureRegistryPolicyResource) buildCompromisedPackagesControlObject(
 
 	obj, objDiags := types.ObjectValue(compromisedPackagesControlAttrTypes, map[string]attr.Value{
 		"enabled": types.BoolValue(ctrl.Enabled),
+	})
+	diags.Append(objDiags...)
+	return obj
+}
+
+// buildTyposquattingControlObject converts the API typosquatting control to a Terraform object.
+// If the control is disabled and ref did not track it, null is returned so the
+// user's state stays clean.
+func (r *secureRegistryPolicyResource) buildTyposquattingControlObject(
+	ctx context.Context,
+	ctrl *stepsecurityapi.TyposquattingControl,
+	ref *secureRegistryPolicyResourceModel,
+	diags *diag.Diagnostics,
+) types.Object {
+	if ctrl == nil {
+		return types.ObjectNull(typosquattingControlAttrTypes)
+	}
+
+	refTracking := ref != nil && !ref.TyposquattingControl.IsNull()
+	if !ctrl.Enabled && !refTracking {
+		// Disabled and not previously tracked — treat as not configured.
+		return types.ObjectNull(typosquattingControlAttrTypes)
+	}
+
+	var exemptionListVal attr.Value
+	if len(ctrl.Whitelist) > 0 {
+		vals := make([]attr.Value, len(ctrl.Whitelist))
+		for i, v := range ctrl.Whitelist {
+			vals[i] = types.StringValue(v)
+		}
+		setVal, setDiags := types.SetValue(types.StringType, vals)
+		diags.Append(setDiags...)
+		exemptionListVal = setVal
+	} else {
+		// Preserve existing exemption_list value if it was an explicit empty set.
+		if refTracking {
+			var existingM typosquattingControlModel
+			if diag := ref.TyposquattingControl.As(ctx, &existingM, basetypes.ObjectAsOptions{}); !diag.HasError() && !existingM.ExemptionList.IsNull() {
+				emptySet, emptyDiags := types.SetValue(types.StringType, []attr.Value{})
+				diags.Append(emptyDiags...)
+				exemptionListVal = emptySet
+			} else {
+				exemptionListVal = types.SetNull(types.StringType)
+			}
+		} else {
+			exemptionListVal = types.SetNull(types.StringType)
+		}
+	}
+
+	obj, objDiags := types.ObjectValue(typosquattingControlAttrTypes, map[string]attr.Value{
+		"enabled":        types.BoolValue(ctrl.Enabled),
+		"exemption_list": exemptionListVal,
 	})
 	diags.Append(objDiags...)
 	return obj
