@@ -1026,7 +1026,20 @@ func (r *githubChecksResource) convertToState(ctx context.Context, owner string,
 	var optionalRepos []attr.Value
 	var optionalOmitRepos []attr.Value
 
-	for name, opts := range config.Repos {
+	// config.Repos is a map, and Go randomizes map iteration order on every range. Iterating
+	// it directly would emit these lists in a different order on each read, so two reads of a
+	// byte-identical API response (e.g. the plan phase and the apply phase of one run) would
+	// disagree on ordering and Terraform would render a spurious reordering diff. Iterating a
+	// sorted key list instead makes every read deterministic. Controls are sorted below for
+	// the same reason.
+	repoNames := make([]string, 0, len(config.Repos))
+	for name := range config.Repos {
+		repoNames = append(repoNames, name)
+	}
+	sort.Strings(repoNames)
+
+	for _, name := range repoNames {
+		opts := config.Repos[name]
 		// Baseline
 		if !isBaselineAll && opts.Baseline {
 			baselineRepos = append(baselineRepos, types.StringValue(name))
