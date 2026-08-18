@@ -401,8 +401,8 @@ func (r *policyDrivenPRResource) ImportState(ctx context.Context, req resource.I
 				map[string]attr.Value{
 					"package":       types.StringValue(ecosystem.Package),
 					"interval":      types.StringValue(ecosystem.Interval),
-					"cooldown_yaml": types.StringValue(ecosystem.CoolDownYAML),
-					"groups_yaml":   types.StringValue(ecosystem.GroupsYAML),
+					"cooldown_yaml": stringOrNull(ecosystem.CoolDownYAML),
+					"groups_yaml":   stringOrNull(ecosystem.GroupsYAML),
 				},
 			)
 			ecosystemObjects = append(ecosystemObjects, obj)
@@ -562,7 +562,7 @@ func (r *policyDrivenPRResource) ImportState(ctx context.Context, req resource.I
 							"target_runner_labels":          types.ListType{ElemType: types.StringType},
 						},
 						map[string]attr.Value{
-							"config":                        types.StringValue(policy.AutoRemdiationOptions.HardenRunnerConfig.Config),
+							"config":                        stringOrNull(policy.AutoRemdiationOptions.HardenRunnerConfig.Config),
 							"update_existing_configuration": types.BoolValue(policy.AutoRemdiationOptions.HardenRunnerConfig.Subtractive),
 							"target_runner_labels":          labelsList,
 						},
@@ -1773,8 +1773,8 @@ func (r *policyDrivenPRResource) updatePolicyDrivenPRState(ctx context.Context, 
 				map[string]attr.Value{
 					"package":       types.StringValue(ecosystem.Package),
 					"interval":      types.StringValue(ecosystem.Interval),
-					"cooldown_yaml": types.StringValue(ecosystem.CoolDownYAML),
-					"groups_yaml":   types.StringValue(ecosystem.GroupsYAML),
+					"cooldown_yaml": stringOrNull(ecosystem.CoolDownYAML),
+					"groups_yaml":   stringOrNull(ecosystem.GroupsYAML),
 				},
 			)
 			ecosystemObjects = append(ecosystemObjects, obj)
@@ -1934,7 +1934,7 @@ func (r *policyDrivenPRResource) updatePolicyDrivenPRState(ctx context.Context, 
 							"target_runner_labels":          types.ListType{ElemType: types.StringType},
 						},
 						map[string]attr.Value{
-							"config":                        types.StringValue(stepSecurityPolicy.AutoRemdiationOptions.HardenRunnerConfig.Config),
+							"config":                        stringOrNull(stepSecurityPolicy.AutoRemdiationOptions.HardenRunnerConfig.Config),
 							"update_existing_configuration": types.BoolValue(stepSecurityPolicy.AutoRemdiationOptions.HardenRunnerConfig.Subtractive),
 							"target_runner_labels":          labelsList,
 						},
@@ -1976,6 +1976,21 @@ func (r *policyDrivenPRResource) updatePolicyDrivenPRState(ctx context.Context, 
 		excludedList, _ := types.ListValueFrom(ctx, types.StringType, excludedElements)
 		state.ExcludedRepos = excludedList
 	}
+}
+
+// stringOrNull maps an absent API string to null rather than to the empty string.
+//
+// cooldown_yaml, groups_yaml and harden_runner_config.config are Optional with no
+// default, so a configuration that omits them holds null. All three are omitempty on the
+// wire, so the API returns them absent and Go decodes that to "". Writing types.StringValue("")
+// into state therefore disagrees with the plan on every refresh. Terraform counts that as
+// a change but renders empty-string-vs-null as unchanged, producing a plan that reports
+// "1 to change" with no attribute diff shown at all.
+func stringOrNull(s string) types.String {
+	if s == "" {
+		return types.StringNull()
+	}
+	return types.StringValue(s)
 }
 
 // listToStrings extracts a []string from a types.List of strings, skipping any

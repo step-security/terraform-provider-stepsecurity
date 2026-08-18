@@ -191,3 +191,47 @@ func TestAlignListOrderHandlesDuplicates(t *testing.T) {
 	require.True(t, changed)
 	assert.Equal(t, []string{"b", "a", "b"}, listValues(t, aligned))
 }
+
+// TestReadMapsAbsentOptionalStringsToNull pins the null-vs-empty-string mapping for the
+// Optional string attributes that have no default. The API omits them (omitempty), so Go
+// decodes them to "", and writing that into state disagrees with a configuration that
+// leaves them unset on every single refresh. Terraform then reports a change it renders as
+// nothing at all: "Plan: 0 to add, 1 to change, 0 to destroy" with every attribute listed
+// as unchanged.
+func TestReadMapsAbsentOptionalStringsToNull(t *testing.T) {
+	ctx := context.Background()
+	r := &policyDrivenPRResource{}
+
+	apiPolicy := stepsecurityapi.PolicyDrivenPRPolicy{
+		Owner: "test-org",
+		AutoRemdiationOptions: stepsecurityapi.AutoRemdiationOptions{
+			PackageEcosystem: []stepsecurityapi.DependabotConfig{
+				{Package: "npm", Interval: "daily"},
+				{Package: "pip", Interval: "weekly", CoolDownYAML: "days: 7"},
+			},
+			HardenRunnerConfig: &stepsecurityapi.HardenRunnerConfig{},
+		},
+		SelectedRepos: []string{"repo-a"},
+	}
+
+	var state policyDrivenPRModel
+	r.updatePolicyDrivenPRState(ctx, apiPolicy, &state, []string{"repo-a"}, nil)
+
+	options := readStateOptions(t, state)
+
+	var ecosystems []packageEcosystemModel
+	diags := options.PackageEcosystem.ElementsAs(ctx, &ecosystems, false)
+	require.False(t, diags.HasError(), "decoding package_ecosystem: %v", diags)
+	require.Len(t, ecosystems, 2)
+
+	assert.True(t, ecosystems[0].CoolDownYAML.IsNull(), "npm cooldown_yaml should be null, got %q", ecosystems[0].CoolDownYAML.ValueString())
+	assert.True(t, ecosystems[0].GroupsYAML.IsNull(), "npm groups_yaml should be null, got %q", ecosystems[0].GroupsYAML.ValueString())
+	assert.True(t, ecosystems[1].GroupsYAML.IsNull(), "pip groups_yaml should be null, got %q", ecosystems[1].GroupsYAML.ValueString())
+	// A value the API does return must still come through untouched.
+	assert.Equal(t, "days: 7", ecosystems[1].CoolDownYAML.ValueString(), "pip cooldown_yaml")
+
+	var hardenRunner hardenRunnerConfigModel
+	diags = options.HardenRunnerConfig.As(ctx, &hardenRunner, basetypes.ObjectAsOptions{})
+	require.False(t, diags.HasError(), "decoding harden_runner_config: %v", diags)
+	assert.True(t, hardenRunner.Config.IsNull(), "harden_runner_config.config should be null, got %q", hardenRunner.Config.ValueString())
+}
