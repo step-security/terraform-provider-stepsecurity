@@ -1978,7 +1978,78 @@ func (r *policyDrivenPRResource) updatePolicyDrivenPRState(ctx context.Context, 
 	}
 }
 
+// listToStrings extracts a []string from a types.List of strings, skipping any
+// element that is not a known string value.
+func listToStrings(list types.List) []string {
+	out := make([]string, 0, len(list.Elements()))
+	for _, e := range list.Elements() {
+		s, ok := e.(types.String)
+		if !ok || s.IsNull() || s.IsUnknown() {
+			continue
+		}
+		out = append(out, s.ValueString())
+	}
+	return out
+}
+
+// alignListOrder reorders apiList to follow stateList's ordering for the elements the
+// two have in common, appending any element that only the API returned in the order the
+// API returned it.
+//
+// The API stores some of these lists as JSON objects, which unmarshal into Go maps, so
+// the read path has to derive a list from a randomized map range. Sorting that list (see
+// GetPolicyDrivenPRPolicy) makes each read self-consistent but does not match the order
+// the practitioner wrote in their configuration, so a config that is not already sorted
+// gets a permanent reordering diff. Realigning to the prior state's order removes that
+// diff while still surfacing genuine membership changes: an element the API dropped
+// disappears and an element the API added shows up at the end.
+//
+// Returns ok=false when apiList is already in the desired order, so callers can avoid
+// rebuilding the enclosing object for no reason.
+func alignListOrder(ctx context.Context, stateList, apiList types.List) (types.List, bool) {
+	if stateList.IsNull() || stateList.IsUnknown() || apiList.IsNull() || apiList.IsUnknown() {
+		return apiList, false
+	}
+
+	stateElems := listToStrings(stateList)
+	apiElems := listToStrings(apiList)
+	if len(apiElems) == 0 {
+		return apiList, false
+	}
+
+	// Track occurrences rather than mere presence so duplicated elements survive.
+	remaining := make(map[string]int, len(apiElems))
+	for _, e := range apiElems {
+		remaining[e]++
+	}
+
+	aligned := make([]string, 0, len(apiElems))
+	for _, e := range stateElems {
+		if remaining[e] > 0 {
+			remaining[e]--
+			aligned = append(aligned, e)
+		}
+	}
+	for _, e := range apiElems {
+		if remaining[e] > 0 {
+			remaining[e]--
+			aligned = append(aligned, e)
+		}
+	}
+
+	if slices.Equal(aligned, apiElems) {
+		return apiList, false
+	}
+
+	alignedList, diags := types.ListValueFrom(ctx, types.StringType, aligned)
+	if diags.HasError() {
+		return apiList, false
+	}
+	return alignedList, true
+}
+
 // preserveAutoRemediationListOrder prevents spurious diffs caused by the API returning
+// the elements of a list attribute in an order that differs from the configured order.
 func (r *policyDrivenPRResource) preserveAutoRemediationListOrder(ctx context.Context, currentStateOptions autoRemdiationOptionsModel, state *policyDrivenPRModel) {
 	if state.AutoRemdiationOptions.IsNull() || state.AutoRemdiationOptions.IsUnknown() {
 		return
@@ -1987,43 +2058,29 @@ func (r *policyDrivenPRResource) preserveAutoRemediationListOrder(ctx context.Co
 	attrs := state.AutoRemdiationOptions.Attributes()
 	changed := false
 
-	// preserveOrder replaces attrs[key] with stateList when both contain the same elements.
+	// preserveOrder rewrites attrs[key] so it follows stateList's ordering.
 	preserveOrder := func(key string, stateList types.List) {
-		if stateList.IsNull() || stateList.IsUnknown() {
+		apiList, ok := attrs[key].(types.List)
+		if !ok {
 			return
 		}
-		newList, ok := attrs[key].(types.List)
-		if !ok || newList.IsNull() || newList.IsUnknown() {
+		aligned, ok := alignListOrder(ctx, stateList, apiList)
+		if !ok {
 			return
 		}
-
-		stateElems := make([]string, 0, len(stateList.Elements()))
-		for _, e := range stateList.Elements() {
-			stateElems = append(stateElems, e.(types.String).ValueString())
-		}
-		newElems := make([]string, 0, len(newList.Elements()))
-		for _, e := range newList.Elements() {
-			newElems = append(newElems, e.(types.String).ValueString())
-		}
-
-		if len(stateElems) != len(newElems) {
-			return
-		}
-		stateSorted := make([]string, len(stateElems))
-		copy(stateSorted, stateElems)
-		newSorted := make([]string, len(newElems))
-		copy(newSorted, newElems)
-		slices.Sort(stateSorted)
-		slices.Sort(newSorted)
-		if slices.Equal(stateSorted, newSorted) {
-			attrs[key] = stateList
-			changed = true
-		}
+		attrs[key] = aligned
+		changed = true
 	}
 
 	preserveOrder("actions_to_replace_with_step_security_actions", currentStateOptions.ActionsToReplaceWithStepSecurityActions)
 	preserveOrder("actions_to_exempt_while_pinning", currentStateOptions.ActionsToExemptWhilePinning)
 	preserveOrder("images_to_exempt_while_pinning", currentStateOptions.ImagesToExemptWhilePinning)
+	preserveOrder("actions_exempted_from_replacement", currentStateOptions.ExemptedFromReplacement)
+	preserveOrder("update_precommit_file", currentStateOptions.UpdatePrecommitFile)
+
+	if r.preserveHardenRunnerLabelOrder(ctx, currentStateOptions, attrs) {
+		changed = true
+	}
 
 	if !changed {
 		return
@@ -2040,4 +2097,45 @@ func (r *policyDrivenPRResource) preserveAutoRemediationListOrder(ctx context.Co
 		return
 	}
 	state.AutoRemdiationOptions = updatedObj
+}
+
+// preserveHardenRunnerLabelOrder applies the same ordering fix to
+// harden_runner_config.target_runner_labels, which lives one level down in a nested
+// object. It mutates attrs in place and reports whether it changed anything.
+func (r *policyDrivenPRResource) preserveHardenRunnerLabelOrder(ctx context.Context, currentStateOptions autoRemdiationOptionsModel, attrs map[string]attr.Value) bool {
+	stateConfig := currentStateOptions.HardenRunnerConfig
+	if stateConfig.IsNull() || stateConfig.IsUnknown() {
+		return false
+	}
+	var stateModel hardenRunnerConfigModel
+	if diags := stateConfig.As(ctx, &stateModel, basetypes.ObjectAsOptions{}); diags.HasError() {
+		return false
+	}
+
+	apiConfig, ok := attrs["harden_runner_config"].(types.Object)
+	if !ok || apiConfig.IsNull() || apiConfig.IsUnknown() {
+		return false
+	}
+	configAttrs := apiConfig.Attributes()
+	apiLabels, ok := configAttrs["target_runner_labels"].(types.List)
+	if !ok {
+		return false
+	}
+
+	aligned, ok := alignListOrder(ctx, stateModel.RunnerLabels, apiLabels)
+	if !ok {
+		return false
+	}
+	configAttrs["target_runner_labels"] = aligned
+
+	objType, ok := apiConfig.Type(ctx).(basetypes.ObjectType)
+	if !ok {
+		return false
+	}
+	updatedConfig, diags := types.ObjectValue(objType.AttrTypes, configAttrs)
+	if diags.HasError() {
+		return false
+	}
+	attrs["harden_runner_config"] = updatedConfig
+	return true
 }
