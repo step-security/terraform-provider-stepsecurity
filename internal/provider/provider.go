@@ -187,6 +187,7 @@ func (p *StepSecurityProvider) Resources(_ context.Context) []func() resource.Re
 		NewUserResource,
 		NewRoleResource,
 		NewGithubRepoNotificationSettingsResource,
+		NewTenantNotificationSettingsResource,
 		NewPolicyDrivenPRResource,
 		NewGithubPolicyStoreResource,
 		NewGithubPolicyStoreAttachmentResource,
