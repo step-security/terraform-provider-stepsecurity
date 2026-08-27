@@ -113,7 +113,7 @@ import {
 
 - `developer_mdm` (Attributes) The tenant's Dev Machine Guard notification subscription. The events are independent of each other and each defaults to disabled. (see [below for nested schema](#nestedatt--developer_mdm))
 - `notification_channels` (Attributes) Where the tenant's notifications are delivered. Every channel is optional, but with none configured no notification is delivered, whatever is subscribed below. (see [below for nested schema](#nestedatt--notification_channels))
-- `threat_intel` (Attributes) The tenant's Threat Intel notification subscription: a single on/off plus the granularity of what warrants a notification. (see [below for nested schema](#nestedatt--threat_intel))
+- `threat_intel` (Attributes) The tenant's Threat Intel notification subscription: a single on/off plus the granularity of what warrants a notification. This covers tenant-scoped assets, such as compromised components on the device fleet. Compromised components found in a GitHub organization's pull requests and workflows notify per organization, configured on `stepsecurity_github_org_notification_settings`. (see [below for nested schema](#nestedatt--threat_intel))
 
 <a id="nestedatt--developer_mdm"></a>
 ### Nested Schema for `developer_mdm`

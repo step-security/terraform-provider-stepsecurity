@@ -226,7 +226,10 @@ func (r *tenantNotificationSettingsResource) Schema(_ context.Context, _ resourc
 			"threat_intel": schema.SingleNestedAttribute{
 				Required: true,
 				MarkdownDescription: "The tenant's Threat Intel notification subscription: a single on/off plus the " +
-					"granularity of what warrants a notification.",
+					"granularity of what warrants a notification. This covers tenant-scoped assets, such as " +
+					"compromised components on the device fleet. Compromised components found in a GitHub " +
+					"organization's pull requests and workflows notify per organization, configured on " +
+					"`stepsecurity_github_org_notification_settings`.",
 				Attributes: map[string]schema.Attribute{
 					"enabled": schema.BoolAttribute{
 						Required:            true,

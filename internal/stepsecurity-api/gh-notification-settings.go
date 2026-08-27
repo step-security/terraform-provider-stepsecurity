@@ -34,6 +34,55 @@ type NotificationSettings struct {
 	NotifyForOptionalCheckFailures    string `json:"notifyForOptionalCheckFailures"` // PR Check failure notifications
 	SlackNotificationMethod           string `json:"slackNotificationMethod"`        // "webhook" (default) or "oauth"
 	SlackChannelID                    string `json:"slackChannelID,omitempty"`       // For OAuth: channel to post to
+	// OrgThreatIntelLevel is the org's threat intel opt-in granularity:
+	// "off", "all", "name" or "version". It is authoritative; the backend only
+	// consults the three NotifyForCompromised* flags below when it is empty.
+	OrgThreatIntelLevel string `json:"orgThreatIntelLevel"`
+	// NotifyForCompromisedNPMInPR, NotifyForCompromisedPyPIInPR and
+	// NotifyForCompromisedActionInWorkflow are the per-source flags that predate
+	// OrgThreatIntelLevel. They are written from the same on/off as the level, the
+	// way the console writes them, so backend paths that still read them agree
+	// with the level.
+	NotifyForCompromisedNPMInPR          string `json:"notifyForCompromisedNPMInPR"`
+	NotifyForCompromisedPyPIInPR         string `json:"notifyForCompromisedPyPIInPR"`
+	NotifyForCompromisedActionInWorkflow string `json:"notifyForCompromisedActionInWorkflow"`
+}
+
+// OrgThreatIntelLevelOff is the stored level of an org that has explicitly opted
+// out of threat intel notifications. It is distinct from an empty level, which
+// means the org never configured them and defaults to notifying about
+// everything.
+const OrgThreatIntelLevelOff = "off"
+
+// OrgThreatIntelLevelFor builds the stored level from an on/off plus a
+// granularity, so disabling always writes the explicit opt-out rather than
+// clearing the field — an empty level would read back as opted in.
+func OrgThreatIntelLevelFor(enabled bool, level string) string {
+	if !enabled {
+		return OrgThreatIntelLevelOff
+	}
+	return level
+}
+
+// OrgThreatIntelSubscription resolves a stored level into the on/off and
+// granularity a configuration expresses.
+//
+// Org threat intel is opt-out: only an explicit "off" disables it, and an org
+// that never configured it notifies about every incident. An empty or
+// unrecognized level therefore reads as enabled at "all", matching the backend's
+// gate and what the console displays.
+//
+// A disabled org has no stored granularity, so priorLevel stands in — otherwise
+// `enabled = false, level = "name"` would drift on every refresh.
+func OrgThreatIntelSubscription(stored, priorLevel string) (enabled bool, level string) {
+	switch stored {
+	case ThreatIntelLevelAll, ThreatIntelLevelName, ThreatIntelLevelVersion:
+		return true, stored
+	case OrgThreatIntelLevelOff:
+		return false, priorLevel
+	default:
+		return true, ThreatIntelLevelAll
+	}
 }
 
 func (c *APIClient) CreateNotificationSettings(ctx context.Context, notificationSettingsReq GitHubNotificationSettingsRequest) error {
@@ -108,6 +157,13 @@ func (c *APIClient) DeleteNotificationSettings(ctx context.Context, owner string
 			NotifyForOptionalCheckFailures:    "false",
 			SlackNotificationMethod:           " ",
 			SlackChannelID:                    " ",
+			// Threat intel is opt-out, so destroying has to write the explicit
+			// "off": clearing the level would leave the org notifying about every
+			// incident.
+			OrgThreatIntelLevel:                  OrgThreatIntelLevelOff,
+			NotifyForCompromisedNPMInPR:          "false",
+			NotifyForCompromisedPyPIInPR:         "false",
+			NotifyForCompromisedActionInWorkflow: "false",
 		},
 	}
 

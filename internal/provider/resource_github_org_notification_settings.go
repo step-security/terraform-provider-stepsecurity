@@ -7,14 +7,18 @@ import (
 	stepsecurityapi "github.com/step-security/terraform-provider-stepsecurity/internal/stepsecurity-api"
 	"github.com/step-security/terraform-provider-stepsecurity/internal/utilities"
 
+	"github.com/hashicorp/terraform-plugin-framework-validators/stringvalidator"
 	"github.com/hashicorp/terraform-plugin-framework/attr"
+	"github.com/hashicorp/terraform-plugin-framework/diag"
 	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/booldefault"
+	"github.com/hashicorp/terraform-plugin-framework/resource/schema/objectplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringdefault"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringplanmodifier"
+	"github.com/hashicorp/terraform-plugin-framework/schema/validator"
 	"github.com/hashicorp/terraform-plugin-framework/types"
 	"github.com/hashicorp/terraform-plugin-framework/types/basetypes"
 )
@@ -186,8 +190,53 @@ func (r *GithubRepoNotificationSettingsResource) Schema(_ context.Context, _ res
 				},
 				Required: true,
 			},
+			"threat_intel": schema.SingleNestedAttribute{
+				Optional: true,
+				Computed: true,
+				// Without this, an omitted block re-plans as unknown on every run
+				// instead of keeping the value adopted from the API, so the plan
+				// never settles.
+				PlanModifiers: []planmodifier.Object{
+					objectplanmodifier.UseStateForUnknown(),
+				},
+				MarkdownDescription: "The organization's Threat Intel notification subscription, covering compromised " +
+					"components found in this organization's pull requests and workflows. Tenant-wide Threat Intel " +
+					"notifications are configured separately, on `stepsecurity_tenant_notification_settings`.\n\n" +
+					"Threat Intel notifications are opt-out: an organization that has never configured them is " +
+					"notified about every incident. Omit this block to leave the organization's current setting " +
+					"alone and adopt it into state.",
+				Attributes: map[string]schema.Attribute{
+					"enabled": schema.BoolAttribute{
+						Required:            true,
+						MarkdownDescription: "Whether the organization receives Threat Intel notifications at all.",
+					},
+					"level": schema.StringAttribute{
+						Optional: true,
+						Computed: true,
+						Default:  stringdefault.StaticString(stepsecurityapi.ThreatIntelLevelAll),
+						MarkdownDescription: "Which incidents warrant a notification, ignored when `enabled` is `false`: " +
+							"`all` for every Threat Intel incident whether or not this organization is affected, " +
+							"`name` only when this organization is affected by a compromised package matched by name at " +
+							"any version, `version` only when this organization uses the exact compromised version. " +
+							"Defaults to `all`, matching the opt-out default.",
+						Validators: []validator.String{
+							stringvalidator.OneOf(
+								stepsecurityapi.ThreatIntelLevelAll,
+								stepsecurityapi.ThreatIntelLevelName,
+								stepsecurityapi.ThreatIntelLevelVersion,
+							),
+						},
+					},
+				},
+			},
 		},
 	}
+}
+
+// githubThreatIntelAttrTypes defines the types for the threat_intel nested object.
+var githubThreatIntelAttrTypes = map[string]attr.Type{
+	"enabled": types.BoolType,
+	"level":   types.StringType,
 }
 
 // Configure adds the provider configured client to the resource.
@@ -240,6 +289,12 @@ type githubNotificationSettingsModel struct {
 	Owner                types.String `tfsdk:"owner"`
 	NotificationChannels types.Object `tfsdk:"notification_channels"`
 	NotificationEvents   types.Object `tfsdk:"notification_events"`
+	ThreatIntel          types.Object `tfsdk:"threat_intel"`
+}
+
+type githubThreatIntelModel struct {
+	Enabled types.Bool   `tfsdk:"enabled"`
+	Level   types.String `tfsdk:"level"`
 }
 
 type githubNotificationChannelsModel struct {
@@ -319,6 +374,11 @@ func (r *GithubRepoNotificationSettingsResource) Create(ctx context.Context, req
 		},
 	}
 
+	r.applyThreatIntelToRequest(ctx, plan.ThreatIntel, &request.NotificationSettings, &resp.Diagnostics)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+
 	// Create notification settings in StepSecurity
 	err := r.client.CreateNotificationSettings(ctx, request)
 	if err != nil {
@@ -326,6 +386,11 @@ func (r *GithubRepoNotificationSettingsResource) Create(ctx context.Context, req
 			"Unable to Create Notification Settings",
 			err.Error(),
 		)
+		return
+	}
+
+	r.resolveThreatIntelState(ctx, &plan, &resp.Diagnostics)
+	if resp.Diagnostics.HasError() {
 		return
 	}
 
@@ -421,6 +486,11 @@ func (r *GithubRepoNotificationSettingsResource) Read(ctx context.Context, req r
 	)
 	state.NotificationEvents = eventsObj
 
+	state.ThreatIntel = githubThreatIntelObject(settings.OrgThreatIntelLevel, githubPriorThreatIntelLevel(ctx, state.ThreatIntel), &resp.Diagnostics)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+
 	// Set state to fully populated data
 	diags = resp.State.Set(ctx, state)
 	resp.Diagnostics.Append(diags...)
@@ -480,6 +550,11 @@ func (r *GithubRepoNotificationSettingsResource) Update(ctx context.Context, req
 		},
 	}
 
+	r.applyThreatIntelToRequest(ctx, plan.ThreatIntel, &request.NotificationSettings, &resp.Diagnostics)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+
 	// Update notification settings in StepSecurity
 	err := r.client.UpdateNotificationSettings(ctx, request)
 	if err != nil {
@@ -487,6 +562,11 @@ func (r *GithubRepoNotificationSettingsResource) Update(ctx context.Context, req
 			"Unable to Update Notification Settings",
 			err.Error(),
 		)
+		return
+	}
+
+	r.resolveThreatIntelState(ctx, &plan, &resp.Diagnostics)
+	if resp.Diagnostics.HasError() {
 		return
 	}
 
@@ -519,4 +599,91 @@ func (r *GithubRepoNotificationSettingsResource) Delete(ctx context.Context, req
 		)
 		return
 	}
+}
+
+// applyThreatIntelToRequest writes the threat intel block onto the request.
+//
+// An absent block leaves every threat intel field empty, which this API reads as
+// "leave the organization's current value alone" — it only assigns the fields a
+// request sends non-empty.
+//
+// The three per-source flags are written from the same on/off as the level, the
+// way the console writes them, so backend paths that still read the flags agree
+// with the authoritative level.
+func (r *GithubRepoNotificationSettingsResource) applyThreatIntelToRequest(
+	ctx context.Context,
+	threatIntelObj types.Object,
+	settings *stepsecurityapi.NotificationSettings,
+	diags *diag.Diagnostics,
+) {
+	if threatIntelObj.IsNull() || threatIntelObj.IsUnknown() {
+		return
+	}
+
+	var threatIntel githubThreatIntelModel
+	diags.Append(threatIntelObj.As(ctx, &threatIntel, basetypes.ObjectAsOptions{})...)
+	if diags.HasError() {
+		return
+	}
+
+	enabled := threatIntel.Enabled.ValueBool()
+	settings.OrgThreatIntelLevel = stepsecurityapi.OrgThreatIntelLevelFor(enabled, threatIntel.Level.ValueString())
+	settings.NotifyForCompromisedNPMInPR = utilities.ConvertBoolToString(enabled)
+	settings.NotifyForCompromisedPyPIInPR = utilities.ConvertBoolToString(enabled)
+	settings.NotifyForCompromisedActionInWorkflow = utilities.ConvertBoolToString(enabled)
+}
+
+// resolveThreatIntelState fills in threat_intel after a write when the
+// configuration omitted it. The attribute is optional-and-computed, so its
+// planned value is unknown on create and only the API can say what the
+// organization's setting actually is.
+func (r *GithubRepoNotificationSettingsResource) resolveThreatIntelState(
+	ctx context.Context,
+	plan *githubNotificationSettingsModel,
+	diags *diag.Diagnostics,
+) {
+	if !plan.ThreatIntel.IsUnknown() {
+		return
+	}
+
+	settings, err := r.client.GetNotificationSettings(ctx, plan.Owner.ValueString())
+	if err != nil {
+		diags.AddError("Unable to Read Back Notification Settings", err.Error())
+		return
+	}
+
+	plan.ThreatIntel = githubThreatIntelObject(settings.OrgThreatIntelLevel, stepsecurityapi.ThreatIntelLevelAll, diags)
+}
+
+// githubThreatIntelObject builds the threat_intel object from a stored level.
+func githubThreatIntelObject(storedLevel, priorLevel string, diags *diag.Diagnostics) types.Object {
+	enabled, level := stepsecurityapi.OrgThreatIntelSubscription(storedLevel, priorLevel)
+
+	obj, objDiags := types.ObjectValue(githubThreatIntelAttrTypes, map[string]attr.Value{
+		"enabled": types.BoolValue(enabled),
+		"level":   types.StringValue(level),
+	})
+	diags.Append(objDiags...)
+
+	return obj
+}
+
+// githubPriorThreatIntelLevel reads the level already in state, used when the
+// organization is opted out and the API has no granularity to report. Falls back
+// to the opt-out default so state written before threat intel was supported
+// still refreshes cleanly.
+func githubPriorThreatIntelLevel(ctx context.Context, threatIntelObj types.Object) string {
+	if threatIntelObj.IsNull() || threatIntelObj.IsUnknown() {
+		return stepsecurityapi.ThreatIntelLevelAll
+	}
+
+	var threatIntel githubThreatIntelModel
+	if diags := threatIntelObj.As(ctx, &threatIntel, basetypes.ObjectAsOptions{}); diags.HasError() {
+		return stepsecurityapi.ThreatIntelLevelAll
+	}
+	if level := threatIntel.Level.ValueString(); level != "" {
+		return level
+	}
+
+	return stepsecurityapi.ThreatIntelLevelAll
 }
