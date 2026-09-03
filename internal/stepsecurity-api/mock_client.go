@@ -58,6 +58,25 @@ func (m *MockStepSecurityClient) DeleteNotificationSettings(ctx context.Context,
 	return args.Error(0)
 }
 
+// Tenant Notification Settings methods
+func (m *MockStepSecurityClient) GetTenantNotificationSettings(ctx context.Context) (*TenantNotificationSettings, error) {
+	args := m.Called(ctx)
+	if settings, ok := args.Get(0).(*TenantNotificationSettings); ok {
+		return settings, args.Error(1)
+	}
+	return nil, args.Error(1)
+}
+
+func (m *MockStepSecurityClient) UpdateTenantNotificationSettings(ctx context.Context, req TenantNotificationSettings) error {
+	args := m.Called(ctx, req)
+	return args.Error(0)
+}
+
+func (m *MockStepSecurityClient) DeleteTenantNotificationSettings(ctx context.Context) error {
+	args := m.Called(ctx)
+	return args.Error(0)
+}
+
 // Policy-driven PR methods
 func (m *MockStepSecurityClient) CreatePolicyDrivenPRPolicy(ctx context.Context, req PolicyDrivenPRPolicy) error {
 	args := m.Called(ctx, req)
