@@ -214,6 +214,25 @@ func (m *MockStepSecurityClient) DeleteGitHubPRTemplate(ctx context.Context, own
 	return args.Error(0)
 }
 
+// GitHub PAT Governance Policy methods
+func (m *MockStepSecurityClient) GetPATGovernancePolicy(ctx context.Context, owner string) (*PATGovernancePolicy, error) {
+	args := m.Called(ctx, owner)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).(*PATGovernancePolicy), args.Error(1)
+}
+
+func (m *MockStepSecurityClient) UpdatePATGovernancePolicy(ctx context.Context, owner string, policy PATGovernancePolicy) error {
+	args := m.Called(ctx, owner, policy)
+	return args.Error(0)
+}
+
+func (m *MockStepSecurityClient) DeletePATGovernancePolicy(ctx context.Context, owner string) error {
+	args := m.Called(ctx, owner)
+	return args.Error(0)
+}
+
 // Custom Role methods
 func (m *MockStepSecurityClient) ListRoles(ctx context.Context) ([]Role, error) {
 	args := m.Called(ctx)

@@ -66,6 +66,11 @@ type Client interface {
 	UpdateGitHubPRTemplate(ctx context.Context, owner string, template GitHubPRTemplate) error
 	DeleteGitHubPRTemplate(ctx context.Context, owner string) error
 
+	// GitHub PAT Governance Policy
+	GetPATGovernancePolicy(ctx context.Context, owner string) (*PATGovernancePolicy, error)
+	UpdatePATGovernancePolicy(ctx context.Context, owner string, policy PATGovernancePolicy) error
+	DeletePATGovernancePolicy(ctx context.Context, owner string) error
+
 	// Custom Roles
 	ListRoles(ctx context.Context) ([]Role, error)
 	CreateRole(ctx context.Context, req CreateRoleRequest) (*Role, error)
