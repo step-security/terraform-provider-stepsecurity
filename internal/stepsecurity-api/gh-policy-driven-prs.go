@@ -68,12 +68,12 @@ type issuePRConfig struct {
 type controlSettings struct {
 	ExemptedActions                     []string                             `json:"exempted_actions"`
 	ActionsToReplace                    map[string]string                    `json:"actions_to_replace"`
-	CustomActionsToReplace              map[string]string                    `json:"custom_actions_to_replace,omitempty"`
+	CustomActionsToReplace              map[string]string                    `json:"custom_actions_to_replace"`
 	ReplaceByMajorTag                   *bool                                `json:"replace_by_major_tag,omitempty"`
-	ExemptedFromReplacement             []string                             `json:"exempted_from_replacement,omitempty"`
+	ExemptedFromReplacement             []string                             `json:"exempted_from_replacement"`
 	ReplaceAllActions                   *bool                                `json:"replace_all_actions,omitempty"`
 	LabelsToReplace                     map[string]string                    `json:"labels_to_replace"`
-	UpdatePrecommitFile                 map[string]bool                      `json:"update_precommit_file,omitempty"`
+	UpdatePrecommitFile                 map[string]bool                      `json:"update_precommit_file"`
 	PackageEcosystem                    []DependabotConfig                   `json:"package_ecosystem,omitempty"`
 	Subtractive                         *bool                                `json:"subtractive,omitempty"`
 	AddWorkflows                        string                               `json:"add_workflows,omitempty"`
