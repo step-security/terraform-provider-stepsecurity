@@ -46,6 +46,28 @@ resource "stepsecurity_github_policy_store_attachment" "workflow-attachment" {
   }
 }
 
+# Policy attachment by workflow file name across repositories (wildcard patterns)
+# The repository name supports '*' wildcards: '*' matches all repositories,
+# 'service-*' matches repositories with the 'service-' prefix. Pattern entries
+# must list workflows and cannot apply to entire repositories.
+resource "stepsecurity_github_policy_store_attachment" "pattern-attachment" {
+  owner       = "test-organization"
+  policy_name = "org-wide-workflow-policy"
+
+  org = {
+    repositories = [
+      {
+        name      = "*"
+        workflows = ["security-scan.yml"]
+      },
+      {
+        name      = "service-*"
+        workflows = ["deploy.yml"]
+      }
+    ]
+  }
+}
+
 # Policy attachment to entire repositories
 resource "stepsecurity_github_policy_store_attachment" "repo-attachment" {
   owner       = "test-organization"
@@ -146,9 +168,9 @@ Optional:
 
 Required:
 
-- `name` (String) Repository name
+- `name` (String) Repository name. Supports '*' wildcards to attach the policy by workflow file name across matching repositories (for example '*' for all repositories, or 'service-*' for repositories with a prefix). Pattern entries must specify workflows and cannot use consecutive stars.
 
 Optional:
 
 - `apply_to_repo` (Boolean) If true, applies to entire repository. Automatically set to false when workflows are specified, otherwise defaults to true
-- `workflows` (List of String) List of specific workflows
+- `workflows` (List of String) List of specific workflow file names (for example 'ci.yml'). Wildcards are not allowed in workflow names.
