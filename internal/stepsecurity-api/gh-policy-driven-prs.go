@@ -95,12 +95,16 @@ type DependabotConfig struct {
 	GroupsYAML   string `json:"groups_yaml,omitempty"`
 }
 
+// HardenRunnerConfig is sent as a whole object: the API replaces it rather than merging
+// it field by field. Both label fields are serialized unconditionally, without omitempty,
+// so clearing either one reaches the API as an explicit empty list instead of a missing
+// key, and does not depend on that replace-vs-merge behavior staying as it is.
 type HardenRunnerConfig struct {
 	Config             string   `json:"config"`
 	Subtractive        bool     `json:"subtractive"`
 	SkipHardenRunner   bool     `json:"skipHardenRunner"`
 	RunnerLabels       []string `json:"runnerLabels"`
-	ExemptRunnerLabels []string `json:"exemptRunnerLabels,omitempty"`
+	ExemptRunnerLabels []string `json:"exemptRunnerLabels"`
 }
 
 type featureConfigResponse struct {
