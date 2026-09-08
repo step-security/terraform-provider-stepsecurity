@@ -67,14 +67,14 @@ type issuePRConfig struct {
 }
 
 type controlSettings struct {
-	ExemptedActions                     []string                             `json:"exempted_actions,omitempty"`
-	ActionsToReplace                    map[string]string                    `json:"actions_to_replace,omitempty"`
-	CustomActionsToReplace              map[string]string                    `json:"custom_actions_to_replace,omitempty"`
+	ExemptedActions                     []string                             `json:"exempted_actions"`
+	ActionsToReplace                    map[string]string                    `json:"actions_to_replace"`
+	CustomActionsToReplace              map[string]string                    `json:"custom_actions_to_replace"`
 	ReplaceByMajorTag                   *bool                                `json:"replace_by_major_tag,omitempty"`
-	ExemptedFromReplacement             []string                             `json:"exempted_from_replacement,omitempty"`
+	ExemptedFromReplacement             []string                             `json:"exempted_from_replacement"`
 	ReplaceAllActions                   *bool                                `json:"replace_all_actions,omitempty"`
 	LabelsToReplace                     map[string]string                    `json:"labels_to_replace"`
-	UpdatePrecommitFile                 map[string]bool                      `json:"update_precommit_file,omitempty"`
+	UpdatePrecommitFile                 map[string]bool                      `json:"update_precommit_file"`
 	CustomPrecommitConfig               *CustomPrecommitConfig               `json:"custom_precommit_config,omitempty"`
 	PackageEcosystem                    []DependabotConfig                   `json:"package_ecosystem,omitempty"`
 	Subtractive                         *bool                                `json:"subtractive,omitempty"`
@@ -82,7 +82,7 @@ type controlSettings struct {
 	ApplyIssuePRConfigForAllRepos       *bool                                `json:"apply_issue_pr_config_for_all_repos,omitempty"`
 	ApplyIssuePRConfigForAllReposFilter *ApplyIssuePRConfigForAllReposFilter `json:"apply_issue_pr_config_for_all_repos_filter,omitempty"`
 	ActionCommitMap                     map[string]string                    `json:"action_commit_map"`
-	ExemptedImages                      []string                             `json:"exempted_images,omitempty"`
+	ExemptedImages                      []string                             `json:"exempted_images"`
 	HardenRunnerConfig                  *HardenRunnerConfig                  `json:"harden_runner_config,omitempty"`
 }
 

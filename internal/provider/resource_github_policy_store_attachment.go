@@ -120,6 +120,90 @@ func (v noEmptyListValidator) ValidateList(ctx context.Context, req validator.Li
 	}
 }
 
+// repoPatternValidator validates wildcard repository name patterns at plan time
+// so invalid patterns fail before the API call. Wildcards ('*') are supported in
+// repository names only: pattern entries must list workflows, cannot use
+// consecutive stars, and workflow file names must never contain '*'.
+type repoPatternValidator struct{}
+
+func (v repoPatternValidator) Description(ctx context.Context) string {
+	return "Validates wildcard repository name patterns and their workflow lists"
+}
+
+func (v repoPatternValidator) MarkdownDescription(ctx context.Context) string {
+	return "Validates wildcard repository name patterns and their workflow lists"
+}
+
+func (v repoPatternValidator) ValidateList(ctx context.Context, req validator.ListRequest, resp *validator.ListResponse) {
+	if req.ConfigValue.IsNull() || req.ConfigValue.IsUnknown() {
+		return
+	}
+
+	for i, elem := range req.ConfigValue.Elements() {
+		obj, ok := elem.(types.Object)
+		if !ok || obj.IsNull() || obj.IsUnknown() {
+			continue
+		}
+		attrs := obj.Attributes()
+		elemPath := req.Path.AtListIndex(i)
+
+		name := ""
+		nameKnown := false
+		if nameAttr, exists := attrs["name"]; exists {
+			if nameVal, ok := nameAttr.(types.String); ok && !nameVal.IsNull() && !nameVal.IsUnknown() {
+				name = nameVal.ValueString()
+				nameKnown = true
+			}
+		}
+
+		var workflows []string
+		workflowsKnown := true
+		if workflowsAttr, exists := attrs["workflows"]; exists {
+			if workflowsList, ok := workflowsAttr.(types.List); ok {
+				if workflowsList.IsUnknown() {
+					workflowsKnown = false
+				} else if !workflowsList.IsNull() {
+					for _, wf := range workflowsList.Elements() {
+						if wfVal, ok := wf.(types.String); ok && !wfVal.IsNull() && !wfVal.IsUnknown() {
+							workflows = append(workflows, wfVal.ValueString())
+						}
+					}
+				}
+			}
+		}
+
+		for _, wf := range workflows {
+			if strings.Contains(wf, "*") {
+				resp.Diagnostics.AddAttributeError(
+					elemPath.AtName("workflows"),
+					"Invalid Configuration",
+					fmt.Sprintf("Workflow name %q must not contain '*'. Wildcards are only supported in the repository name.", wf),
+				)
+			}
+		}
+
+		if !nameKnown || !strings.Contains(name, "*") {
+			continue
+		}
+
+		if strings.Contains(name, "**") {
+			resp.Diagnostics.AddAttributeError(
+				elemPath.AtName("name"),
+				"Invalid Configuration",
+				fmt.Sprintf("Invalid repository pattern %q: consecutive '*' are not allowed.", name),
+			)
+		}
+
+		if workflowsKnown && len(workflows) == 0 {
+			resp.Diagnostics.AddAttributeError(
+				elemPath.AtName("name"),
+				"Invalid Configuration",
+				fmt.Sprintf("Repository pattern %q requires at least one workflow. Wildcard patterns attach by workflow file name and cannot apply to entire repositories.", name),
+			)
+		}
+	}
+}
+
 // Ensure the implementation satisfies the expected interfaces.
 var (
 	_ resource.Resource                = &githubPolicyStoreAttachmentResource{}
@@ -184,12 +268,13 @@ func (r *githubPolicyStoreAttachmentResource) Schema(_ context.Context, _ resour
 						Description: "List of repository-level attachments",
 						Validators: []validator.List{
 							noEmptyListValidator{fieldName: "repositories"},
+							repoPatternValidator{},
 						},
 						NestedObject: schema.NestedAttributeObject{
 							Attributes: map[string]schema.Attribute{
 								"name": schema.StringAttribute{
 									Required:    true,
-									Description: "Repository name",
+									Description: "Repository name. Supports '*' wildcards to attach the policy by workflow file name across matching repositories (for example '*' for all repositories, or 'service-*' for repositories with a prefix). Pattern entries must specify workflows and cannot use consecutive stars.",
 								},
 								"apply_to_repo": schema.BoolAttribute{
 									Optional:    true,
@@ -202,7 +287,7 @@ func (r *githubPolicyStoreAttachmentResource) Schema(_ context.Context, _ resour
 								"workflows": schema.ListAttribute{
 									ElementType: types.StringType,
 									Optional:    true,
-									Description: "List of specific workflows",
+									Description: "List of specific workflow file names (for example 'ci.yml'). Wildcards are not allowed in workflow names.",
 									Validators: []validator.List{
 										noEmptyListValidator{fieldName: "workflows"},
 									},
