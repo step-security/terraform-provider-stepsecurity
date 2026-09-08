@@ -54,6 +54,18 @@ resource "stepsecurity_github_org_notification_settings" "test-organization" {
     required_check_failures               = false
     optional_check_failures               = false
   }
+  # Threat Intel notifications for compromised components found in this
+  # organization's pull requests and workflows. Omit the block to leave the
+  # organization's current setting alone — Threat Intel notifications are
+  # opt-out, so an organization that has never configured them is notified about
+  # every incident.
+  #
+  # Tenant-wide Threat Intel notifications are configured separately, on
+  # stepsecurity_tenant_notification_settings.
+  threat_intel = {
+    enabled = true
+    level   = "version" # all | name | version
+  }
 }
 
 
@@ -74,6 +86,12 @@ import {
 - `notification_channels` (Attributes) (see [below for nested schema](#nestedatt--notification_channels))
 - `notification_events` (Attributes) (see [below for nested schema](#nestedatt--notification_events))
 - `owner` (String) The owner/organization name.
+
+### Optional
+
+- `threat_intel` (Attributes) The organization's Threat Intel notification subscription, covering compromised components found in this organization's pull requests and workflows. Tenant-wide Threat Intel notifications are configured separately, on `stepsecurity_tenant_notification_settings`.
+
+Threat Intel notifications are opt-out: an organization that has never configured them is notified about every incident. Omit this block to leave the organization's current setting alone and adopt it into state. (see [below for nested schema](#nestedatt--threat_intel))
 
 ### Read-Only
 
@@ -111,6 +129,18 @@ Optional:
 - `secrets_detected` (Boolean) Notify when secrets are detected in the build log
 - `suspicious_network_call_detected` (Boolean) Notify when suspicious network calls are detected
 - `suspicious_process_events_detected` (Boolean) Notify when suspicious process events are detected
+
+
+<a id="nestedatt--threat_intel"></a>
+### Nested Schema for `threat_intel`
+
+Required:
+
+- `enabled` (Boolean) Whether the organization receives Threat Intel notifications at all.
+
+Optional:
+
+- `level` (String) Which incidents warrant a notification, ignored when `enabled` is `false`: `all` for every Threat Intel incident whether or not this organization is affected, `name` only when this organization is affected by a compromised package matched by name at any version, `version` only when this organization uses the exact compromised version. Defaults to `all`, matching the opt-out default.
 
 ## Import
 

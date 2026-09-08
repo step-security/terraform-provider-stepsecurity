@@ -24,6 +24,11 @@ type Client interface {
 	UpdateNotificationSettings(ctx context.Context, notificationSettingsReq GitHubNotificationSettingsRequest) error
 	DeleteNotificationSettings(ctx context.Context, owner string) error
 
+	// Tenant Notification Settings
+	GetTenantNotificationSettings(ctx context.Context) (*TenantNotificationSettings, error)
+	UpdateTenantNotificationSettings(ctx context.Context, req TenantNotificationSettings) error
+	DeleteTenantNotificationSettings(ctx context.Context) error
+
 	// policy-driven PRs
 	CreatePolicyDrivenPRPolicy(ctx context.Context, createRequest PolicyDrivenPRPolicy) error
 	GetPolicyDrivenPRPolicy(ctx context.Context, owner string, repos []string) (*PolicyDrivenPRPolicy, error)
