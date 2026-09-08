@@ -155,6 +155,17 @@ func (c *APIClient) CreatePolicyDrivenPRPolicy(ctx context.Context, createReques
 		replaceAllActions = &t
 	}
 
+	// actions_to_replace and replace_all_actions are mutually exclusive on the API side,
+	// and the check there is for presence rather than content: a non-nil empty map still
+	// counts as sending the field. actions_to_replace is serialized without omitempty so
+	// that an empty map clears the stored value, which means an empty map built for a
+	// replace-all request would reach the API and be rejected. Drop it, since it carries
+	// no information. A non-empty map is left alone so a genuine conflict is still
+	// reported by the API instead of silently discarding the configured actions.
+	if replaceAllActions != nil && len(actionsToReplace) == 0 {
+		actionsToReplace = nil
+	}
+
 	// Build control checks config
 	controlChecksConfig := make(controlChecksFeatureConfig)
 	createPR := createRequest.AutoRemdiationOptions.CreatePR
