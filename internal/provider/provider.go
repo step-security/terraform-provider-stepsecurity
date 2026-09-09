@@ -195,6 +195,7 @@ func (p *StepSecurityProvider) Resources(_ context.Context) []func() resource.Re
 		NewGithubRunPolicyResource,
 		NewGitHubChecksResource,
 		NewGitHubPRTemplateResource,
+		NewGithubPATGovernancePolicyResource,
 		NewSecureRegistryPolicyResource,
 		NewDeveloperMDMIDEExtensionPolicyResource,
 		NewDeveloperMDMPackageConfigPolicyResource,
