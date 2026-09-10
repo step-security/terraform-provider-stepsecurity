@@ -77,6 +77,16 @@ resource "stepsecurity_policy_driven_pr" "repo_level_config" {
 
     # v2-only features (requires policy-driven PR v2 to be enabled)
     update_precommit_file = ["eslint"]
+    # Alternatively, provide a full .pre-commit-config.yaml instead of selecting
+    # hooks. custom_precommit_config and update_precommit_file are mutually
+    # exclusive, so uncomment this only after removing update_precommit_file above.
+    # The content is written as-is, no hook merging is done. When
+    # update_existing_configuration is false the config is only added to repos that
+    # do not already have one; when true, an existing config is overwritten.
+    # custom_precommit_config = {
+    #   config                        = "repos:\n  - repo: https://github.com/pre-commit/pre-commit-hooks\n    rev: v4.6.0\n    hooks:\n      - id: trailing-whitespace\n      - id: end-of-file-fixer\n"
+    #   update_existing_configuration = false
+    # }
     package_ecosystem = [
       {
         package       = "npm"
@@ -100,7 +110,8 @@ resource "stepsecurity_policy_driven_pr" "repo_level_config" {
     harden_runner_config = {
       update_existing_configuration = false
       config                        = "- name: Harden the runner (Audit all outbound calls)\n  uses: step-security/custom-agent@v2\n  with:\n    egress-policy: audit\n    allowed-endpoints: >\n      github.com:443\n"
-      target_runner_labels          = ["ubuntu-latest", "macos-latest"]
+      target_runner_labels          = ["ubuntu-latest", "macos-latest"] # only add harden-runner to jobs on these runners
+      exempt_runner_labels          = ["gpu-*", "self-hosted"]          # skip jobs on these runners (supports globs, takes precedence)
     }
   }
 }
@@ -192,6 +203,7 @@ Optional:
 - `create_issue` (Boolean) Create an issue when a finding is detected.
 - `create_pr` (Boolean) Create a PR when a finding is detected.
 - `custom_actions_to_replace` (Map of String) Map of actions to replace with custom replacements. Keys are the original action names, values are the replacement action names chosen by the customer.
+- `custom_precommit_config` (Attributes) Provide a full .pre-commit-config.yaml verbatim instead of assembling it from update_precommit_file hooks. Mutually exclusive with update_precommit_file. (see [below for nested schema](#nestedatt--auto_remediation_options--custom_precommit_config))
 - `harden_github_hosted_runner` (Boolean) When enabled, this creates a PR/issue to install security agent on the GitHub-hosted runner to prevent exfiltration of credentials, monitor the build process, and detect compromised dependencies.
 - `harden_runner_config` (Attributes) Configuration for harden runner. When not provided, the default harden runner config will be applied. (see [below for nested schema](#nestedatt--auto_remediation_options--harden_runner_config))
 - `images_to_exempt_while_pinning` (List of String) List of Docker images to exempt while pinning images to SHA. When exempted, the image will not be pinned to SHA.
@@ -204,12 +216,25 @@ Optional:
 - `update_existing_configuration` (Boolean) When enabled, dependabot will remove existing entries that are not in the package_ecosystem config.
 - `update_precommit_file` (List of String) List of pre-commit file paths to update (e.g., ['.pre-commit-config.yaml']).
 
+<a id="nestedatt--auto_remediation_options--custom_precommit_config"></a>
+### Nested Schema for `auto_remediation_options.custom_precommit_config`
+
+Required:
+
+- `config` (String) The full .pre-commit-config.yaml content to write to the repository.
+
+Optional:
+
+- `update_existing_configuration` (Boolean) When true, overwrite an existing .pre-commit-config.yaml. When false (default), an existing file is left untouched and one is only created when absent.
+
+
 <a id="nestedatt--auto_remediation_options--harden_runner_config"></a>
 ### Nested Schema for `auto_remediation_options.harden_runner_config`
 
 Optional:
 
 - `config` (String) YAML string configuring the harden runner.
+- `exempt_runner_labels` (Set of String) Set of runner label glob patterns (e.g. "gpu-*") to exclude from harden runner. Jobs whose runs-on matches any pattern are skipped, regardless of target_runner_labels. Order is not significant.
 - `target_runner_labels` (List of String) List of runner labels to apply the harden runner config to. When non-empty, skip_harden_runner is automatically set to true internally.
 - `update_existing_configuration` (Boolean) When enabled, removes existing harden runner configurations not in the config.
 
