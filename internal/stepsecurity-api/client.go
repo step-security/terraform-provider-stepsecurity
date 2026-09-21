@@ -4,9 +4,26 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
+	"time"
+
+	"github.com/hashicorp/terraform-plugin-log/tflog"
+)
+
+const (
+	// retryableAttempts is the total number of attempts (initial + retries)
+	// made by doWithRetry for a request the caller marked as safe to repeat.
+	// Three gives two retries at 2s and 4s. The transient failures worth
+	// riding out here — a cold start, a brief throttle — clear well inside
+	// that; a backend that is actually down should surface quickly rather
+	// than stretch every resource in the plan.
+	retryableAttempts = 3
+
+	// retryBaseDelay is the first backoff interval; it doubles per attempt.
+	retryBaseDelay = 2 * time.Second
 )
 
 type Client interface {
@@ -146,7 +163,126 @@ func (c *APIClient) do(req *http.Request, opts ...HTTPRequestOpts) ([]byte, erro
 		return body, err
 	}
 
-	return nil, fmt.Errorf("status: %d, body: %s", res.StatusCode, body)
+	return nil, &apiStatusError{StatusCode: res.StatusCode, Body: string(body)}
+}
+
+// apiStatusError carries the HTTP status alongside the message so callers can
+// decide whether a failure is worth retrying without string-matching the error
+// text. Its Error() keeps the previous wording, so existing diagnostics and the
+// "status: 503" check in gh-policy-driven-prs.go are unaffected.
+type apiStatusError struct {
+	StatusCode int
+	Body       string
+}
+
+func (e *apiStatusError) Error() string {
+	return fmt.Sprintf("status: %d, body: %s", e.StatusCode, e.Body)
+}
+
+// isRetryableFailure reports whether a failed request is worth repeating. 5xx
+// responses from API Gateway are typically a backend that timed out or a
+// transient capacity problem, and 429 is explicit backpressure. A 4xx means the
+// request itself is wrong and repeating it will not help.
+func isRetryableFailure(err error) bool {
+	var statusErr *apiStatusError
+	if !errors.As(err, &statusErr) {
+		// Not an HTTP status failure but a transport error (connection reset,
+		// client timeout). The request may or may not have reached the backend,
+		// which is exactly the case an idempotency key makes safe to retry.
+		return true
+	}
+	return statusErr.StatusCode >= 500 || statusErr.StatusCode == http.StatusTooManyRequests
+}
+
+// doWithRetry repeats a request that failed for a transient reason, with
+// exponential backoff.
+//
+// ONLY use this for requests that are safe to repeat. A plain POST is not: if
+// the first attempt reached the backend and only the response was lost, a retry
+// creates a second resource. Suppression rules are safe because the provider
+// sends a deterministic rule_id and the API treats a repeat of an existing id
+// as a read rather than a create (see deriveSuppressionRuleID). Do not reach
+// for this from a create path that has no such key.
+func (c *APIClient) doWithRetry(ctx context.Context, newReq func() (*http.Request, error), opts ...HTTPRequestOpts) ([]byte, error) {
+	var lastErr error
+
+	for attempt := 0; attempt < retryableAttempts; attempt++ {
+		if attempt > 0 {
+			delay := retryBaseDelay * time.Duration(1<<(attempt-1))
+			select {
+			case <-ctx.Done():
+				return nil, fmt.Errorf("request cancelled after %d attempts: %w (last error: %v)", attempt, ctx.Err(), lastErr)
+			case <-time.After(delay):
+			}
+		}
+
+		req, err := newReq()
+		if err != nil {
+			return nil, err
+		}
+
+		body, err := c.do(req, opts...)
+		if err == nil {
+			return body, nil
+		}
+		lastErr = err
+
+		if !isRetryableFailure(err) {
+			return nil, err
+		}
+		tflog.Warn(ctx, "retrying request after transient failure", map[string]interface{}{
+			"attempt": attempt + 1,
+			"error":   err.Error(),
+		})
+	}
+
+	return nil, fmt.Errorf("request failed after %d attempts: %w", retryableAttempts, lastErr)
+}
+
+// postWithRetry is post() for a request the caller has established is safe to
+// repeat. See doWithRetry for what that requires.
+func (c *APIClient) postWithRetry(ctx context.Context, URI string, payload any, opts ...HTTPRequestOpts) ([]byte, error) {
+	reqBody, err := json.Marshal(payload)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal config: %w", err)
+	}
+	return c.doWithRetry(ctx, func() (*http.Request, error) {
+		req, err := http.NewRequestWithContext(ctx, http.MethodPost, URI, bytes.NewReader(reqBody))
+		if err != nil {
+			return nil, fmt.Errorf("failed to create request: %w", err)
+		}
+		req.Header.Set("Content-Type", "application/json")
+		return req, nil
+	}, opts...)
+}
+
+// putWithRetry is put() for a request that is safe to repeat. An update keyed
+// by rule id is naturally idempotent: applying it twice leaves the same row.
+func (c *APIClient) putWithRetry(ctx context.Context, URI string, payload any) ([]byte, error) {
+	reqBody, err := json.Marshal(payload)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal config: %w", err)
+	}
+	return c.doWithRetry(ctx, func() (*http.Request, error) {
+		req, err := http.NewRequestWithContext(ctx, http.MethodPut, URI, bytes.NewReader(reqBody))
+		if err != nil {
+			return nil, fmt.Errorf("failed to create request: %w", err)
+		}
+		req.Header.Set("Content-Type", "application/json")
+		return req, nil
+	})
+}
+
+// getWithRetry is get() for reads, which are always safe to repeat.
+func (c *APIClient) getWithRetry(ctx context.Context, URI string) ([]byte, error) {
+	return c.doWithRetry(ctx, func() (*http.Request, error) {
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, URI, nil)
+		if err != nil {
+			return nil, fmt.Errorf("failed to create request: %w", err)
+		}
+		req.Header.Set("Content-Type", "application/json")
+		return req, nil
+	})
 }
 
 func (c *APIClient) get(ctx context.Context, URI string) ([]byte, error) {

@@ -15,6 +15,7 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/schema/validator"
 	"github.com/hashicorp/terraform-plugin-framework/types"
 	"github.com/hashicorp/terraform-plugin-framework/types/basetypes"
+	"github.com/hashicorp/terraform-plugin-log/tflog"
 	stepsecurityapi "github.com/step-security/terraform-provider-stepsecurity/internal/stepsecurity-api"
 )
 
@@ -356,6 +357,28 @@ func (r *githubSupressionRuleResource) Create(ctx context.Context, req resource.
 			err.Error(),
 		)
 		return
+	}
+
+	// The rule id is derived from the rule's definition, so a create that is
+	// really a retry adopts the rule the earlier attempt left behind rather
+	// than making a second one. The adopted rule can differ in fields that are
+	// not part of the derived id — description is the only one today — so
+	// converge it to the plan before recording state. Without this the state
+	// would disagree with the configuration and Terraform would reject the
+	// apply as an inconsistent result.
+	if createdRule.Description != suppressionRule.Description {
+		tflog.Info(ctx, "adopted an existing suppression rule; updating it to match the configuration", map[string]interface{}{
+			"rule_id": createdRule.RuleID,
+		})
+		suppressionRule.RuleID = createdRule.RuleID
+		if err := r.client.UpdateSuppressionRule(ctx, *suppressionRule); err != nil {
+			resp.Diagnostics.AddError(
+				"Failed to reconcile existing suppression rule",
+				fmt.Sprintf("A rule already existed for this configuration (id %s) but could not be updated to match it: %s", createdRule.RuleID, err.Error()),
+			)
+			return
+		}
+		createdRule.Description = suppressionRule.Description
 	}
 
 	// populate data to store state
