@@ -53,6 +53,13 @@ resource "stepsecurity_github_org_notification_settings" "test-organization" {
     baseline_check_failures               = false
     required_check_failures               = false
     optional_check_failures               = false
+    # PAT governance: violation alerts per control, plus pre-expiry reminders.
+    pat_max_age_violation        = true
+    pat_no_expiry_violation      = true
+    pat_over_scoped_violation    = true
+    pat_unused_violation         = true
+    pat_inactive_owner_violation = true
+    pat_expiry_reminder          = true
   }
   # Threat Intel notifications for compromised components found in this
   # organization's pull requests and workflows. Omit the block to leave the
@@ -124,6 +131,12 @@ Optional:
 - `new_endpoint_discovered` (Boolean) Notify when anomalous outbound call is discovered
 - `non_compliant_artifact_detected` (Boolean) Notify when non-compliant artifacts are detected
 - `optional_check_failures` (Boolean) Notify when optional PR checks fail
+- `pat_expiry_reminder` (Boolean) Notify with pre-expiry reminders for personal access tokens that are about to expire
+- `pat_inactive_owner_violation` (Boolean) Notify when a personal access token belongs to an owner who is no longer an active organization member
+- `pat_max_age_violation` (Boolean) Notify when a personal access token violates the PAT governance max-age control
+- `pat_no_expiry_violation` (Boolean) Notify when a personal access token violates the PAT governance no-expiration control
+- `pat_over_scoped_violation` (Boolean) Notify when a personal access token violates the PAT governance over-scoped control
+- `pat_unused_violation` (Boolean) Notify when a personal access token violates the PAT governance unused-token control
 - `required_check_failures` (Boolean) Notify when required PR checks fail
 - `run_blocked_by_policy` (Boolean) Notify when a run policy is blocked
 - `secrets_detected` (Boolean) Notify when secrets are detected in the build log

@@ -39,6 +39,13 @@ resource "stepsecurity_github_org_notification_settings" "test-organization" {
     baseline_check_failures               = false
     required_check_failures               = false
     optional_check_failures               = false
+    # PAT governance: violation alerts per control, plus pre-expiry reminders.
+    pat_max_age_violation        = true
+    pat_no_expiry_violation      = true
+    pat_over_scoped_violation    = true
+    pat_unused_violation         = true
+    pat_inactive_owner_violation = true
+    pat_expiry_reminder          = true
   }
   # Threat Intel notifications for compromised components found in this
   # organization's pull requests and workflows. Omit the block to leave the

@@ -32,8 +32,16 @@ type NotificationSettings struct {
 	NotifyForBaselineCheckFailures    string `json:"notifyForBaselineCheckFailures"` // PR Check failure notifications
 	NotifyForRequiredCheckFailures    string `json:"notifyForRequiredCheckFailures"` // PR Check failure notifications
 	NotifyForOptionalCheckFailures    string `json:"notifyForOptionalCheckFailures"` // PR Check failure notifications
-	SlackNotificationMethod           string `json:"slackNotificationMethod"`        // "webhook" (default) or "oauth"
-	SlackChannelID                    string `json:"slackChannelID,omitempty"`       // For OAuth: channel to post to
+	// PAT governance: one toggle per policy control, plus one for the
+	// pre-expiry reminders. String "true"/"false" like every other toggle.
+	NotifyForPATMaxAgeViolation        string `json:"notifyForPATMaxAgeViolation"`
+	NotifyForPATNoExpiryViolation      string `json:"notifyForPATNoExpiryViolation"`
+	NotifyForPATOverScopedViolation    string `json:"notifyForPATOverScopedViolation"`
+	NotifyForPATUnusedViolation        string `json:"notifyForPATUnusedViolation"`
+	NotifyForPATInactiveOwnerViolation string `json:"notifyForPATInactiveOwnerViolation"`
+	NotifyForPATExpiryReminder         string `json:"notifyForPATExpiryReminder"`
+	SlackNotificationMethod            string `json:"slackNotificationMethod"`  // "webhook" (default) or "oauth"
+	SlackChannelID                     string `json:"slackChannelID,omitempty"` // For OAuth: channel to post to
 	// OrgThreatIntelLevel is the org's threat intel opt-in granularity:
 	// "off", "all", "name" or "version". It is authoritative; the backend only
 	// consults the three NotifyForCompromised* flags below when it is empty.
@@ -137,26 +145,32 @@ func (c *APIClient) DeleteNotificationSettings(ctx context.Context, owner string
 	deleteReq := GitHubNotificationSettingsRequest{
 		Owner: owner,
 		NotificationSettings: NotificationSettings{
-			SlackWebhookURL:                   " ",
-			TeamsWebhookURL:                   " ",
-			Email:                             " ",
-			NotifyWhenDomainBlocked:           "false",
-			NotifyOnFileOverwrite:             "false",
-			NotifyWhenEndpointDiscovered:      "false",
-			NotifyForHttpsDetections:          "false",
-			NotifyForSecretsDetection:         "false",
-			NotifyForArtifactSecretsDetection: "false",
-			NotifyForImposterCommitsDetection: "false",
-			NotifyForSuspiciousNetworkCall:    "false",
-			NotifyForSuspiciousProcessEvents:  "false",
-			NotifyForHardenRunnerConfigChange: "false",
-			NotifyForNonCompliantArtifacts:    "false",
-			NotifyForBlockedRunPolicy:         "false",
-			NotifyForBaselineCheckFailures:    "false",
-			NotifyForRequiredCheckFailures:    "false",
-			NotifyForOptionalCheckFailures:    "false",
-			SlackNotificationMethod:           " ",
-			SlackChannelID:                    " ",
+			SlackWebhookURL:                    " ",
+			TeamsWebhookURL:                    " ",
+			Email:                              " ",
+			NotifyWhenDomainBlocked:            "false",
+			NotifyOnFileOverwrite:              "false",
+			NotifyWhenEndpointDiscovered:       "false",
+			NotifyForHttpsDetections:           "false",
+			NotifyForSecretsDetection:          "false",
+			NotifyForArtifactSecretsDetection:  "false",
+			NotifyForImposterCommitsDetection:  "false",
+			NotifyForSuspiciousNetworkCall:     "false",
+			NotifyForSuspiciousProcessEvents:   "false",
+			NotifyForHardenRunnerConfigChange:  "false",
+			NotifyForNonCompliantArtifacts:     "false",
+			NotifyForBlockedRunPolicy:          "false",
+			NotifyForBaselineCheckFailures:     "false",
+			NotifyForRequiredCheckFailures:     "false",
+			NotifyForOptionalCheckFailures:     "false",
+			NotifyForPATMaxAgeViolation:        "false",
+			NotifyForPATNoExpiryViolation:      "false",
+			NotifyForPATOverScopedViolation:    "false",
+			NotifyForPATUnusedViolation:        "false",
+			NotifyForPATInactiveOwnerViolation: "false",
+			NotifyForPATExpiryReminder:         "false",
+			SlackNotificationMethod:            " ",
+			SlackChannelID:                     " ",
 			// Threat intel is opt-out, so destroying has to write the explicit
 			// "off": clearing the level would leave the org notifying about every
 			// incident.
