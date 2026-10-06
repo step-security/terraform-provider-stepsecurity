@@ -37,6 +37,10 @@ resource "stepsecurity_secure_registry_policy" "npm_full" {
 
   npm_settings = {
     rewrite_tarball_urls = true
+
+    # Optional, npm only. Placeholders are validated at plan time.
+    block_message_template          = "False positive? Raise a PR against example-org/exclusions for {{package}} (control: {{control}})."
+    hidden_versions_notice_template = "{{count}} of {{package}} hidden ({{details}}). Questions: #platform-security"
   }
 }
 

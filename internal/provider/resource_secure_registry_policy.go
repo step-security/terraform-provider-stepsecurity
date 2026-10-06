@@ -54,7 +54,9 @@ var customBlockListControlAttrTypes = map[string]attr.Type{
 
 // npmSettingsAttrTypes defines the types for the npm_settings nested object.
 var npmSettingsAttrTypes = map[string]attr.Type{
-	"rewrite_tarball_urls": types.BoolType,
+	"rewrite_tarball_urls":            types.BoolType,
+	"block_message_template":          types.StringType,
+	"hidden_versions_notice_template": types.StringType,
 }
 
 func NewSecureRegistryPolicyResource() resource.Resource {
@@ -95,7 +97,9 @@ type customBlockListControlModel struct {
 }
 
 type npmSettingsModel struct {
-	RewriteTarballURLs types.Bool `tfsdk:"rewrite_tarball_urls"`
+	RewriteTarballURLs           types.Bool   `tfsdk:"rewrite_tarball_urls"`
+	BlockMessageTemplate         types.String `tfsdk:"block_message_template"`
+	HiddenVersionsNoticeTemplate types.String `tfsdk:"hidden_versions_notice_template"`
 }
 
 func (r *secureRegistryPolicyResource) Metadata(_ context.Context, req resource.MetadataRequest, resp *resource.MetadataResponse) {
@@ -187,6 +191,16 @@ func (r *secureRegistryPolicyResource) Schema(_ context.Context, _ resource.Sche
 					"rewrite_tarball_urls": schema.BoolAttribute{
 						Required:            true,
 						MarkdownDescription: "Whether to rewrite `dist.tarball` URLs in npm package metadata so tarballs are served through the secure registry.",
+					},
+					"block_message_template": schema.StringAttribute{
+						Optional:            true,
+						MarkdownDescription: "Text appended to the error returned when npm traffic is blocked by Secure Registry (for example, `False positive? Raise a PR against example-org/exclusions for {{package}}.`). It only reaches developers for full-package blocks (typosquatting, compromised package wildcard, block list entries like `name@*`) and tarball downloads. It cannot appear when a single version is silently removed from package metadata (cooldown, compromised version, block list `name@1.2.3`), because that is not an error response. Only npm and yarn classic print the error body; pnpm, yarn berry and bun show only `403 Forbidden`. Supported placeholders: `{{package}}`, `{{version}}` (empty for package-level blocks), `{{control}}` (`typosquatting`, `compromised`, `custom_block_list` or `cooldown`), `{{reason}}` and `{{ecosystem}}`. Maximum 500 characters, a single line of printable text. Removing the attribute clears the message.",
+						Validators:          []validator.String{messageTemplate(maxBlockMessageTemplateLen, blockMessagePlaceholders)},
+					},
+					"hidden_versions_notice_template": schema.StringAttribute{
+						Optional:            true,
+						MarkdownDescription: "Replaces the default notice shown when cooldown, compromised packages or the custom block list remove versions from a package's metadata. When unset, the default text is used. Only the npm CLI prints it (`npm notice ...`); pnpm, yarn and bun do not. To make npm show it on every install, the registry sends `Cache-Control: no-store` to the npm CLI only, so those package documents are re-downloaded instead of cached. Supported placeholders: `{{package}}`, `{{count}}`, `{{versions}}` (the 2 newest hidden versions), `{{cooldown_days}}` (the configured cooldown period), `{{details}}` (the default per-control text, for example `cooldown (7 days): 26.6.4, 25.9.9 (+2 more)`) and `{{ecosystem}}`. Maximum 300 characters, a single line of printable text. Removing the attribute restores the default text.",
+						Validators:          []validator.String{messageTemplate(maxNoticeTemplateLen, noticePlaceholders)},
 					},
 				},
 			},
@@ -460,12 +474,49 @@ func (r *secureRegistryPolicyResource) buildUpsertRequest(
 		if diags.HasError() {
 			return req
 		}
-		req.NpmSettings = &stepsecurityapi.NpmSettingsControl{RewriteTarballURLs: m.RewriteTarballURLs.ValueBool()}
+		ctrl := &stepsecurityapi.NpmSettingsControl{RewriteTarballURLs: m.RewriteTarballURLs.ValueBool()}
+		var prev npmSettingsModel
+		if prevState != nil && !prevState.NpmSettings.IsNull() {
+			diags.Append(prevState.NpmSettings.As(ctx, &prev, basetypes.ObjectAsOptions{})...)
+		}
+		ctrl.BlockMessageTemplate = templateForUpsert(m.BlockMessageTemplate, prev.BlockMessageTemplate)
+		ctrl.HiddenVersionsNoticeTemplate = templateForUpsert(m.HiddenVersionsNoticeTemplate, prev.HiddenVersionsNoticeTemplate)
+		req.NpmSettings = ctrl
 	} else if prevState != nil && !prevState.NpmSettings.IsNull() {
-		req.NpmSettings = &stepsecurityapi.NpmSettingsControl{RewriteTarballURLs: false}
+		// Block removed from config: reset everything so the backend keeps no stale value.
+		empty := ""
+		req.NpmSettings = &stepsecurityapi.NpmSettingsControl{
+			RewriteTarballURLs:           false,
+			BlockMessageTemplate:         &empty,
+			HiddenVersionsNoticeTemplate: &empty,
+		}
 	}
 
 	return req
+}
+
+// templateForUpsert maps a planned template to the request value. The backend keeps the
+// stored template when the field is omitted and clears it on "", so a template that was
+// set in prior state but is now null must be sent as an explicit empty string.
+func templateForUpsert(planned, prev types.String) *string {
+	if !planned.IsNull() && !planned.IsUnknown() {
+		v := planned.ValueString()
+		return &v
+	}
+	if !prev.IsNull() && !prev.IsUnknown() {
+		empty := ""
+		return &empty
+	}
+	return nil
+}
+
+// templateOrNull returns null for an unset/empty API template so state matches a config
+// that omits the attribute.
+func templateOrNull(v *string) types.String {
+	if v == nil || *v == "" {
+		return types.StringNull()
+	}
+	return types.StringValue(*v)
 }
 
 // applyAPIResponseToModel writes API response fields into model.
@@ -689,12 +740,16 @@ func (r *secureRegistryPolicyResource) buildNpmSettingsObject(
 	}
 
 	refTracking := ref != nil && !ref.NpmSettings.IsNull()
-	if !ctrl.RewriteTarballURLs && !refTracking {
+	hasTemplates := templateOrNull(ctrl.BlockMessageTemplate).ValueString() != "" ||
+		templateOrNull(ctrl.HiddenVersionsNoticeTemplate).ValueString() != ""
+	if !ctrl.RewriteTarballURLs && !hasTemplates && !refTracking {
 		return types.ObjectNull(npmSettingsAttrTypes)
 	}
 
 	obj, objDiags := types.ObjectValue(npmSettingsAttrTypes, map[string]attr.Value{
-		"rewrite_tarball_urls": types.BoolValue(ctrl.RewriteTarballURLs),
+		"rewrite_tarball_urls":            types.BoolValue(ctrl.RewriteTarballURLs),
+		"block_message_template":          templateOrNull(ctrl.BlockMessageTemplate),
+		"hidden_versions_notice_template": templateOrNull(ctrl.HiddenVersionsNoticeTemplate),
 	})
 	diags.Append(objDiags...)
 	return obj

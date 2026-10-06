@@ -52,6 +52,10 @@ resource "stepsecurity_secure_registry_policy" "npm_full" {
 
   npm_settings = {
     rewrite_tarball_urls = true
+
+    # Optional, npm only. Placeholders are validated at plan time.
+    block_message_template          = "False positive? Raise a PR against example-org/exclusions for {{package}} (control: {{control}})."
+    hidden_versions_notice_template = "{{count}} of {{package}} hidden ({{details}}). Questions: #platform-security"
   }
 }
 
@@ -228,6 +232,11 @@ Optional:
 Required:
 
 - `rewrite_tarball_urls` (Boolean) Whether to rewrite `dist.tarball` URLs in npm package metadata so tarballs are served through the secure registry.
+
+Optional:
+
+- `block_message_template` (String) Text appended to the error returned when npm traffic is blocked by Secure Registry (for example, `False positive? Raise a PR against example-org/exclusions for {{package}}.`). It only reaches developers for full-package blocks (typosquatting, compromised package wildcard, block list entries like `name@*`) and tarball downloads. It cannot appear when a single version is silently removed from package metadata (cooldown, compromised version, block list `name@1.2.3`), because that is not an error response. Only npm and yarn classic print the error body; pnpm, yarn berry and bun show only `403 Forbidden`. Supported placeholders: `{{package}}`, `{{version}}` (empty for package-level blocks), `{{control}}` (`typosquatting`, `compromised`, `custom_block_list` or `cooldown`), `{{reason}}` and `{{ecosystem}}`. Maximum 500 characters, a single line of printable text. Removing the attribute clears the message.
+- `hidden_versions_notice_template` (String) Replaces the default notice shown when cooldown, compromised packages or the custom block list remove versions from a package's metadata. When unset, the default text is used. Only the npm CLI prints it (`npm notice ...`); pnpm, yarn and bun do not. To make npm show it on every install, the registry sends `Cache-Control: no-store` to the npm CLI only, so those package documents are re-downloaded instead of cached. Supported placeholders: `{{package}}`, `{{count}}`, `{{versions}}` (the 2 newest hidden versions), `{{cooldown_days}}` (the configured cooldown period), `{{details}}` (the default per-control text, for example `cooldown (7 days): 26.6.4, 25.9.9 (+2 more)`) and `{{ecosystem}}`. Maximum 300 characters, a single line of printable text. Removing the attribute restores the default text.
 
 
 <a id="nestedatt--typosquatting_control"></a>

@@ -52,8 +52,13 @@ type CustomBlockListControl struct {
 // other controls it has no "enabled" toggle — RewriteTarballURLs is itself the
 // setting. Only applicable when Registry == "npm"; the backend rejects any non-nil
 // value for other registries.
+//
+// The two message templates are pointers because the backend treats them as
+// preserve-on-omit: nil keeps the stored value, an empty string clears it.
 type NpmSettingsControl struct {
-	RewriteTarballURLs bool `json:"rewrite_tarball_urls"`
+	RewriteTarballURLs           bool    `json:"rewrite_tarball_urls"`
+	BlockMessageTemplate         *string `json:"block_message_template,omitempty"`
+	HiddenVersionsNoticeTemplate *string `json:"hidden_versions_notice_template,omitempty"`
 }
 
 // UpsertSecureRegistryControlsRequest is the PUT request body. Omitting a control
