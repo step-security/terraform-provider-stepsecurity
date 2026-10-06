@@ -599,6 +599,18 @@ func templateOrNull(v *string) types.String {
 	return types.StringValue(*v)
 }
 
+// templateFromAPI is templateOrNull, except that an empty or absent API value stays ""
+// when the reference value is an explicit "".
+func templateFromAPI(v *string, ref types.String) types.String {
+	if out := templateOrNull(v); !out.IsNull() {
+		return out
+	}
+	if !ref.IsNull() && !ref.IsUnknown() && ref.ValueString() == "" {
+		return types.StringValue("")
+	}
+	return types.StringNull()
+}
+
 // applyAPIResponseToModel writes API response fields into model.
 // ref is used to determine which disabled controls were already being tracked
 // (and should therefore remain in state rather than becoming null).
@@ -850,10 +862,21 @@ func (r *secureRegistryPolicyResource) buildNpmSettingsObject(
 		return types.ObjectNull(npmSettingsAttrTypes)
 	}
 
+	// An explicit "" in config clears the template on the backend, which then reports it
+	// as absent. Keep "" in state when the reference (plan or prior state) holds "" so
+	// Terraform does not see a changed value after apply or a perpetual diff.
+	var refBlock, refNotice types.String = types.StringNull(), types.StringNull()
+	if refTracking && !ref.NpmSettings.IsUnknown() {
+		var m npmSettingsModel
+		if d := ref.NpmSettings.As(context.Background(), &m, basetypes.ObjectAsOptions{}); !d.HasError() {
+			refBlock, refNotice = m.BlockMessageTemplate, m.HiddenVersionsNoticeTemplate
+		}
+	}
+
 	obj, objDiags := types.ObjectValue(npmSettingsAttrTypes, map[string]attr.Value{
 		"rewrite_tarball_urls":            types.BoolValue(ctrl.RewriteTarballURLs),
-		"block_message_template":          templateOrNull(ctrl.BlockMessageTemplate),
-		"hidden_versions_notice_template": templateOrNull(ctrl.HiddenVersionsNoticeTemplate),
+		"block_message_template":          templateFromAPI(ctrl.BlockMessageTemplate, refBlock),
+		"hidden_versions_notice_template": templateFromAPI(ctrl.HiddenVersionsNoticeTemplate, refNotice),
 	})
 	diags.Append(objDiags...)
 	return obj

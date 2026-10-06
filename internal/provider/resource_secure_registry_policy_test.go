@@ -1498,6 +1498,20 @@ func TestSecureRegistryPolicyResource_applyAPIResponse_NpmTemplates(t *testing.T
 			wantNotice: types.StringNull(),
 		},
 		{
+			name:       "explicit empty string in ref is preserved",
+			ref:        mustObj(t, true, types.StringValue(""), types.StringValue("")),
+			api:        &stepsecurityapi.NpmSettingsControl{RewriteTarballURLs: true},
+			wantBlock:  types.StringValue(""),
+			wantNotice: types.StringValue(""),
+		},
+		{
+			name:       "empty string in ref is replaced by a non-empty API value",
+			ref:        mustObj(t, true, types.StringValue(""), types.StringNull()),
+			api:        &stepsecurityapi.NpmSettingsControl{RewriteTarballURLs: true, BlockMessageTemplate: str("b")},
+			wantBlock:  types.StringValue("b"),
+			wantNotice: types.StringNull(),
+		},
+		{
 			name:     "untracked, all defaults stays null",
 			ref:      types.ObjectNull(npmSettingsAttrTypes),
 			api:      &stepsecurityapi.NpmSettingsControl{},
