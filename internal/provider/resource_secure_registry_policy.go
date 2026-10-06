@@ -11,6 +11,7 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
+	"github.com/hashicorp/terraform-plugin-framework/resource/schema/booldefault"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/int64default"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringplanmodifier"
@@ -48,8 +49,15 @@ var typosquattingControlAttrTypes = map[string]attr.Type{
 
 // customBlockListControlAttrTypes defines the types for the custom_block_list_control nested object.
 var customBlockListControlAttrTypes = map[string]attr.Type{
-	"enabled":  types.BoolType,
-	"patterns": types.SetType{ElemType: types.StringType},
+	"enabled":               types.BoolType,
+	"patterns":              types.SetType{ElemType: types.StringType},
+	"block_pseudo_versions": types.SetType{ElemType: types.StringType},
+	"block_yanked_versions": types.BoolType,
+}
+
+// goSettingsAttrTypes defines the types for the go_settings nested object.
+var goSettingsAttrTypes = map[string]attr.Type{
+	"proxy_checksum_db": types.BoolType,
 }
 
 // npmSettingsAttrTypes defines the types for the npm_settings nested object.
@@ -74,6 +82,7 @@ type secureRegistryPolicyResourceModel struct {
 	TyposquattingControl       types.Object `tfsdk:"typosquatting_control"`
 	CustomBlockListControl     types.Object `tfsdk:"custom_block_list_control"`
 	NpmSettings                types.Object `tfsdk:"npm_settings"`
+	GoSettings                 types.Object `tfsdk:"go_settings"`
 }
 
 type cooldownControlModel struct {
@@ -92,8 +101,14 @@ type typosquattingControlModel struct {
 }
 
 type customBlockListControlModel struct {
-	Enabled  types.Bool `tfsdk:"enabled"`
-	Patterns types.Set  `tfsdk:"patterns"`
+	Enabled             types.Bool `tfsdk:"enabled"`
+	Patterns            types.Set  `tfsdk:"patterns"`
+	BlockPseudoVersions types.Set  `tfsdk:"block_pseudo_versions"`
+	BlockYankedVersions types.Bool `tfsdk:"block_yanked_versions"`
+}
+
+type goSettingsModel struct {
+	ProxyChecksumDB types.Bool `tfsdk:"proxy_checksum_db"`
 }
 
 type npmSettingsModel struct {
@@ -112,12 +127,12 @@ func (r *secureRegistryPolicyResource) Schema(_ context.Context, _ resource.Sche
 		Attributes: map[string]schema.Attribute{
 			"registry": schema.StringAttribute{
 				Required:            true,
-				MarkdownDescription: "The package registry to configure. Currently supported: `npm`, `pypi`, `maven`, `nuget`.",
+				MarkdownDescription: "The package registry to configure. Currently supported: `npm`, `pypi`, `maven`, `nuget`, `go`, `ruby`, `cargo`.",
 				PlanModifiers: []planmodifier.String{
 					stringplanmodifier.RequiresReplace(),
 				},
 				Validators: []validator.String{
-					stringvalidator.OneOf("npm", "pypi", "maven", "nuget"),
+					stringvalidator.OneOf("npm", "pypi", "maven", "nuget", "go", "ruby", "cargo"),
 				},
 			},
 			"cooldown_control": schema.SingleNestedAttribute{
@@ -171,7 +186,7 @@ func (r *secureRegistryPolicyResource) Schema(_ context.Context, _ resource.Sche
 			},
 			"custom_block_list_control": schema.SingleNestedAttribute{
 				Optional:            true,
-				MarkdownDescription: "Explicitly blocks packages or versions matching configured glob patterns. Supported for `npm`, `pypi`, and `nuget`; not applicable to `maven`.",
+				MarkdownDescription: "Explicitly blocks packages or versions matching configured glob patterns. Supported for `npm`, `pypi`, `nuget`, `go`, `ruby` and `cargo`; not applicable to `maven`.",
 				Attributes: map[string]schema.Attribute{
 					"enabled": schema.BoolAttribute{
 						Required:            true,
@@ -181,6 +196,27 @@ func (r *secureRegistryPolicyResource) Schema(_ context.Context, _ resource.Sche
 						ElementType:         types.StringType,
 						Optional:            true,
 						MarkdownDescription: "Package/version glob patterns to block. Supports exact names, version globs (`package@*`), and exact versions (`package@1.2.3`). For npm, scoped wildcards (`@scope/*`) are also supported. Order-insensitive — reordering entries produces no plan diff.",
+					},
+					"block_pseudo_versions": schema.SetAttribute{
+						ElementType:         types.StringType,
+						Optional:            true,
+						MarkdownDescription: "Module globs whose versions must be released tags. Pseudo-versions and raw commit or branch revisions are refused for matching modules; `*` applies the rule to every module. Only applicable when `registry = \"go\"`; setting this for any other registry raises a plan-time error. Order-insensitive.",
+					},
+					"block_yanked_versions": schema.BoolAttribute{
+						Optional:            true,
+						Computed:            true,
+						Default:             booldefault.StaticBool(false),
+						MarkdownDescription: "Hard-blocks crate versions that crates.io has yanked, even when they are pinned in a `Cargo.lock`. Only applicable when `registry = \"cargo\"`; setting this for any other registry raises a plan-time error. Defaults to `false`.",
+					},
+				},
+			},
+			"go_settings": schema.SingleNestedAttribute{
+				Optional:            true,
+				MarkdownDescription: "Go-specific registry settings. Only applicable when `registry = \"go\"`; setting this for any other registry raises a plan-time error.",
+				Attributes: map[string]schema.Attribute{
+					"proxy_checksum_db": schema.BoolAttribute{
+						Required:            true,
+						MarkdownDescription: "Serve the Go checksum database through the secure registry instead of letting the client reach `sum.golang.org` directly. Leave off unless build runners have no egress to `sum.golang.org`; module verification happens either way.",
 					},
 				},
 			},
@@ -240,6 +276,32 @@ func (r *secureRegistryPolicyResource) ValidateConfig(ctx context.Context, req r
 			"typosquatting_control not applicable",
 			fmt.Sprintf("typosquatting_control is not applicable to registry %q. Remove this block or set registry to \"npm\".", registry),
 		)
+	}
+
+	if registry != "go" && !model.GoSettings.IsNull() && !model.GoSettings.IsUnknown() {
+		resp.Diagnostics.AddAttributeError(
+			path.Root("go_settings"),
+			"go_settings not applicable",
+			fmt.Sprintf("go_settings is not applicable to registry %q. Remove this block or set registry to \"go\".", registry),
+		)
+	}
+
+	if !model.CustomBlockListControl.IsNull() && !model.CustomBlockListControl.IsUnknown() {
+		attrs := model.CustomBlockListControl.Attributes()
+		if v, ok := attrs["block_pseudo_versions"].(types.Set); ok && registry != "go" && !v.IsNull() && !v.IsUnknown() {
+			resp.Diagnostics.AddAttributeError(
+				path.Root("custom_block_list_control").AtName("block_pseudo_versions"),
+				"block_pseudo_versions not applicable",
+				fmt.Sprintf("block_pseudo_versions is not applicable to registry %q. Remove this attribute or set registry to \"go\".", registry),
+			)
+		}
+		if v, ok := attrs["block_yanked_versions"].(types.Bool); ok && registry != "cargo" && !v.IsNull() && !v.IsUnknown() && v.ValueBool() {
+			resp.Diagnostics.AddAttributeError(
+				path.Root("custom_block_list_control").AtName("block_yanked_versions"),
+				"block_yanked_versions not applicable",
+				fmt.Sprintf("block_yanked_versions is not applicable to registry %q. Remove this attribute or set registry to \"cargo\".", registry),
+			)
+		}
 	}
 
 	if registry == "maven" && !model.CustomBlockListControl.IsNull() && !model.CustomBlockListControl.IsUnknown() {
@@ -461,6 +523,12 @@ func (r *secureRegistryPolicyResource) buildUpsertRequest(
 			diags.Append(m.Patterns.ElementsAs(ctx, &patterns, false)...)
 			ctrl.Patterns = patterns
 		}
+		if !m.BlockPseudoVersions.IsNull() && !m.BlockPseudoVersions.IsUnknown() {
+			var pseudo []string
+			diags.Append(m.BlockPseudoVersions.ElementsAs(ctx, &pseudo, false)...)
+			ctrl.BlockPseudoVersions = pseudo
+		}
+		ctrl.BlockYankedVersions = m.BlockYankedVersions.ValueBool()
 		req.CustomBlockList = ctrl
 	} else if prevState != nil && !prevState.CustomBlockListControl.IsNull() {
 		req.CustomBlockList = &stepsecurityapi.CustomBlockListControl{Enabled: false, Patterns: []string{}}
@@ -490,6 +558,18 @@ func (r *secureRegistryPolicyResource) buildUpsertRequest(
 			BlockMessageTemplate:         &empty,
 			HiddenVersionsNoticeTemplate: &empty,
 		}
+	}
+
+	// go_settings: same shape as npm_settings: send the planned value, reset on removal.
+	if !plan.GoSettings.IsNull() {
+		var m goSettingsModel
+		diags.Append(plan.GoSettings.As(ctx, &m, basetypes.ObjectAsOptions{})...)
+		if diags.HasError() {
+			return req
+		}
+		req.GoSettings = &stepsecurityapi.GoSettingsControl{ProxyChecksumDB: m.ProxyChecksumDB.ValueBool()}
+	} else if prevState != nil && !prevState.GoSettings.IsNull() {
+		req.GoSettings = &stepsecurityapi.GoSettingsControl{ProxyChecksumDB: false}
 	}
 
 	return req
@@ -545,6 +625,9 @@ func (r *secureRegistryPolicyResource) applyAPIResponseToModel(
 
 	// npm_settings
 	model.NpmSettings = r.buildNpmSettingsObject(controls.NpmSettings, ref, diags)
+
+	// go_settings
+	model.GoSettings = r.buildGoSettingsObject(controls.GoSettings, ref, diags)
 }
 
 // buildCooldownControlObject converts the API cooldown period to a Terraform object.
@@ -688,7 +771,7 @@ func (r *secureRegistryPolicyResource) buildCustomBlockListControlObject(
 	}
 
 	refTracking := ref != nil && !ref.CustomBlockListControl.IsNull()
-	if !ctrl.Enabled && !refTracking {
+	if !ctrl.Enabled && !refTracking && len(ctrl.BlockPseudoVersions) == 0 && !ctrl.BlockYankedVersions {
 		// Disabled and not previously tracked — treat as not configured.
 		return types.ObjectNull(customBlockListControlAttrTypes)
 	}
@@ -718,9 +801,30 @@ func (r *secureRegistryPolicyResource) buildCustomBlockListControlObject(
 		}
 	}
 
+	pseudoVal := types.SetNull(types.StringType)
+	if len(ctrl.BlockPseudoVersions) > 0 {
+		vals := make([]attr.Value, len(ctrl.BlockPseudoVersions))
+		for i, v := range ctrl.BlockPseudoVersions {
+			vals[i] = types.StringValue(v)
+		}
+		setVal, setDiags := types.SetValue(types.StringType, vals)
+		diags.Append(setDiags...)
+		pseudoVal = setVal
+	} else if refTracking {
+		// Preserve an explicit empty set from config so it doesn't show as drift.
+		var existingM customBlockListControlModel
+		if d := ref.CustomBlockListControl.As(ctx, &existingM, basetypes.ObjectAsOptions{}); !d.HasError() && !existingM.BlockPseudoVersions.IsNull() && !existingM.BlockPseudoVersions.IsUnknown() {
+			emptySet, emptyDiags := types.SetValue(types.StringType, []attr.Value{})
+			diags.Append(emptyDiags...)
+			pseudoVal = emptySet
+		}
+	}
+
 	obj, objDiags := types.ObjectValue(customBlockListControlAttrTypes, map[string]attr.Value{
-		"enabled":  types.BoolValue(ctrl.Enabled),
-		"patterns": patternsVal,
+		"enabled":               types.BoolValue(ctrl.Enabled),
+		"patterns":              patternsVal,
+		"block_pseudo_versions": pseudoVal,
+		"block_yanked_versions": types.BoolValue(ctrl.BlockYankedVersions),
 	})
 	diags.Append(objDiags...)
 	return obj
@@ -750,6 +854,30 @@ func (r *secureRegistryPolicyResource) buildNpmSettingsObject(
 		"rewrite_tarball_urls":            types.BoolValue(ctrl.RewriteTarballURLs),
 		"block_message_template":          templateOrNull(ctrl.BlockMessageTemplate),
 		"hidden_versions_notice_template": templateOrNull(ctrl.HiddenVersionsNoticeTemplate),
+	})
+	diags.Append(objDiags...)
+	return obj
+}
+
+// buildGoSettingsObject converts the API go settings to a Terraform object. Mirrors
+// buildNpmSettingsObject: when the setting is off and ref did not track it, null is
+// returned so state stays clean.
+func (r *secureRegistryPolicyResource) buildGoSettingsObject(
+	ctrl *stepsecurityapi.GoSettingsControl,
+	ref *secureRegistryPolicyResourceModel,
+	diags *diag.Diagnostics,
+) types.Object {
+	if ctrl == nil {
+		return types.ObjectNull(goSettingsAttrTypes)
+	}
+
+	refTracking := ref != nil && !ref.GoSettings.IsNull()
+	if !ctrl.ProxyChecksumDB && !refTracking {
+		return types.ObjectNull(goSettingsAttrTypes)
+	}
+
+	obj, objDiags := types.ObjectValue(goSettingsAttrTypes, map[string]attr.Value{
+		"proxy_checksum_db": types.BoolValue(ctrl.ProxyChecksumDB),
 	})
 	diags.Append(objDiags...)
 	return obj

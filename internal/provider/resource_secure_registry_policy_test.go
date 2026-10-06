@@ -596,6 +596,7 @@ func TestSecureRegistryPolicyResource_ValidateConfig_NpmSettings(t *testing.T) {
 				TyposquattingControl:       tc.typosquattingControl,
 				CustomBlockListControl:     tc.customBlockListControl,
 				NpmSettings:                tc.npmSettings,
+				GoSettings:                 types.ObjectNull(goSettingsAttrTypes),
 			}
 
 			config := testSecureRegistryPolicyConfig(t, model)
@@ -662,6 +663,7 @@ func TestSecureRegistryPolicyResource_ValidateConfig_UnknownBlocksDeferValidatio
 				TyposquattingControl:       types.ObjectNull(typosquattingControlAttrTypes),
 				CustomBlockListControl:     types.ObjectNull(customBlockListControlAttrTypes),
 				NpmSettings:                types.ObjectNull(npmSettingsAttrTypes),
+				GoSettings:                 types.ObjectNull(goSettingsAttrTypes),
 			}
 			tc.model(&model)
 
@@ -1116,8 +1118,10 @@ func buildTestCustomBlockListObject(ctx context.Context, enabled bool, patterns 
 		patternsSet = types.SetNull(types.StringType)
 	}
 	return types.ObjectValue(customBlockListControlAttrTypes, map[string]attr.Value{
-		"enabled":  types.BoolValue(enabled),
-		"patterns": patternsSet,
+		"enabled":               types.BoolValue(enabled),
+		"patterns":              patternsSet,
+		"block_pseudo_versions": types.SetNull(types.StringType),
+		"block_yanked_versions": types.BoolValue(false),
 	})
 }
 
@@ -1519,4 +1523,160 @@ func TestSecureRegistryPolicyResource_applyAPIResponse_NpmTemplates(t *testing.T
 			assert.Equal(t, tt.wantNotice, attrs["hidden_versions_notice_template"])
 		})
 	}
+}
+
+// newEcosystemModel builds a full config model with every control null, for ValidateConfig tests.
+func newEcosystemModel(registry string) secureRegistryPolicyResourceModel {
+	return secureRegistryPolicyResourceModel{
+		Registry:                   types.StringValue(registry),
+		CooldownControl:            types.ObjectNull(cooldownControlAttrTypes),
+		CompromisedPackagesControl: types.ObjectNull(compromisedPackagesControlAttrTypes),
+		TyposquattingControl:       types.ObjectNull(typosquattingControlAttrTypes),
+		CustomBlockListControl:     types.ObjectNull(customBlockListControlAttrTypes),
+		NpmSettings:                types.ObjectNull(npmSettingsAttrTypes),
+		GoSettings:                 types.ObjectNull(goSettingsAttrTypes),
+	}
+}
+
+func blockListWith(t *testing.T, pseudo []string, yanked bool) types.Object {
+	t.Helper()
+	pseudoSet := types.SetNull(types.StringType)
+	if pseudo != nil {
+		vals := make([]attr.Value, len(pseudo))
+		for i, v := range pseudo {
+			vals[i] = types.StringValue(v)
+		}
+		var d diag.Diagnostics
+		pseudoSet, d = types.SetValue(types.StringType, vals)
+		require.False(t, d.HasError())
+	}
+	obj, d := types.ObjectValue(customBlockListControlAttrTypes, map[string]attr.Value{
+		"enabled":               types.BoolValue(true),
+		"patterns":              types.SetNull(types.StringType),
+		"block_pseudo_versions": pseudoSet,
+		"block_yanked_versions": types.BoolValue(yanked),
+	})
+	require.False(t, d.HasError())
+	return obj
+}
+
+func TestSecureRegistryPolicyResource_ValidateConfig_NewEcosystems(t *testing.T) {
+	t.Parallel()
+
+	goSettings := types.ObjectValueMust(goSettingsAttrTypes, map[string]attr.Value{"proxy_checksum_db": types.BoolValue(true)})
+
+	tests := []struct {
+		name      string
+		registry  string
+		mutate    func(t *testing.T, m *secureRegistryPolicyResourceModel)
+		wantError bool
+	}{
+		{"go plain", "go", func(*testing.T, *secureRegistryPolicyResourceModel) {}, false},
+		{"ruby plain", "ruby", func(*testing.T, *secureRegistryPolicyResourceModel) {}, false},
+		{"cargo plain", "cargo", func(*testing.T, *secureRegistryPolicyResourceModel) {}, false},
+		{"go_settings on go", "go", func(_ *testing.T, m *secureRegistryPolicyResourceModel) { m.GoSettings = goSettings }, false},
+		{"go_settings on npm", "npm", func(_ *testing.T, m *secureRegistryPolicyResourceModel) { m.GoSettings = goSettings }, true},
+		{"go_settings on cargo", "cargo", func(_ *testing.T, m *secureRegistryPolicyResourceModel) { m.GoSettings = goSettings }, true},
+		{"go_settings unknown on npm defers", "npm", func(_ *testing.T, m *secureRegistryPolicyResourceModel) {
+			m.GoSettings = types.ObjectUnknown(goSettingsAttrTypes)
+		}, false},
+		{"pseudo versions on go", "go", func(t *testing.T, m *secureRegistryPolicyResourceModel) {
+			m.CustomBlockListControl = blockListWith(t, []string{"*"}, false)
+		}, false},
+		{"pseudo versions on npm", "npm", func(t *testing.T, m *secureRegistryPolicyResourceModel) {
+			m.CustomBlockListControl = blockListWith(t, []string{"*"}, false)
+		}, true},
+		{"yanked on cargo", "cargo", func(t *testing.T, m *secureRegistryPolicyResourceModel) {
+			m.CustomBlockListControl = blockListWith(t, nil, true)
+		}, false},
+		{"yanked on ruby", "ruby", func(t *testing.T, m *secureRegistryPolicyResourceModel) {
+			m.CustomBlockListControl = blockListWith(t, nil, true)
+		}, true},
+		{"typosquatting on go", "go", func(t *testing.T, m *secureRegistryPolicyResourceModel) {
+			m.TyposquattingControl = mustBuildTestTyposquattingObject(t, true)
+		}, true},
+		{"npm_settings on ruby", "ruby", func(t *testing.T, m *secureRegistryPolicyResourceModel) {
+			m.NpmSettings = mustBuildTestNpmSettingsObject(t, true)
+		}, true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			m := newEcosystemModel(tt.registry)
+			tt.mutate(t, &m)
+			resp := &fwresource.ValidateConfigResponse{}
+			(&secureRegistryPolicyResource{}).ValidateConfig(context.Background(), fwresource.ValidateConfigRequest{Config: testSecureRegistryPolicyConfig(t, m)}, resp)
+			assert.Equal(t, tt.wantError, resp.Diagnostics.HasError(), "diagnostics: %v", resp.Diagnostics)
+		})
+	}
+}
+
+func TestSecureRegistryPolicyResource_buildUpsertRequest_NewEcosystemControls(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	r := &secureRegistryPolicyResource{}
+
+	plan := &secureRegistryPolicyResourceModel{
+		Registry:               types.StringValue("go"),
+		CustomBlockListControl: blockListWith(t, []string{"github.com/example-org/*"}, false),
+		GoSettings:             types.ObjectValueMust(goSettingsAttrTypes, map[string]attr.Value{"proxy_checksum_db": types.BoolValue(true)}),
+	}
+	var diags diag.Diagnostics
+	req := r.buildUpsertRequest(ctx, plan, nil, &diags)
+	require.False(t, diags.HasError())
+	assert.Equal(t, []string{"github.com/example-org/*"}, req.CustomBlockList.BlockPseudoVersions)
+	require.NotNil(t, req.GoSettings)
+	assert.True(t, req.GoSettings.ProxyChecksumDB)
+
+	cargoPlan := &secureRegistryPolicyResourceModel{Registry: types.StringValue("cargo"), CustomBlockListControl: blockListWith(t, nil, true)}
+	req = r.buildUpsertRequest(ctx, cargoPlan, nil, &diags)
+	require.False(t, diags.HasError())
+	assert.True(t, req.CustomBlockList.BlockYankedVersions)
+	assert.Nil(t, req.CustomBlockList.BlockPseudoVersions)
+
+	// go_settings removed from config resets on the backend.
+	prev := &secureRegistryPolicyResourceModel{GoSettings: plan.GoSettings}
+	removed := &secureRegistryPolicyResourceModel{Registry: types.StringValue("go"), GoSettings: types.ObjectNull(goSettingsAttrTypes)}
+	req = r.buildUpsertRequest(ctx, removed, prev, &diags)
+	require.NotNil(t, req.GoSettings)
+	assert.False(t, req.GoSettings.ProxyChecksumDB)
+}
+
+func TestSecureRegistryPolicyResource_applyAPIResponse_NewEcosystemControls(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	r := &secureRegistryPolicyResource{}
+	var diags diag.Diagnostics
+
+	ref := &secureRegistryPolicyResourceModel{GoSettings: types.ObjectNull(goSettingsAttrTypes), CustomBlockListControl: types.ObjectNull(customBlockListControlAttrTypes)}
+	model := &secureRegistryPolicyResourceModel{}
+	r.applyAPIResponseToModel(ctx, ref, model, &stepsecurityapi.SecureRegistryControls{
+		Registry:        "go",
+		GoSettings:      &stepsecurityapi.GoSettingsControl{ProxyChecksumDB: true},
+		CustomBlockList: &stepsecurityapi.CustomBlockListControl{Enabled: true, BlockPseudoVersions: []string{"*"}},
+	}, &diags)
+	require.False(t, diags.HasError())
+	assert.Equal(t, types.BoolValue(true), model.GoSettings.Attributes()["proxy_checksum_db"])
+	assert.False(t, model.CustomBlockListControl.Attributes()["block_pseudo_versions"].(types.Set).IsNull())
+
+	// Defaults on an untracked block stay null and unset pseudo versions map to null (no drift).
+	model = &secureRegistryPolicyResourceModel{}
+	r.applyAPIResponseToModel(ctx, ref, model, &stepsecurityapi.SecureRegistryControls{
+		Registry:        "go",
+		GoSettings:      &stepsecurityapi.GoSettingsControl{},
+		CustomBlockList: &stepsecurityapi.CustomBlockListControl{Enabled: true},
+	}, &diags)
+	assert.True(t, model.GoSettings.IsNull())
+	assert.True(t, model.CustomBlockListControl.Attributes()["block_pseudo_versions"].(types.Set).IsNull())
+
+	// Cargo yanked flag round-trips.
+	model = &secureRegistryPolicyResourceModel{}
+	r.applyAPIResponseToModel(ctx, ref, model, &stepsecurityapi.SecureRegistryControls{
+		Registry:        "cargo",
+		CustomBlockList: &stepsecurityapi.CustomBlockListControl{Enabled: true, BlockYankedVersions: true},
+	}, &diags)
+	assert.Equal(t, types.BoolValue(true), model.CustomBlockListControl.Attributes()["block_yanked_versions"])
 }

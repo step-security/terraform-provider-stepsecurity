@@ -171,6 +171,72 @@ resource "stepsecurity_secure_registry_policy" "nuget_full" {
   }
 }
 
+# Go modules: cooldown, compromised packages, block list and go_settings.
+# (typosquatting_control and npm_settings are not applicable to go)
+resource "stepsecurity_secure_registry_policy" "go_full" {
+  registry = "go"
+
+  cooldown_control = {
+    enabled        = true
+    period_in_days = 7
+  }
+
+  compromised_packages_control = {
+    enabled = true
+  }
+
+  custom_block_list_control = {
+    enabled  = true
+    patterns = ["github.com/example-org/legacy@*"]
+
+    # Require released tags: refuse pseudo-versions and raw commit or branch revisions.
+    block_pseudo_versions = ["*"]
+  }
+
+  go_settings = {
+    proxy_checksum_db = false
+  }
+}
+
+# RubyGems: typosquatting_control, npm_settings and go_settings are not applicable.
+resource "stepsecurity_secure_registry_policy" "ruby_full" {
+  registry = "ruby"
+
+  cooldown_control = {
+    enabled        = true
+    period_in_days = 7
+  }
+
+  compromised_packages_control = {
+    enabled = true
+  }
+
+  custom_block_list_control = {
+    enabled  = true
+    patterns = ["example-gem@*"]
+  }
+}
+
+# Cargo (crates.io): block_yanked_versions is cargo-only.
+resource "stepsecurity_secure_registry_policy" "cargo_full" {
+  registry = "cargo"
+
+  cooldown_control = {
+    enabled        = true
+    period_in_days = 7
+  }
+
+  compromised_packages_control = {
+    enabled = true
+  }
+
+  custom_block_list_control = {
+    enabled               = true
+    patterns              = ["example-crate@*"]
+    block_yanked_versions = true
+  }
+}
+
 # For importing an existing NuGet registry policy into Terraform state
 import {
   to = stepsecurity_secure_registry_policy.nuget_full
@@ -183,13 +249,14 @@ import {
 
 ### Required
 
-- `registry` (String) The package registry to configure. Currently supported: `npm`, `pypi`, `maven`, `nuget`.
+- `registry` (String) The package registry to configure. Currently supported: `npm`, `pypi`, `maven`, `nuget`, `go`, `ruby`, `cargo`.
 
 ### Optional
 
 - `compromised_packages_control` (Attributes) Blocks packages flagged as compromised or reported as malicious by the security community. (see [below for nested schema](#nestedatt--compromised_packages_control))
 - `cooldown_control` (Attributes) Blocks packages published within a configurable number of days, giving the community time to vet new releases. (see [below for nested schema](#nestedatt--cooldown_control))
-- `custom_block_list_control` (Attributes) Explicitly blocks packages or versions matching configured glob patterns. Supported for `npm`, `pypi`, and `nuget`; not applicable to `maven`. (see [below for nested schema](#nestedatt--custom_block_list_control))
+- `custom_block_list_control` (Attributes) Explicitly blocks packages or versions matching configured glob patterns. Supported for `npm`, `pypi`, `nuget`, `go`, `ruby` and `cargo`; not applicable to `maven`. (see [below for nested schema](#nestedatt--custom_block_list_control))
+- `go_settings` (Attributes) Go-specific registry settings. Only applicable when `registry = "go"`; setting this for any other registry raises a plan-time error. (see [below for nested schema](#nestedatt--go_settings))
 - `npm_settings` (Attributes) npm-specific registry settings. Only applicable when `registry = "npm"`; setting this for any other registry raises a plan-time error. (see [below for nested schema](#nestedatt--npm_settings))
 - `typosquatting_control` (Attributes) Blocks packages whose names are heuristically similar to popular packages (advisory typosquatting detection). Only applicable when `registry = "npm"`; setting this for any other registry raises a plan-time error. (see [below for nested schema](#nestedatt--typosquatting_control))
 
@@ -223,7 +290,17 @@ Required:
 
 Optional:
 
+- `block_pseudo_versions` (Set of String) Module globs whose versions must be released tags. Pseudo-versions and raw commit or branch revisions are refused for matching modules; `*` applies the rule to every module. Only applicable when `registry = "go"`; setting this for any other registry raises a plan-time error. Order-insensitive.
+- `block_yanked_versions` (Boolean) Hard-blocks crate versions that crates.io has yanked, even when they are pinned in a `Cargo.lock`. Only applicable when `registry = "cargo"`; setting this for any other registry raises a plan-time error. Defaults to `false`.
 - `patterns` (Set of String) Package/version glob patterns to block. Supports exact names, version globs (`package@*`), and exact versions (`package@1.2.3`). For npm, scoped wildcards (`@scope/*`) are also supported. Order-insensitive — reordering entries produces no plan diff.
+
+
+<a id="nestedatt--go_settings"></a>
+### Nested Schema for `go_settings`
+
+Required:
+
+- `proxy_checksum_db` (Boolean) Serve the Go checksum database through the secure registry instead of letting the client reach `sum.golang.org` directly. Leave off unless build runners have no egress to `sum.golang.org`; module verification happens either way.
 
 
 <a id="nestedatt--npm_settings"></a>
