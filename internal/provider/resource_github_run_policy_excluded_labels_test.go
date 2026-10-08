@@ -291,18 +291,22 @@ func TestAccGithubRunPolicyExcludedLabelsSetOutsideTerraform(t *testing.T) {
 // TestAccGithubRunPolicyExcludedLabelsRejectedAtPlan checks that values the API would
 // reject or rewrite fail at plan time instead.
 func TestAccGithubRunPolicyExcludedLabelsRejectedAtPlan(t *testing.T) {
-	for name, labels := range map[string]string{
-		"lone wildcard":       `["*"]`,
-		"empty string":        `[""]`,
-		"surrounding spaces":  `[" gpu "]`,
-		"wildcard with peers": `["gpu", "*"]`,
+	for name, tc := range map[string]struct {
+		labels string
+		want   string
+	}{
+		"lone wildcard":       {`["*"]`, `excludes every job`},
+		"wildcard with peers": {`["gpu", "*"]`, `excludes every job`},
+		"empty string":        {`[""]`, `must not be empty`},
+		"blank":               {`["  "]`, `must not be empty`},
+		"surrounding spaces":  {`[" gpu "]`, `leading or trailing whitespace`},
 	} {
 		t.Run(name, func(t *testing.T) {
 			testAccGithubRunPolicyAgainstFake(t, newFakeRunPolicyBackend(),
 				resource.TestStep{
-					Config:      githubRunPolicyExcludedLabelsFixture(false, "    harden_runner_excluded_labels = "+labels),
+					Config:      githubRunPolicyExcludedLabelsFixture(false, "    harden_runner_excluded_labels = "+tc.labels),
 					PlanOnly:    true,
-					ExpectError: regexp.MustCompile(`harden_runner_excluded_labels`),
+					ExpectError: regexp.MustCompile(`(?s)Invalid excluded runner label.*` + tc.want),
 				},
 			)
 		})

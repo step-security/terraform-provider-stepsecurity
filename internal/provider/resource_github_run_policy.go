@@ -3,7 +3,6 @@ package provider
 import (
 	"context"
 	"fmt"
-	"regexp"
 	"strings"
 	"time"
 
@@ -33,10 +32,6 @@ var (
 	_ resource.ResourceWithConfigure   = &githubRunPolicyResource{}
 	_ resource.ResourceWithImportState = &githubRunPolicyResource{}
 )
-
-// nonBlankTrimmedPattern matches values with no leading or trailing whitespace. The
-// API trims entries and drops blank ones, so either would otherwise show up as drift.
-var nonBlankTrimmedPattern = regexp.MustCompile(`^\S(.*\S)?$`)
 
 // NewGithubRunPolicyResource is a helper function to simplify the provider implementation.
 func NewGithubRunPolicyResource() resource.Resource {
@@ -186,10 +181,7 @@ func (r *githubRunPolicyResource) Schema(_ context.Context, _ resource.SchemaReq
 							setplanmodifier.UseStateForUnknown(),
 						},
 						Validators: []validator.Set{
-							setvalidator.ValueStringsAre(
-								stringvalidator.NoneOf("*"),
-								stringvalidator.RegexMatches(nonBlankTrimmedPattern, "must be non-empty and must not have leading or trailing whitespace"),
-							),
+							setvalidator.ValueStringsAre(excludedRunnerLabel()),
 						},
 					},
 					"harden_runner_custom_actions": schema.SetAttribute{
