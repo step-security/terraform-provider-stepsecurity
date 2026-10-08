@@ -64,34 +64,39 @@ func (r *GithubRepoNotificationSettingsResource) Schema(_ context.Context, _ res
 				Required: true,
 				Attributes: map[string]schema.Attribute{
 					"slack_webhook_url": schema.StringAttribute{
-						Optional:    true,
-						Computed:    true,
-						Description: "The Slack webhook URL to receive notifications. If not provided, no notifications will be sent to Slack.",
-						Default:     stringdefault.StaticString(""),
+						Optional:      true,
+						Computed:      true,
+						Description:   "The Slack webhook URL to receive notifications. If not provided, no notifications will be sent to Slack.",
+						Default:       stringdefault.StaticString(""),
+						PlanModifiers: []planmodifier.String{githubEquivalentStateForDefault(stepsecurityapi.NormalizeNotificationChannel)},
 					},
 					"teams_webhook_url": schema.StringAttribute{
-						Optional:    true,
-						Computed:    true,
-						Description: "The Microsoft Teams webhook URL to receive notifications. If not provided, no notifications will be sent to Microsoft Teams.",
-						Default:     stringdefault.StaticString(""),
+						Optional:      true,
+						Computed:      true,
+						Description:   "The Microsoft Teams webhook URL to receive notifications. If not provided, no notifications will be sent to Microsoft Teams.",
+						Default:       stringdefault.StaticString(""),
+						PlanModifiers: []planmodifier.String{githubEquivalentStateForDefault(stepsecurityapi.NormalizeNotificationChannel)},
 					},
 					"email": schema.StringAttribute{
-						Optional:    true,
-						Computed:    true,
-						Description: "The email address to receive notifications. If not provided, no notifications will be sent to the email address.",
-						Default:     stringdefault.StaticString(""),
+						Optional:      true,
+						Computed:      true,
+						Description:   "The email address to receive notifications. If not provided, no notifications will be sent to the email address.",
+						Default:       stringdefault.StaticString(""),
+						PlanModifiers: []planmodifier.String{githubEquivalentStateForDefault(stepsecurityapi.NormalizeNotificationChannel)},
 					},
 					"slack_channel_id": schema.StringAttribute{
-						Optional:    true,
-						Computed:    true,
-						Description: "The Slack channel ID to post notifications to when using OAuth method. Required when slack_notification_method is 'oauth'.",
-						Default:     stringdefault.StaticString(""),
+						Optional:      true,
+						Computed:      true,
+						Description:   "The Slack channel ID to post notifications to when using OAuth method. Required when slack_notification_method is 'oauth'.",
+						Default:       stringdefault.StaticString(""),
+						PlanModifiers: []planmodifier.String{githubEquivalentStateForDefault(stepsecurityapi.NormalizeNotificationChannel)},
 					},
 					"slack_notification_method": schema.StringAttribute{
-						Optional:    true,
-						Computed:    true,
-						Description: "The method to use for sending Slack notifications. Valid values are 'webhook' (default) or 'oauth'.",
-						Default:     stringdefault.StaticString(stepsecurityapi.SlackNotificationMethodWebhook),
+						Optional:      true,
+						Computed:      true,
+						Description:   "The method to use for sending Slack notifications. Valid values are 'webhook' (default) or 'oauth'.",
+						Default:       stringdefault.StaticString(stepsecurityapi.SlackNotificationMethodWebhook),
+						PlanModifiers: []planmodifier.String{githubEquivalentStateForDefault(stepsecurityapi.NormalizeSlackNotificationMethod)},
 					},
 				},
 			},
@@ -705,4 +710,34 @@ func githubChannelValue(prior types.String, read string, normalize func(string) 
 		return prior
 	}
 	return types.StringValue(read)
+}
+
+// githubEquivalentStateForDefault keeps the prior state value when the
+// attribute is left to its default and the state value means the same thing.
+// State written by earlier provider versions holds " " for a cleared channel
+// and "" for an unset Slack method, so without this the new defaults would plan
+// an update nobody asked for right after upgrading.
+func githubEquivalentStateForDefault(normalize func(string) string) planmodifier.String {
+	return githubEquivalentStateForDefaultModifier{normalize: normalize}
+}
+
+type githubEquivalentStateForDefaultModifier struct {
+	normalize func(string) string
+}
+
+func (m githubEquivalentStateForDefaultModifier) Description(_ context.Context) string {
+	return "Keeps the prior state value when the default means the same thing."
+}
+
+func (m githubEquivalentStateForDefaultModifier) MarkdownDescription(ctx context.Context) string {
+	return m.Description(ctx)
+}
+
+func (m githubEquivalentStateForDefaultModifier) PlanModifyString(_ context.Context, req planmodifier.StringRequest, resp *planmodifier.StringResponse) {
+	if !req.ConfigValue.IsNull() || req.StateValue.IsNull() || req.StateValue.IsUnknown() || req.PlanValue.IsUnknown() || req.PlanValue.IsNull() {
+		return
+	}
+	if m.normalize(req.StateValue.ValueString()) == m.normalize(req.PlanValue.ValueString()) {
+		resp.PlanValue = req.StateValue
+	}
 }

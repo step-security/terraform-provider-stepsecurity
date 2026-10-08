@@ -113,6 +113,32 @@ func testAccGithubOrgNotificationSettings(t *testing.T, backend *fakeGithubNotif
 	})
 }
 
+// testAccGithubOrgNotificationSettingsSteps is testAccGithubOrgNotificationSettings
+// for steps that pick their own provider, such as a released version.
+func testAccGithubOrgNotificationSettingsSteps(t *testing.T, backend *fakeGithubNotificationSettingsBackend, steps ...resource.TestStep) {
+	t.Helper()
+
+	tfPath := os.Getenv("TF_ACC_TERRAFORM_PATH")
+	if tfPath == "" {
+		found, err := exec.LookPath("terraform")
+		if err != nil {
+			t.Skip("terraform CLI not found in PATH; set TF_ACC_TERRAFORM_PATH to run this test")
+		}
+		tfPath = found
+	}
+
+	server := httptest.NewServer(backend)
+	t.Cleanup(server.Close)
+
+	t.Setenv("TF_ACC", "1")
+	t.Setenv("TF_ACC_TERRAFORM_PATH", tfPath)
+	t.Setenv("STEP_SECURITY_API_BASE_URL", server.URL)
+	t.Setenv("STEP_SECURITY_API_KEY", "test-key")
+	t.Setenv("STEP_SECURITY_CUSTOMER", "tf-acc-test")
+
+	resource.Test(t, resource.TestCase{Steps: steps})
+}
+
 // githubOrgNotificationSettingsFixture renders the resource with an optional
 // threat_intel block, so the omitted case exercises the same configuration
 // otherwise.
@@ -401,6 +427,47 @@ resource "stepsecurity_github_org_notification_settings" "test" {
 		resource.TestStep{
 			Config:   config,
 			PlanOnly: true,
+		},
+	)
+}
+
+// githubOrgNotificationSettingsReleasedProvider is the last release that wrote
+// " " for cleared channels.
+var githubOrgNotificationSettingsReleasedProvider = map[string]resource.ExternalProvider{
+	"stepsecurity": {Source: "step-security/stepsecurity", VersionConstraint: "0.0.46"},
+}
+
+// TestAccGithubOrgNotificationSettingsUpgradeFromRelease applies with the last
+// release, which stored " " for every channel left to its default, and checks
+// that this version plans no changes for that state, before and after an apply.
+func TestAccGithubOrgNotificationSettingsUpgradeFromRelease(t *testing.T) {
+	backend := newFakeGithubNotificationSettingsBackend(nil)
+	config := githubOrgNotificationSettingsFixture("")
+
+	testAccGithubOrgNotificationSettingsSteps(t, backend,
+		resource.TestStep{
+			ExternalProviders: githubOrgNotificationSettingsReleasedProvider,
+			Config:            config,
+			Check: func(*terraform.State) error {
+				if got := backend.storedString("slackWebhookURL"); got != " " {
+					return fmt.Errorf("released provider stored slackWebhookURL = %q, want %q", got, " ")
+				}
+				return nil
+			},
+		},
+		resource.TestStep{
+			ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+			Config:                   config,
+			PlanOnly:                 true,
+		},
+		resource.TestStep{
+			ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+			Config:                   strings.Replace(config, "domain_blocked          = true", "domain_blocked          = false", 1),
+		},
+		resource.TestStep{
+			ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+			Config:                   strings.Replace(config, "domain_blocked          = true", "domain_blocked          = false", 1),
+			PlanOnly:                 true,
 		},
 	)
 }
