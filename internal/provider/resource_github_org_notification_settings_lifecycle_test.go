@@ -113,6 +113,32 @@ func testAccGithubOrgNotificationSettings(t *testing.T, backend *fakeGithubNotif
 	})
 }
 
+// testAccGithubOrgNotificationSettingsSteps is testAccGithubOrgNotificationSettings
+// for steps that pick their own provider, such as a released version.
+func testAccGithubOrgNotificationSettingsSteps(t *testing.T, backend *fakeGithubNotificationSettingsBackend, steps ...resource.TestStep) {
+	t.Helper()
+
+	tfPath := os.Getenv("TF_ACC_TERRAFORM_PATH")
+	if tfPath == "" {
+		found, err := exec.LookPath("terraform")
+		if err != nil {
+			t.Skip("terraform CLI not found in PATH; set TF_ACC_TERRAFORM_PATH to run this test")
+		}
+		tfPath = found
+	}
+
+	server := httptest.NewServer(backend)
+	t.Cleanup(server.Close)
+
+	t.Setenv("TF_ACC", "1")
+	t.Setenv("TF_ACC_TERRAFORM_PATH", tfPath)
+	t.Setenv("STEP_SECURITY_API_BASE_URL", server.URL)
+	t.Setenv("STEP_SECURITY_API_KEY", "test-key")
+	t.Setenv("STEP_SECURITY_CUSTOMER", "tf-acc-test")
+
+	resource.Test(t, resource.TestCase{Steps: steps})
+}
+
 // githubOrgNotificationSettingsFixture renders the resource with an optional
 // threat_intel block, so the omitted case exercises the same configuration
 // otherwise.
@@ -284,6 +310,164 @@ func TestAccGithubOrgNotificationSettingsThreatIntelUpdate(t *testing.T) {
 					return nil
 				},
 			),
+		},
+	)
+}
+
+// TestAccGithubOrgNotificationSettingsImportConsoleOrg imports an org set up in
+// the console, which stores "empty" for a cleared channel and no Slack method
+// until OAuth is configured, and checks that the plan stays empty and that
+// clearing a channel still reaches the backend.
+func TestAccGithubOrgNotificationSettingsImportConsoleOrg(t *testing.T) {
+	backend := newFakeGithubNotificationSettingsBackend(map[string]any{
+		"email":                        "security@example.com",
+		"slackWebhookURL":              "empty",
+		"teamsWebhookURL":              "empty",
+		"notifyWhenDomainBlocked":      "true",
+		"notifyWhenEndpointDiscovered": "true",
+		"orgThreatIntelLevel":          "off",
+	})
+
+	config := githubOrgNotificationSettingsFixture("")
+	testAccGithubOrgNotificationSettings(t, backend,
+		resource.TestStep{
+			Config:             config,
+			ResourceName:       "stepsecurity_github_org_notification_settings.test",
+			ImportState:        true,
+			ImportStateId:      "step-terraform-tests",
+			ImportStatePersist: true,
+		},
+		resource.TestStep{
+			Config:   config,
+			PlanOnly: true,
+		},
+		resource.TestStep{
+			Config: strings.Replace(config, `email = "security@example.com"`, `slack_webhook_url = "https://hooks.slack.com/x"`, 1),
+			Check: func(*terraform.State) error {
+				if got := backend.storedString("email"); got != "empty" {
+					return fmt.Errorf("email = %q, want the cleared value %q", got, "empty")
+				}
+				if got := backend.storedString("slackNotificationMethod"); got != "webhook" {
+					return fmt.Errorf("slackNotificationMethod = %q, want %q", got, "webhook")
+				}
+				return nil
+			},
+		},
+	)
+}
+
+// TestAccGithubOrgNotificationSettingsLegacyBlankChannels refreshes an org
+// written by earlier provider versions, which stored " " for every cleared
+// channel and for the Slack method on destroy, and checks the plan stays empty.
+func TestAccGithubOrgNotificationSettingsLegacyBlankChannels(t *testing.T) {
+	backend := newFakeGithubNotificationSettingsBackend(map[string]any{
+		"email":                        "security@example.com",
+		"slackWebhookURL":              " ",
+		"teamsWebhookURL":              " ",
+		"slackChannelID":               " ",
+		"slackNotificationMethod":      " ",
+		"notifyWhenDomainBlocked":      "true",
+		"notifyWhenEndpointDiscovered": "true",
+		"orgThreatIntelLevel":          "off",
+	})
+
+	config := githubOrgNotificationSettingsFixture("")
+	testAccGithubOrgNotificationSettings(t, backend,
+		resource.TestStep{
+			Config:             config,
+			ResourceName:       "stepsecurity_github_org_notification_settings.test",
+			ImportState:        true,
+			ImportStateId:      "step-terraform-tests",
+			ImportStatePersist: true,
+		},
+		resource.TestStep{
+			Config:   config,
+			PlanOnly: true,
+		},
+	)
+}
+
+// TestAccGithubOrgNotificationSettingsLegacyClearSpellings keeps configurations
+// that spelled a cleared channel the way earlier provider versions needed (" "
+// or "empty", and an empty Slack method) planning clean, and checks the channel
+// still reaches the backend as cleared.
+func TestAccGithubOrgNotificationSettingsLegacyClearSpellings(t *testing.T) {
+	backend := newFakeGithubNotificationSettingsBackend(map[string]any{
+		"slackWebhookURL": "https://hooks.slack.com/old",
+	})
+
+	config := `
+resource "stepsecurity_github_org_notification_settings" "test" {
+  owner = "step-terraform-tests"
+
+  notification_channels = {
+    email                     = "security@example.com"
+    slack_webhook_url         = " "
+    teams_webhook_url         = "empty"
+    slack_notification_method = ""
+  }
+
+  notification_events = {
+    domain_blocked = true
+  }
+}
+`
+	testAccGithubOrgNotificationSettings(t, backend,
+		resource.TestStep{
+			Config: config,
+			Check: func(*terraform.State) error {
+				for _, key := range []string{"slackWebhookURL", "teamsWebhookURL", "slackChannelID"} {
+					if got := backend.storedString(key); got != "empty" {
+						return fmt.Errorf("%s = %q, want the cleared value %q", key, got, "empty")
+					}
+				}
+				return nil
+			},
+		},
+		resource.TestStep{
+			Config:   config,
+			PlanOnly: true,
+		},
+	)
+}
+
+// githubOrgNotificationSettingsReleasedProvider is the last release that wrote
+// " " for cleared channels.
+var githubOrgNotificationSettingsReleasedProvider = map[string]resource.ExternalProvider{
+	"stepsecurity": {Source: "step-security/stepsecurity", VersionConstraint: "0.0.46"},
+}
+
+// TestAccGithubOrgNotificationSettingsUpgradeFromRelease applies with the last
+// release, which stored " " for every channel left to its default, and checks
+// that this version plans no changes for that state, before and after an apply.
+func TestAccGithubOrgNotificationSettingsUpgradeFromRelease(t *testing.T) {
+	backend := newFakeGithubNotificationSettingsBackend(nil)
+	config := githubOrgNotificationSettingsFixture("")
+
+	testAccGithubOrgNotificationSettingsSteps(t, backend,
+		resource.TestStep{
+			ExternalProviders: githubOrgNotificationSettingsReleasedProvider,
+			Config:            config,
+			Check: func(*terraform.State) error {
+				if got := backend.storedString("slackWebhookURL"); got != " " {
+					return fmt.Errorf("released provider stored slackWebhookURL = %q, want %q", got, " ")
+				}
+				return nil
+			},
+		},
+		resource.TestStep{
+			ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+			Config:                   config,
+			PlanOnly:                 true,
+		},
+		resource.TestStep{
+			ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+			Config:                   strings.Replace(config, "domain_blocked          = true", "domain_blocked          = false", 1),
+		},
+		resource.TestStep{
+			ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+			Config:                   strings.Replace(config, "domain_blocked          = true", "domain_blocked          = false", 1),
+			PlanOnly:                 true,
 		},
 	)
 }

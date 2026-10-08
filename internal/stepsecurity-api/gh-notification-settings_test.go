@@ -131,3 +131,44 @@ func TestDeleteNotificationSettingsOptsOutOfThreatIntel(t *testing.T) {
 	assert.Equal(t, "false", request.NotifyForCompromisedPyPIInPR)
 	assert.Equal(t, "false", request.NotifyForCompromisedActionInWorkflow)
 }
+
+// TestNotificationSettingsChannelsRoundTrip pins the translation between the
+// provider's "" and the backend's clear value. The backend skips empty fields,
+// so a cleared channel has to go out as "empty", and the " " earlier provider
+// versions wrote must read back as "".
+func TestNotificationSettingsChannelsRoundTrip(t *testing.T) {
+	t.Parallel()
+
+	var sent GitHubNotificationSettingsRequest
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet {
+			_, _ = w.Write([]byte(`{"email":"empty","slackWebhookURL":" ","teamsWebhookURL":"https://teams.example.com","slackNotificationMethod":""}`))
+			return
+		}
+		body, err := io.ReadAll(r.Body)
+		require.NoError(t, err)
+		require.NoError(t, json.Unmarshal(body, &sent))
+		_, _ = w.Write([]byte(`{}`))
+	}))
+	t.Cleanup(server.Close)
+
+	client := &APIClient{HTTPClient: server.Client(), BaseURL: server.URL, Customer: "test-customer"}
+
+	require.NoError(t, client.CreateNotificationSettings(context.Background(), GitHubNotificationSettingsRequest{
+		Owner:                "test-owner",
+		NotificationSettings: NotificationSettings{TeamsWebhookURL: "https://teams.example.com"},
+	}))
+	assert.Equal(t, "empty", sent.Email)
+	assert.Equal(t, "empty", sent.SlackWebhookURL)
+	assert.Equal(t, "empty", sent.SlackChannelID)
+	assert.Equal(t, "https://teams.example.com", sent.TeamsWebhookURL)
+	assert.Equal(t, SlackNotificationMethodWebhook, sent.SlackNotificationMethod)
+
+	got, err := client.GetNotificationSettings(context.Background(), "test-owner")
+	require.NoError(t, err)
+	assert.Equal(t, "", got.Email)
+	assert.Equal(t, "", got.SlackWebhookURL)
+	assert.Equal(t, "", got.SlackChannelID)
+	assert.Equal(t, "https://teams.example.com", got.TeamsWebhookURL)
+	assert.Equal(t, SlackNotificationMethodWebhook, got.SlackNotificationMethod)
+}
