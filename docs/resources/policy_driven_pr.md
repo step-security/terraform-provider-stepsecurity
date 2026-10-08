@@ -62,6 +62,7 @@ resource "stepsecurity_policy_driven_pr" "repo_level_config" {
     pin_actions_to_sha                    = true
     restrict_github_token_permissions     = true
     secure_docker_file                    = true
+    dockerfile_patterns                   = ["Dockerfile.*", "*.Dockerfile"] # also pin files with these names, not only "Dockerfile"; requires secure_docker_file = true
     labels_to_replace = {
       "ubuntu-latest-8-cores" = "ubuntu-latest"
       "windows-latest-large"  = "windows-latest"
