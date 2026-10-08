@@ -26,18 +26,36 @@ provider "stepsecurity" {
   customer = "abcdefg"  # can also be set as env variable STEP_SECURITY_CUSTOMER
 }
 
-# Enable both controls for the npm registry
+# Enable all controls for the npm registry
 resource "stepsecurity_secure_registry_policy" "npm_full" {
   registry = "npm"
 
   cooldown_control = {
     enabled        = true
     period_in_days = 7
-    exemption_list = ["@babel/core@*", "react", "@scope/*", "lodash@4.17.21"]
+    exemption_list = ["@babel/core@*", "react@1.2.3", "@scope/*", "lodash@4.17.21"]
   }
 
   compromised_packages_control = {
     enabled = true
+  }
+
+  typosquatting_control = {
+    enabled        = true
+    exemption_list = ["reactt", "lodashh"]
+  }
+
+  custom_block_list_control = {
+    enabled  = true
+    patterns = ["lodash@4.17.20", "@scope/*", "left-pad@*"]
+  }
+
+  npm_settings = {
+    rewrite_tarball_urls = true
+
+    # Optional, npm only. Placeholders are validated at plan time.
+    block_message_template          = "False positive? Raise a PR against example-org/exclusions for {{package}} (control: {{control}})."
+    hidden_versions_notice_template = "{{count}} of {{package}} hidden ({{details}}). Questions: #platform-security"
   }
 }
 
@@ -66,6 +84,164 @@ import {
   to = stepsecurity_secure_registry_policy.npm_full
   id = "npm"
 }
+
+# Enable all controls for the PyPI registry (npm_settings is npm-only, omitted here)
+resource "stepsecurity_secure_registry_policy" "pypi_full" {
+  registry = "pypi"
+
+  cooldown_control = {
+    enabled        = true
+    period_in_days = 7
+    exemption_list = ["requests@*", "django@1.*", "flask@3.0.3"]
+  }
+
+  compromised_packages_control = {
+    enabled = true
+  }
+
+  custom_block_list_control = {
+    enabled  = false
+    patterns = ["requests@2.25.0", "insecure-package@*"]
+  }
+}
+
+# Enable only the compromised packages control for PyPI
+resource "stepsecurity_secure_registry_policy" "pypi_compromised_only" {
+  registry = "pypi"
+
+  compromised_packages_control = {
+    enabled = true
+  }
+}
+
+# Enable only the cooldown control for PyPI with no exemptions
+resource "stepsecurity_secure_registry_policy" "pypi_cooldown_only" {
+  registry = "pypi"
+
+  cooldown_control = {
+    enabled        = true
+    period_in_days = 3
+  }
+}
+
+# For importing an existing PyPI registry policy into Terraform state
+import {
+  to = stepsecurity_secure_registry_policy.pypi_full
+  id = "pypi"
+}
+
+# Enable cooldown and compromised packages controls for Maven Central
+# (custom_block_list_control, typosquatting_control, and npm_settings are not applicable to maven)
+resource "stepsecurity_secure_registry_policy" "maven_full" {
+  registry = "maven"
+
+  cooldown_control = {
+    enabled        = true
+    period_in_days = 7
+  }
+
+  compromised_packages_control = {
+    enabled = true
+  }
+}
+
+# For importing an existing Maven registry policy into Terraform state
+import {
+  to = stepsecurity_secure_registry_policy.maven_full
+  id = "maven"
+}
+
+# Enable all applicable controls for NuGet
+# (typosquatting_control and npm_settings are not applicable to nuget)
+resource "stepsecurity_secure_registry_policy" "nuget_full" {
+  registry = "nuget"
+
+  cooldown_control = {
+    enabled        = true
+    period_in_days = 7
+  }
+
+  compromised_packages_control = {
+    enabled = true
+  }
+
+  custom_block_list_control = {
+    enabled  = true
+    patterns = ["Newtonsoft.Json@1*"]
+  }
+}
+
+# Go modules: cooldown, compromised packages, block list and go_settings.
+# (typosquatting_control and npm_settings are not applicable to go)
+resource "stepsecurity_secure_registry_policy" "go_full" {
+  registry = "go"
+
+  cooldown_control = {
+    enabled        = true
+    period_in_days = 7
+  }
+
+  compromised_packages_control = {
+    enabled = true
+  }
+
+  custom_block_list_control = {
+    enabled  = true
+    patterns = ["github.com/example-org/legacy@*"]
+
+    # Require released tags: refuse pseudo-versions and raw commit or branch revisions.
+    block_pseudo_versions = ["*"]
+  }
+
+  go_settings = {
+    proxy_checksum_db = false
+  }
+}
+
+# RubyGems: typosquatting_control, npm_settings and go_settings are not applicable.
+resource "stepsecurity_secure_registry_policy" "ruby_full" {
+  registry = "ruby"
+
+  cooldown_control = {
+    enabled        = true
+    period_in_days = 7
+  }
+
+  compromised_packages_control = {
+    enabled = true
+  }
+
+  custom_block_list_control = {
+    enabled  = true
+    patterns = ["example-gem@*"]
+  }
+}
+
+# Cargo (crates.io): block_yanked_versions is cargo-only.
+resource "stepsecurity_secure_registry_policy" "cargo_full" {
+  registry = "cargo"
+
+  cooldown_control = {
+    enabled        = true
+    period_in_days = 7
+  }
+
+  compromised_packages_control = {
+    enabled = true
+  }
+
+  custom_block_list_control = {
+    enabled               = true
+    patterns              = ["example-crate@*"]
+    block_yanked_versions = true
+  }
+}
+
+# For importing an existing NuGet registry policy into Terraform state
+import {
+  to = stepsecurity_secure_registry_policy.nuget_full
+  id = "nuget"
+}
 ```
 
 <!-- schema generated by tfplugindocs -->
@@ -73,12 +249,16 @@ import {
 
 ### Required
 
-- `registry` (String) The package registry to configure. Currently supported: `npm`.
+- `registry` (String) The package registry to configure. Currently supported: `npm`, `pypi`, `maven`, `nuget`, `go`, `ruby`, `cargo`.
 
 ### Optional
 
 - `compromised_packages_control` (Attributes) Blocks packages flagged as compromised or reported as malicious by the security community. (see [below for nested schema](#nestedatt--compromised_packages_control))
 - `cooldown_control` (Attributes) Blocks packages published within a configurable number of days, giving the community time to vet new releases. (see [below for nested schema](#nestedatt--cooldown_control))
+- `custom_block_list_control` (Attributes) Explicitly blocks packages or versions matching configured glob patterns. Supported for `npm`, `pypi`, `nuget`, `go`, `ruby` and `cargo`; not applicable to `maven`. (see [below for nested schema](#nestedatt--custom_block_list_control))
+- `go_settings` (Attributes) Go-specific registry settings. Only applicable when `registry = "go"`; setting this for any other registry raises a plan-time error. (see [below for nested schema](#nestedatt--go_settings))
+- `npm_settings` (Attributes) npm-specific registry settings. Only applicable when `registry = "npm"`; setting this for any other registry raises a plan-time error. (see [below for nested schema](#nestedatt--npm_settings))
+- `typosquatting_control` (Attributes) Blocks packages whose names are heuristically similar to popular packages (advisory typosquatting detection). Only applicable when `registry = "npm"`; setting this for any other registry raises a plan-time error. (see [below for nested schema](#nestedatt--typosquatting_control))
 
 <a id="nestedatt--compromised_packages_control"></a>
 ### Nested Schema for `compromised_packages_control`
@@ -97,8 +277,55 @@ Required:
 
 Optional:
 
-- `exemption_list` (Set of String) Packages exempt from the cooldown period. Supports exact names, version globs (`lodash@*`), scoped wildcards (`@scope/*`), and exact versions (`react@18.2.0`). Order-insensitive — reordering entries produces no plan diff.
+- `exemption_list` (Set of String) Packages exempt from the cooldown period. Supports exact names, version globs (`package@*`), and exact versions (`package@1.2.3`). For npm, scoped wildcards (`@scope/*`) are also supported. Order-insensitive — reordering entries produces no plan diff.
 - `period_in_days` (Number) Number of days to quarantine newly-published package versions. Must be between 1 and 30.
+
+
+<a id="nestedatt--custom_block_list_control"></a>
+### Nested Schema for `custom_block_list_control`
+
+Required:
+
+- `enabled` (Boolean) Whether the custom block list control is enabled.
+
+Optional:
+
+- `block_pseudo_versions` (Set of String) Module globs whose versions must be released tags. Pseudo-versions and raw commit or branch revisions are refused for matching modules; `*` applies the rule to every module. Only applicable when `registry = "go"`; setting this for any other registry raises a plan-time error. Order-insensitive.
+- `block_yanked_versions` (Boolean) Hard-blocks crate versions that crates.io has yanked, even when they are pinned in a `Cargo.lock`. Only applicable when `registry = "cargo"`; setting this for any other registry raises a plan-time error. Defaults to `false`.
+- `patterns` (Set of String) Package/version glob patterns to block. Supports exact names, version globs (`package@*`), and exact versions (`package@1.2.3`). For npm, scoped wildcards (`@scope/*`) are also supported. Order-insensitive — reordering entries produces no plan diff.
+
+
+<a id="nestedatt--go_settings"></a>
+### Nested Schema for `go_settings`
+
+Required:
+
+- `proxy_checksum_db` (Boolean) Serve the Go checksum database through the secure registry instead of letting the client reach `sum.golang.org` directly. Leave off unless build runners have no egress to `sum.golang.org`; module verification happens either way.
+
+
+<a id="nestedatt--npm_settings"></a>
+### Nested Schema for `npm_settings`
+
+Required:
+
+- `rewrite_tarball_urls` (Boolean) Whether to rewrite `dist.tarball` URLs in npm package metadata so tarballs are served through the secure registry.
+
+Optional:
+
+- `block_message_template` (String) Text appended to the error returned when npm traffic is blocked by Secure Registry (for example, `False positive? Raise a PR against example-org/exclusions for {{package}}.`). It only reaches developers for full-package blocks (typosquatting, compromised package wildcard, block list entries like `name@*`) and tarball downloads. It cannot appear when a single version is silently removed from package metadata (cooldown, compromised version, block list `name@1.2.3`), because that is not an error response. Only npm and yarn classic print the error body; pnpm, yarn berry and bun show only `403 Forbidden`. Supported placeholders: `{{package}}`, `{{version}}` (empty for package-level blocks), `{{control}}` (`typosquatting`, `compromised`, `custom_block_list` or `cooldown`), `{{reason}}` and `{{ecosystem}}`. Maximum 500 characters, a single line of printable text. Removing the attribute clears the message.
+- `hidden_versions_notice_template` (String) Replaces the default notice shown when cooldown, compromised packages or the custom block list remove versions from a package's metadata. When unset, the default text is used. Only the npm CLI prints it (`npm notice ...`); pnpm, yarn and bun do not. To make npm show it on every install, the registry sends `Cache-Control: no-store` to the npm CLI only, so those package documents are re-downloaded instead of cached. Supported placeholders: `{{package}}`, `{{count}}`, `{{versions}}` (the 2 newest hidden versions), `{{cooldown_days}}` (the configured cooldown period), `{{details}}` (the default per-control text, for example `cooldown (7 days): 26.6.4, 25.9.9 (+2 more)`) and `{{ecosystem}}`. Maximum 300 characters, a single line of printable text. Removing the attribute restores the default text.
+
+
+<a id="nestedatt--typosquatting_control"></a>
+### Nested Schema for `typosquatting_control`
+
+Required:
+
+- `enabled` (Boolean) Whether the typosquatting control is enabled.
+
+Optional:
+
+- `exemption_list` (Set of String) Package names exempt from typosquatting detection, overriding false positives. Order-insensitive — reordering entries produces no plan diff.
 
 ## Import
 

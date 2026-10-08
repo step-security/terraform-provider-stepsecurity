@@ -9,12 +9,16 @@ import (
 
 var (
 	AvailableControls = map[string]string{
-		"NPM Package Compromised Updates":  "npm_package_compromised_updates",
-		"NPM Package Cooldown":             "npm_package_recent_release_guard",
-		"PWN Request":                      "pwn_request_check",
-		"PyPI Package Compromised Updates": "pypi_package_compromised_updates",
-		"PyPI Package Cooldown":            "pypi_package_cooldown",
-		"Script Injection":                 "script_injection_check",
+		"Maven Package Compromised Updates": "maven_package_compromised_updates",
+		"Maven Package Cooldown":            "maven_package_cooldown",
+		"NPM Package Compromised Updates":   "npm_package_compromised_updates",
+		"NPM Package Cooldown":              "npm_package_recent_release_guard",
+		"NuGet Package Compromised Updates": "nuget_package_compromised_updates",
+		"NuGet Package Cooldown":            "nuget_package_cooldown",
+		"PWN Request":                       "pwn_request_check",
+		"PyPI Package Compromised Updates":  "pypi_package_compromised_updates",
+		"PyPI Package Cooldown":             "pypi_package_cooldown",
+		"Script Injection":                  "script_injection_check",
 	}
 )
 
@@ -55,23 +59,19 @@ func GetAvailableControls() []string {
 	return controls
 }
 
-func GetControlName(control string) string {
-	switch control {
-	case "npm_package_compromised_updates":
-		return "NPM Package Compromised Updates"
-	case "npm_package_recent_release_guard":
-		return "NPM Package Cooldown"
-	case "pwn_request_check":
-		return "PWN Request"
-	case "pypi_package_compromised_updates":
-		return "PyPI Package Compromised Updates"
-	case "pypi_package_cooldown":
-		return "PyPI Package Cooldown"
-	case "script_injection_check":
-		return "Script Injection"
-	default:
-		return ""
+// controlNamesByCheck is the reverse of AvailableControls, so the display name for a check
+// never has to be maintained separately from the check name it maps to.
+var controlNamesByCheck = func() map[string]string {
+	names := make(map[string]string, len(AvailableControls))
+	for name, check := range AvailableControls {
+		names[check] = name
 	}
+	return names
+}()
+
+// GetControlName returns the display name for a check name, or "" if the check is unknown.
+func GetControlName(control string) string {
+	return controlNamesByCheck[control]
 }
 
 func (c *APIClient) GetPRChecksConfig(ctx context.Context, owner string) (GitHubPRChecksConfig, error) {

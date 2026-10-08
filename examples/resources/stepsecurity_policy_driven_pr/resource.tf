@@ -53,12 +53,25 @@ resource "stepsecurity_policy_driven_pr" "repo_level_config" {
     }
     actions_to_exempt_while_pinning               = ["actions/checkout", "actions/setup-node"]
     actions_to_replace_with_step_security_actions = ["enricomi/publish-unit-test-result-action", "tj-actions/changed-files"]
-    replace_action_on_major_tag_match             = true                         # actions in actions_to_replace_with_step_security_actions are replaced only when the major tag matches
-    actions_exempted_from_replacement             = ["fkirc/skip-*", "amannn/*"] // either actions_to_replace_with_step_security_actions or actions_exempted_from_replacement can be set at a time unless its *
-    images_to_exempt_while_pinning                = ["amazon*"]
+    custom_actions_to_replace = {
+      "third-party-actions/dynamodb-actions" = "step-security/dynamodb-actions"
+    }                                                                // replaces all third-party actions with step-security/dynamodb-actions
+    replace_action_on_major_tag_match = true                         # actions in actions_to_replace_with_step_security_actions are replaced only when the major tag matches
+    actions_exempted_from_replacement = ["fkirc/skip-*", "amannn/*"] // either actions_to_replace_with_step_security_actions or actions_exempted_from_replacement can be set at a time unless its *
+    images_to_exempt_while_pinning    = ["amazon*"]
 
     # v2-only features (requires policy-driven PR v2 to be enabled)
     update_precommit_file = ["eslint"]
+    # Alternatively, provide a full .pre-commit-config.yaml instead of selecting
+    # hooks. custom_precommit_config and update_precommit_file are mutually
+    # exclusive, so uncomment this only after removing update_precommit_file above.
+    # The content is written as-is, no hook merging is done. When
+    # update_existing_configuration is false the config is only added to repos that
+    # do not already have one; when true, an existing config is overwritten.
+    # custom_precommit_config = {
+    #   config                        = "repos:\n  - repo: https://github.com/pre-commit/pre-commit-hooks\n    rev: v4.6.0\n    hooks:\n      - id: trailing-whitespace\n      - id: end-of-file-fixer\n"
+    #   update_existing_configuration = false
+    # }
     package_ecosystem = [
       {
         package       = "npm"
@@ -83,7 +96,8 @@ resource "stepsecurity_policy_driven_pr" "repo_level_config" {
     harden_runner_config = {
       update_existing_configuration = false
       config                        = "- name: Harden the runner (Audit all outbound calls)\n  uses: step-security/custom-agent@v2\n  with:\n    egress-policy: audit\n    allowed-endpoints: >\n      github.com:443\n"
-      target_runner_labels          = ["ubuntu-latest", "macos-latest"]
+      target_runner_labels          = ["ubuntu-latest", "macos-latest"] # only add harden-runner to jobs on these runners
+      exempt_runner_labels          = ["gpu-*", "self-hosted"]          # skip jobs on these runners (supports globs, takes precedence)
     }
   }
 }
@@ -127,7 +141,7 @@ resource "stepsecurity_policy_driven_pr" "org_level_with_exclusions" {
     restrict_github_token_permissions             = false
     secure_docker_file                            = false
     actions_to_replace_with_step_security_actions = ["*"]                        // all actions with stepsecurity actions will be replaced
-    actions_exempted_from_replacement             = ["fkirc/skip-*", "amannn/*"] // all actions except these will be replaced since its specified 
+    actions_exempted_from_replacement             = ["fkirc/skip-*", "amannn/*"] // all actions except these will be replaced since its specified
   }
 }
 

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -25,25 +26,27 @@ type PolicyDrivenPRPolicy struct {
 }
 
 type AutoRemdiationOptions struct {
-	CreatePR                                bool                `json:"create_pr"`
-	CreateIssue                             bool                `json:"create_issue"`
-	CreateGitHubAdvancedSecurityAlert       bool                `json:"create_github_advanced_security_alert"`
-	HardenGitHubHostedRunner                bool                `json:"harden_github_hosted_runner"`
-	PinActionsToSHA                         bool                `json:"pin_actions_to_sha"`
-	RestrictGitHubTokenPermissions          bool                `json:"restrict_github_token_permissions"`
-	SecureDockerFile                        bool                `json:"secure_docker_file"`
-	ActionsToExemptWhilePinning             []string            `json:"actions_to_exempt_while_pinning"`
-	ImagesToExemptWhilePinning              []string            `json:"images_to_exempt_while_pinning"`
-	ActionsToReplaceWithStepSecurityActions []string            `json:"actions_to_replace_with_step_security_actions"`
-	ReplaceByMajorTag                       *bool               `json:"replace_by_major_tag,omitempty"`
-	ExemptedFromReplacement                 []string            `json:"exempted_from_replacement,omitempty"`
-	UpdatePrecommitFile                     []string            `json:"update_precommit_file,omitempty"`
-	PackageEcosystem                        []DependabotConfig  `json:"package_ecosystem,omitempty"`
-	Subtractive                             *bool               `json:"subtractive,omitempty"`
-	AddWorkflows                            string              `json:"add_workflows,omitempty"`
-	ActionCommitMap                         map[string]string   `json:"action_commit_map"`
-	HardenRunnerConfig                      *HardenRunnerConfig `json:"harden_runner_config,omitempty"`
-	LabelsToReplace                         map[string]string   `json:"labels_to_replace,omitempty"`
+	CreatePR                                bool                   `json:"create_pr"`
+	CreateIssue                             bool                   `json:"create_issue"`
+	CreateGitHubAdvancedSecurityAlert       bool                   `json:"create_github_advanced_security_alert"`
+	HardenGitHubHostedRunner                bool                   `json:"harden_github_hosted_runner"`
+	PinActionsToSHA                         bool                   `json:"pin_actions_to_sha"`
+	RestrictGitHubTokenPermissions          bool                   `json:"restrict_github_token_permissions"`
+	SecureDockerFile                        bool                   `json:"secure_docker_file"`
+	ActionsToExemptWhilePinning             []string               `json:"actions_to_exempt_while_pinning"`
+	ImagesToExemptWhilePinning              []string               `json:"images_to_exempt_while_pinning"`
+	ActionsToReplaceWithStepSecurityActions []string               `json:"actions_to_replace_with_step_security_actions"`
+	CustomActionsToReplace                  map[string]string      `json:"custom_actions_to_replace,omitempty"`
+	ReplaceByMajorTag                       *bool                  `json:"replace_by_major_tag,omitempty"`
+	ExemptedFromReplacement                 []string               `json:"exempted_from_replacement,omitempty"`
+	UpdatePrecommitFile                     []string               `json:"update_precommit_file,omitempty"`
+	CustomPrecommitConfig                   *CustomPrecommitConfig `json:"custom_precommit_config,omitempty"`
+	PackageEcosystem                        []DependabotConfig     `json:"package_ecosystem,omitempty"`
+	Subtractive                             *bool                  `json:"subtractive,omitempty"`
+	AddWorkflows                            string                 `json:"add_workflows,omitempty"`
+	ActionCommitMap                         map[string]string      `json:"action_commit_map"`
+	HardenRunnerConfig                      *HardenRunnerConfig    `json:"harden_runner_config,omitempty"`
+	LabelsToReplace                         map[string]string      `json:"labels_to_replace,omitempty"`
 }
 
 // API request/response structures matching agent-api
@@ -64,20 +67,22 @@ type issuePRConfig struct {
 }
 
 type controlSettings struct {
-	ExemptedActions                     []string                             `json:"exempted_actions,omitempty"`
-	ActionsToReplace                    map[string]string                    `json:"actions_to_replace,omitempty"`
+	ExemptedActions                     []string                             `json:"exempted_actions"`
+	ActionsToReplace                    map[string]string                    `json:"actions_to_replace"`
+	CustomActionsToReplace              map[string]string                    `json:"custom_actions_to_replace"`
 	ReplaceByMajorTag                   *bool                                `json:"replace_by_major_tag,omitempty"`
-	ExemptedFromReplacement             []string                             `json:"exempted_from_replacement,omitempty"`
+	ExemptedFromReplacement             []string                             `json:"exempted_from_replacement"`
 	ReplaceAllActions                   *bool                                `json:"replace_all_actions,omitempty"`
 	LabelsToReplace                     map[string]string                    `json:"labels_to_replace"`
-	UpdatePrecommitFile                 map[string]bool                      `json:"update_precommit_file,omitempty"`
+	UpdatePrecommitFile                 map[string]bool                      `json:"update_precommit_file"`
+	CustomPrecommitConfig               *CustomPrecommitConfig               `json:"custom_precommit_config,omitempty"`
 	PackageEcosystem                    []DependabotConfig                   `json:"package_ecosystem,omitempty"`
 	Subtractive                         *bool                                `json:"subtractive,omitempty"`
 	AddWorkflows                        string                               `json:"add_workflows,omitempty"`
 	ApplyIssuePRConfigForAllRepos       *bool                                `json:"apply_issue_pr_config_for_all_repos,omitempty"`
 	ApplyIssuePRConfigForAllReposFilter *ApplyIssuePRConfigForAllReposFilter `json:"apply_issue_pr_config_for_all_repos_filter,omitempty"`
 	ActionCommitMap                     map[string]string                    `json:"action_commit_map"`
-	ExemptedImages                      []string                             `json:"exempted_images,omitempty"`
+	ExemptedImages                      []string                             `json:"exempted_images"`
 	HardenRunnerConfig                  *HardenRunnerConfig                  `json:"harden_runner_config,omitempty"`
 }
 
@@ -93,11 +98,31 @@ type DependabotConfig struct {
 	OptionsYAML  string `json:"options_yaml,omitempty"`
 }
 
+// HardenRunnerConfig is sent as a whole object: the API replaces it rather than merging
+// it field by field. Both label fields are serialized unconditionally, without omitempty,
+// so clearing either one reaches the API as an explicit empty list instead of a missing
+// key, and does not depend on that replace-vs-merge behavior staying as it is.
 type HardenRunnerConfig struct {
-	Config           string   `json:"config"`
-	Subtractive      bool     `json:"subtractive"`
-	SkipHardenRunner bool     `json:"skipHardenRunner"`
-	RunnerLabels     []string `json:"runnerLabels"`
+	Config             string   `json:"config"`
+	Subtractive        bool     `json:"subtractive"`
+	SkipHardenRunner   bool     `json:"skipHardenRunner"`
+	RunnerLabels       []string `json:"runnerLabels"`
+	ExemptRunnerLabels []string `json:"exemptRunnerLabels"`
+}
+
+// CustomPrecommitConfig is a full .pre-commit-config.yaml provided verbatim.
+// UpdateExistingConfiguration gates overwriting an existing file: false leaves an
+// existing config untouched (only creates when absent); true overwrites it.
+//
+// Neither field carries omitempty. The API stores this object wholesale, so both an
+// empty config and update_existing_configuration=false have to travel as explicit
+// values: with omitempty, turning the flag back off would drop the key and leave the
+// request unable to say "false" at all. Whether the object itself is present is carried
+// by the enclosing pointer, which is where omitempty belongs, since a nil pointer is the
+// only way to express "no custom config configured".
+type CustomPrecommitConfig struct {
+	Config                      string `json:"config"`
+	UpdateExistingConfiguration bool   `json:"update_existing_configuration"`
 }
 
 type featureConfigResponse struct {
@@ -153,6 +178,17 @@ func (c *APIClient) CreatePolicyDrivenPRPolicy(ctx context.Context, createReques
 		replaceAllActions = &t
 	}
 
+	// actions_to_replace and replace_all_actions are mutually exclusive on the API side,
+	// and the check there is for presence rather than content: a non-nil empty map still
+	// counts as sending the field. actions_to_replace is serialized without omitempty so
+	// that an empty map clears the stored value, which means an empty map built for a
+	// replace-all request would reach the API and be rejected. Drop it, since it carries
+	// no information. A non-empty map is left alone so a genuine conflict is still
+	// reported by the API instead of silently discarding the configured actions.
+	if replaceAllActions != nil && len(actionsToReplace) == 0 {
+		actionsToReplace = nil
+	}
+
 	// Build control checks config
 	controlChecksConfig := make(controlChecksFeatureConfig)
 	createPR := createRequest.AutoRemdiationOptions.CreatePR
@@ -194,14 +230,16 @@ func (c *APIClient) CreatePolicyDrivenPRPolicy(ctx context.Context, createReques
 	}
 
 	if len(createRequest.AutoRemdiationOptions.ActionsToReplaceWithStepSecurityActions) > 0 ||
-		len(createRequest.AutoRemdiationOptions.ExemptedFromReplacement) > 0 {
+		len(createRequest.AutoRemdiationOptions.ExemptedFromReplacement) > 0 ||
+		len(createRequest.AutoRemdiationOptions.CustomActionsToReplace) > 0 {
 		controlChecksConfig["MaintainedGitHubActionsShouldBeUsed"] = issuePRConfig{
 			TriggerGithubIssue: createIssue,
 			TriggerGithubPr:    createPR,
 		}
 	}
 
-	if len(createRequest.AutoRemdiationOptions.UpdatePrecommitFile) > 0 {
+	if len(createRequest.AutoRemdiationOptions.UpdatePrecommitFile) > 0 ||
+		createRequest.AutoRemdiationOptions.CustomPrecommitConfig != nil {
 		controlChecksConfig["UpdatePrecommitFile"] = issuePRConfig{
 			TriggerGithubIssue: createIssue,
 			TriggerGithubPr:    createPR,
@@ -230,11 +268,13 @@ func (c *APIClient) CreatePolicyDrivenPRPolicy(ctx context.Context, createReques
 	cs := &controlSettings{
 		ExemptedActions:                     createRequest.AutoRemdiationOptions.ActionsToExemptWhilePinning,
 		ActionsToReplace:                    actionsToReplace,
+		CustomActionsToReplace:              createRequest.AutoRemdiationOptions.CustomActionsToReplace,
 		ReplaceByMajorTag:                   createRequest.AutoRemdiationOptions.ReplaceByMajorTag,
 		ExemptedFromReplacement:             createRequest.AutoRemdiationOptions.ExemptedFromReplacement,
 		ReplaceAllActions:                   replaceAllActions,
 		LabelsToReplace:                     createRequest.AutoRemdiationOptions.LabelsToReplace,
 		UpdatePrecommitFile:                 updatePrecommitFileMap,
+		CustomPrecommitConfig:               createRequest.AutoRemdiationOptions.CustomPrecommitConfig,
 		PackageEcosystem:                    createRequest.AutoRemdiationOptions.PackageEcosystem,
 		Subtractive:                         createRequest.AutoRemdiationOptions.Subtractive,
 		AddWorkflows:                        createRequest.AutoRemdiationOptions.AddWorkflows,
@@ -413,17 +453,19 @@ func (c *APIClient) GetPolicyDrivenPRPolicy(ctx context.Context, owner string, r
 	enabledSecureDocker := selectedConfig.ControlChecksConfig["SecureDockerFile"].TriggerGithubIssue ||
 		selectedConfig.ControlChecksConfig["SecureDockerFile"].TriggerGithubPr
 
-	// Extract actions to replace
+	// Extract actions to replace (sorted for deterministic ordering)
 	actionsToReplace := []string{}
 	for action := range selectedConfig.ControlSettings.ActionsToReplace {
 		actionsToReplace = append(actionsToReplace, action)
 	}
+	sort.Strings(actionsToReplace)
 
-	// Convert update_precommit_file from map to array
+	// Convert update_precommit_file from map to array (sorted for deterministic ordering)
 	updatePrecommitFiles := []string{}
 	for file := range selectedConfig.ControlSettings.UpdatePrecommitFile {
 		updatePrecommitFiles = append(updatePrecommitFiles, file)
 	}
+	sort.Strings(updatePrecommitFiles)
 
 	// Set policy fields - repos will be set by the caller based on state
 	policy.UseRepoLevelConfig = !isOrgLevel
@@ -440,9 +482,11 @@ func (c *APIClient) GetPolicyDrivenPRPolicy(ctx context.Context, owner string, r
 		ActionsToExemptWhilePinning:             selectedConfig.ControlSettings.ExemptedActions,
 		ImagesToExemptWhilePinning:              selectedConfig.ControlSettings.ExemptedImages,
 		ActionsToReplaceWithStepSecurityActions: actionsToReplace,
+		CustomActionsToReplace:                  selectedConfig.ControlSettings.CustomActionsToReplace,
 		ReplaceByMajorTag:                       selectedConfig.ControlSettings.ReplaceByMajorTag,
 		ExemptedFromReplacement:                 selectedConfig.ControlSettings.ExemptedFromReplacement,
 		UpdatePrecommitFile:                     updatePrecommitFiles,
+		CustomPrecommitConfig:                   selectedConfig.ControlSettings.CustomPrecommitConfig,
 		PackageEcosystem:                        selectedConfig.ControlSettings.PackageEcosystem,
 		Subtractive:                             selectedConfig.ControlSettings.Subtractive,
 		AddWorkflows:                            selectedConfig.ControlSettings.AddWorkflows,
@@ -631,17 +675,19 @@ func (c *APIClient) DiscoverPolicyDrivenPRConfig(ctx context.Context, owner stri
 	enabledSecureDocker := selectedConfig.ControlChecksConfig["SecureDockerFile"].TriggerGithubIssue ||
 		selectedConfig.ControlChecksConfig["SecureDockerFile"].TriggerGithubPr
 
-	// Extract actions to replace
+	// Extract actions to replace (sorted for deterministic ordering)
 	actionsToReplace := []string{}
 	for action := range selectedConfig.ControlSettings.ActionsToReplace {
 		actionsToReplace = append(actionsToReplace, action)
 	}
+	sort.Strings(actionsToReplace)
 
-	// Convert update_precommit_file from map to array
+	// Convert update_precommit_file from map to array (sorted for deterministic ordering)
 	updatePrecommitFiles := []string{}
 	for file := range selectedConfig.ControlSettings.UpdatePrecommitFile {
 		updatePrecommitFiles = append(updatePrecommitFiles, file)
 	}
+	sort.Strings(updatePrecommitFiles)
 
 	policy.SelectedRepos = selectedRepos
 	policy.UseRepoLevelConfig = !useOrgLevel
@@ -658,9 +704,11 @@ func (c *APIClient) DiscoverPolicyDrivenPRConfig(ctx context.Context, owner stri
 		ActionsToExemptWhilePinning:             selectedConfig.ControlSettings.ExemptedActions,
 		ImagesToExemptWhilePinning:              selectedConfig.ControlSettings.ExemptedImages,
 		ActionsToReplaceWithStepSecurityActions: actionsToReplace,
+		CustomActionsToReplace:                  selectedConfig.ControlSettings.CustomActionsToReplace,
 		ReplaceByMajorTag:                       selectedConfig.ControlSettings.ReplaceByMajorTag,
 		ExemptedFromReplacement:                 selectedConfig.ControlSettings.ExemptedFromReplacement,
 		UpdatePrecommitFile:                     updatePrecommitFiles,
+		CustomPrecommitConfig:                   selectedConfig.ControlSettings.CustomPrecommitConfig,
 		PackageEcosystem:                        selectedConfig.ControlSettings.PackageEcosystem,
 		Subtractive:                             selectedConfig.ControlSettings.Subtractive,
 		AddWorkflows:                            selectedConfig.ControlSettings.AddWorkflows,

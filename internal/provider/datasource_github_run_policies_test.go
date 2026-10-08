@@ -69,11 +69,20 @@ func TestGithubRunPoliciesDataSource_ReadMappingWithPinnedActions(t *testing.T) 
 		"harden_runner_target_labels":       types.SetNull(types.StringType),
 		"harden_runner_custom_actions":      types.SetNull(types.StringType),
 		"enable_runs_on_policy":             types.BoolValue(policy.PolicyConfig.EnableRunsOnPolicy),
+		"enable_standard_runner_labels":     types.BoolValue(policy.PolicyConfig.EnableStandardRunnerLabels),
 		"disallowed_runner_labels":          types.SetNull(types.StringType),
 		"enable_secrets_policy":             types.BoolValue(policy.PolicyConfig.EnableSecretsPolicy),
 		"enable_compromised_actions_policy": types.BoolValue(policy.PolicyConfig.EnableCompromisedActionsPolicy),
 		"require_pinned_actions":            types.BoolValue(policy.PolicyConfig.RequirePinnedActions),
 		"is_dry_run":                        types.BoolValue(policy.PolicyConfig.IsDryRun),
+		"bulk_secrets_only_mode":            types.BoolValue(policy.PolicyConfig.BulkSecretsOnlyMode),
+		"pr_comment_template":               types.StringValue(policy.PolicyConfig.PrCommentTemplate),
+		"runs_on_mode":                      types.StringValue(policy.PolicyConfig.RunsOnMode),
+		"allowed_runner_labels":             types.SetNull(types.StringType),
+		"allowed_runner_constraints":        types.MapNull(types.SetType{ElemType: types.StringType}),
+		"require_policy_store":              types.BoolValue(policy.PolicyConfig.RequirePolicyStore),
+		"block_job_container":               types.BoolValue(policy.PolicyConfig.BlockJobContainer),
+		"secrets_analyze_default_branch":    types.BoolValue(policy.PolicyConfig.SecretsAnalyzeDefaultBranch),
 	}
 
 	pinnedExemptionsList := make([]attr.Value, len(policy.PolicyConfig.PinnedActionsExemptions))
@@ -93,12 +102,21 @@ func TestGithubRunPoliciesDataSource_ReadMappingWithPinnedActions(t *testing.T) 
 		"harden_runner_target_labels":       types.SetType{ElemType: types.StringType},
 		"harden_runner_custom_actions":      types.SetType{ElemType: types.StringType},
 		"enable_runs_on_policy":             types.BoolType,
+		"enable_standard_runner_labels":     types.BoolType,
 		"disallowed_runner_labels":          types.SetType{ElemType: types.StringType},
 		"enable_secrets_policy":             types.BoolType,
 		"enable_compromised_actions_policy": types.BoolType,
 		"require_pinned_actions":            types.BoolType,
 		"actions_to_exempt_while_pinning":   types.SetType{ElemType: types.StringType},
 		"is_dry_run":                        types.BoolType,
+		"bulk_secrets_only_mode":            types.BoolType,
+		"pr_comment_template":               types.StringType,
+		"runs_on_mode":                      types.StringType,
+		"allowed_runner_labels":             types.SetType{ElemType: types.StringType},
+		"allowed_runner_constraints":        types.MapType{ElemType: types.SetType{ElemType: types.StringType}},
+		"require_policy_store":              types.BoolType,
+		"block_job_container":               types.BoolType,
+		"secrets_analyze_default_branch":    types.BoolType,
 	}
 
 	policyConfigObj, objDiags := types.ObjectValue(policyConfigAttrTypes, policyConfigAttrs)
@@ -320,12 +338,21 @@ type githubRunPolicyDataSourcePolicyConfigModel struct {
 	HardenRunnerTargetLabels       types.Set    `tfsdk:"harden_runner_target_labels"`
 	HardenRunnerCustomActions      types.Set    `tfsdk:"harden_runner_custom_actions"`
 	EnableRunsOnPolicy             types.Bool   `tfsdk:"enable_runs_on_policy"`
+	EnableStandardRunnerLabels     types.Bool   `tfsdk:"enable_standard_runner_labels"`
 	DisallowedRunnerLabels         types.Set    `tfsdk:"disallowed_runner_labels"`
 	EnableSecretsPolicy            types.Bool   `tfsdk:"enable_secrets_policy"`
 	EnableCompromisedActionsPolicy types.Bool   `tfsdk:"enable_compromised_actions_policy"`
 	RequirePinnedActions           types.Bool   `tfsdk:"require_pinned_actions"`
 	PinnedActionsExemptions        types.Set    `tfsdk:"actions_to_exempt_while_pinning"`
 	IsDryRun                       types.Bool   `tfsdk:"is_dry_run"`
+	BulkSecretsOnlyMode            types.Bool   `tfsdk:"bulk_secrets_only_mode"`
+	PrCommentTemplate              types.String `tfsdk:"pr_comment_template"`
+	RunsOnMode                     types.String `tfsdk:"runs_on_mode"`
+	AllowedRunnerLabels            types.Set    `tfsdk:"allowed_runner_labels"`
+	AllowedRunnerConstraints       types.Map    `tfsdk:"allowed_runner_constraints"`
+	RequirePolicyStore             types.Bool   `tfsdk:"require_policy_store"`
+	BlockJobContainer              types.Bool   `tfsdk:"block_job_container"`
+	SecretsAnalyzeDefaultBranch    types.Bool   `tfsdk:"secrets_analyze_default_branch"`
 }
 
 func testGithubRunPoliciesDataSourceSchema(t *testing.T) datasourceschema.Schema {
@@ -374,12 +401,21 @@ func testRunPolicyDataSourceAttrTypes() map[string]attr.Type {
 			"harden_runner_target_labels":       types.SetType{ElemType: types.StringType},
 			"harden_runner_custom_actions":      types.SetType{ElemType: types.StringType},
 			"enable_runs_on_policy":             types.BoolType,
+			"enable_standard_runner_labels":     types.BoolType,
 			"disallowed_runner_labels":          types.SetType{ElemType: types.StringType},
 			"enable_secrets_policy":             types.BoolType,
 			"enable_compromised_actions_policy": types.BoolType,
 			"require_pinned_actions":            types.BoolType,
 			"actions_to_exempt_while_pinning":   types.SetType{ElemType: types.StringType},
 			"is_dry_run":                        types.BoolType,
+			"bulk_secrets_only_mode":            types.BoolType,
+			"pr_comment_template":               types.StringType,
+			"runs_on_mode":                      types.StringType,
+			"allowed_runner_labels":             types.SetType{ElemType: types.StringType},
+			"allowed_runner_constraints":        types.MapType{ElemType: types.SetType{ElemType: types.StringType}},
+			"require_policy_store":              types.BoolType,
+			"block_job_container":               types.BoolType,
+			"secrets_analyze_default_branch":    types.BoolType,
 		}},
 	}
 }

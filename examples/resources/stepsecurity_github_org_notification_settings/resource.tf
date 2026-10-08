@@ -40,6 +40,18 @@ resource "stepsecurity_github_org_notification_settings" "test-organization" {
     required_check_failures               = false
     optional_check_failures               = false
   }
+  # Threat Intel notifications for compromised components found in this
+  # organization's pull requests and workflows. Omit the block to leave the
+  # organization's current setting alone — Threat Intel notifications are
+  # opt-out, so an organization that has never configured them is notified about
+  # every incident.
+  #
+  # Tenant-wide Threat Intel notifications are configured separately, on
+  # stepsecurity_tenant_notification_settings.
+  threat_intel = {
+    enabled = true
+    level   = "version" # all | name | version
+  }
 }
 
 
