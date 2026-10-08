@@ -73,10 +73,11 @@ output "harden_runner_policies" {
   value = [
     for policy in data.stepsecurity_github_run_policies.all_policies.run_policies :
     {
-      name                         = policy.name
-      policy_id                    = policy.policy_id
-      harden_runner_target_labels  = policy.policy_config.harden_runner_target_labels
-      harden_runner_custom_actions = policy.policy_config.harden_runner_custom_actions
+      name                          = policy.name
+      policy_id                     = policy.policy_id
+      harden_runner_target_labels   = policy.policy_config.harden_runner_target_labels
+      harden_runner_excluded_labels = policy.policy_config.harden_runner_excluded_labels
+      harden_runner_custom_actions  = policy.policy_config.harden_runner_custom_actions
     }
     if policy.policy_config.enable_harden_runner_policy
   ]
@@ -212,6 +213,7 @@ Read-Only:
 - `enable_secrets_policy` (Boolean) Whether the secrets policy is enabled.
 - `enable_standard_runner_labels` (Boolean) Whether the GitHub-hosted standard runner label set is added to the policy labels at evaluation time.
 - `harden_runner_custom_actions` (Set of String) Set of custom actions accepted as Harden Runner equivalents (in addition to `step-security/harden-runner`).
+- `harden_runner_excluded_labels` (Set of String) Set of runner labels excluded from Harden Runner enforcement, regardless of `harden_runner_target_labels`. Entries support a `*` wildcard and match case-insensitively. Null when no labels are excluded.
 - `harden_runner_target_labels` (Set of String) Set of runner labels that target Harden Runner enforcement. When `enable_harden_runner_policy` is true, an empty set means the policy applies to every job; a non-empty set filters to jobs whose `runs-on` matches at least one label. When the policy is disabled, this attribute is null.
 - `is_dry_run` (Boolean) Whether this policy is in dry-run mode.
 - `name` (String) The name of the policy configuration.
