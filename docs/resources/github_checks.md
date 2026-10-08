@@ -159,24 +159,15 @@ resource "stepsecurity_github_checks" "test-organization-nuget" {
 
 ### Required
 
+- `controls` (Attributes List) (see [below for nested schema](#nestedatt--controls))
 - `owner` (String) Owner(organization) Name
 
 ### Optional
 
 - `baseline_check` (Attributes) Configuration for baseline check (see [below for nested schema](#nestedatt--baseline_check))
-- `controls` (Attributes List) (see [below for nested schema](#nestedatt--controls))
 - `custom_description` (String) Custom description text appended to all check summaries.
 - `optional_checks` (Attributes) Configuration for optional checks (see [below for nested schema](#nestedatt--optional_checks))
 - `required_checks` (Attributes) Configuration for required checks (see [below for nested schema](#nestedatt--required_checks))
-
-<a id="nestedatt--baseline_check"></a>
-### Nested Schema for `baseline_check`
-
-Optional:
-
-- `omit_repos` (List of String) List of repositories for baseline check.Can be specified only when '*' is specified in repos section.
-- `repos` (List of String) List of repositories the baseline applies to (supports '*')
-
 
 <a id="nestedatt--controls"></a>
 ### Nested Schema for `controls`
@@ -199,6 +190,15 @@ Optional:
 - `cool_down_period` (Number) Cooldown period values (e.g., days). Only applicable to npm/PyPI/Maven/NuGet cooldown checks. Default is 2 days.
 - `packages_to_exempt_in_cooldown_check` (List of String) Package names to exempt from cooldown checks. Only applicable to npm/PyPI/Maven/NuGet cooldown checks.
 
+
+
+<a id="nestedatt--baseline_check"></a>
+### Nested Schema for `baseline_check`
+
+Optional:
+
+- `omit_repos` (List of String) List of repositories for baseline check.Can be specified only when '*' is specified in repos section.
+- `repos` (List of String) List of repositories the baseline applies to (supports '*')
 
 
 <a id="nestedatt--optional_checks"></a>
