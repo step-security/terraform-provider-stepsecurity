@@ -1292,6 +1292,17 @@ func (r *policyDrivenPRResource) Read(ctx context.Context, req resource.ReadRequ
 		return
 	}
 
+	if stepSecurityPolicy.OrgConfigNotAppliedToAllRepos {
+		resp.Diagnostics.AddWarning(
+			"Policy-Driven PR Not Applied to All Repositories",
+			fmt.Sprintf("selected_repos is [\"*\"], but \"Apply to all repositories\" is turned off for '%s' in StepSecurity, "+
+				"so the org-level configuration is not applied to every repository. "+
+				"Applying this configuration turns it back on for all repositories in the organization. "+
+				"To keep it limited to specific repositories, list them in selected_repos instead.",
+				state.Owner.ValueString()),
+		)
+	}
+
 	// Extract current state's v2 feature values before updating
 	var currentStateOptions autoRemdiationOptionsModel
 	var hasV2FeaturesInState bool

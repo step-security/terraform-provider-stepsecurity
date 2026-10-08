@@ -23,6 +23,10 @@ type PolicyDrivenPRPolicy struct {
 	SelectedReposFilter   ApplyIssuePRConfigForAllReposFilter `json:"selected_repos_filter"`
 	UseRepoLevelConfig    bool                                `json:"use_repo_level_config"`
 	UseOrgLevelConfig     bool                                `json:"use_org_level_config"`
+	// OrgConfigNotAppliedToAllRepos is set on a wildcard read when the org-level [all]
+	// config still carries settings but "apply to all repositories" is turned off, so
+	// those settings are not reaching every repo. It is read-only and never sent.
+	OrgConfigNotAppliedToAllRepos bool `json:"-"`
 }
 
 type AutoRemdiationOptions struct {
@@ -409,8 +413,15 @@ func (c *APIClient) GetPolicyDrivenPRPolicy(ctx context.Context, owner string, r
 		}
 
 		if config != nil && isConfigEnabled(*config) {
-			selectedConfig = *config
-			configFound = true
+			if isAppliedToAllRepos(*config) {
+				selectedConfig = *config
+				configFound = true
+			} else {
+				// The [all] row outlives "apply to all repositories" being turned off: the
+				// console keeps it as the org template for individually selected repos. Its
+				// settings no longer reach every repo, so it does not back a wildcard.
+				policy.OrgConfigNotAppliedToAllRepos = true
+			}
 		}
 	} else {
 		// Query each repo individually for repo-level config
@@ -634,7 +645,7 @@ func (c *APIClient) DiscoverPolicyDrivenPRConfig(ctx context.Context, owner stri
 		} else {
 			// Extract repo name from full_repo_name (owner/repo)
 			repoName := cfg.FullRepoName[len(owner)+1:]
-			if isConfigEnabled(cfg.PolicyDrivenPRConfiguration) {
+			if isRepoSelected(cfg.PolicyDrivenPRConfiguration) {
 				repoConfigs = append(repoConfigs, repoName)
 			}
 		}
@@ -645,8 +656,8 @@ func (c *APIClient) DiscoverPolicyDrivenPRConfig(ctx context.Context, owner stri
 	var selectedRepos []string
 	var useOrgLevel bool
 
-	if orgLevelConfig != nil && isConfigEnabled(*orgLevelConfig) {
-		// Org-level config exists
+	if orgLevelConfig != nil && isConfigEnabled(*orgLevelConfig) && isAppliedToAllRepos(*orgLevelConfig) {
+		// Org-level config applied to all repositories
 		selectedConfig = *orgLevelConfig
 		selectedRepos = []string{"*"}
 		useOrgLevel = true
@@ -727,6 +738,21 @@ func isConfigEnabled(config policyDrivenPRInternal) bool {
 	return config.TriggerGithubAlert ||
 		config.TriggerPRInsteadOfIssue ||
 		len(config.ControlChecksConfig) > 0
+}
+
+// isAppliedToAllRepos reports whether the org-level [all] config is applied to every
+// repo. The backend only fans the [all] config out to repos when this flag is set;
+// with it off, [all] is just the template for repos that opt into the org config.
+func isAppliedToAllRepos(config policyDrivenPRInternal) bool {
+	return config.ControlSettings.ApplyIssuePRConfigForAllRepos != nil &&
+		*config.ControlSettings.ApplyIssuePRConfigForAllRepos
+}
+
+// isRepoSelected reports whether a repo row is part of the policy. A repo is selected
+// when it uses either the org-level or its own repo-level config, which is how the
+// console decides it; settings left on a row with both flags off do not apply.
+func isRepoSelected(config policyDrivenPRInternal) bool {
+	return (config.UseOrgLevelConfig || config.UseRepoLevelConfig) && isConfigEnabled(config)
 }
 
 func (c *APIClient) DeletePolicyDrivenPRPolicy(ctx context.Context, owner string, repos []string) error {
