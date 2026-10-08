@@ -166,6 +166,10 @@ resource "stepsecurity_policy_driven_pr" "org_level_with_filter" {
 # Destroying the org-level resource, or changing its selected_repos from ["*"] to
 # specific repos, resets the configuration of every repo in the organization,
 # including repo-x and repo-y; apply again to restore them.
+#
+# Because of depends_on, `terraform destroy -target` on org_default also destroys
+# org_exempted_repos. To remove only the org-level resource, delete it (and the
+# depends_on reference) from the configuration and apply.
 resource "stepsecurity_policy_driven_pr" "org_default" {
   owner          = "test-organization"
   selected_repos = ["*"]
