@@ -91,9 +91,9 @@ resource "stepsecurity_policy_driven_pr" "repo_level_config" {
       {
         package       = "npm"
         interval      = "daily"
-        cooldown_yaml = "default-days: 7\nsemver-major-days: 30\n"
-        groups_yaml   = "production-dependencies:\n  patterns:\n    - \"*\"\n  exclude-patterns:\n    - \"@types/*\"\n"
-        options_yaml  = "day: friday\ntime: \"14:00\"\ntimezone: Europe/London\nallow:\n  - dependency-name: vue\n    dependency-type: production\nassignees:\n  - user3\n  - user4\n  - user5\ncommit-message:\n  prefix: chore\n  prefix-development: build\n  include: scope\nignore:\n  - dependency-name: moment\n    versions:\n      - \"1.x\"\nlabels:\n  - deps\n  - automated\nmilestone: 10\nopen-pull-requests-limit: 5\npull-request-branch-name:\n  separator: \"-\"\nrebase-strategy: disabled\nreviewers:\n  - platform-team\ntarget-branch: main\nversioning-strategy: lockfile-only\nregistries:\n  - npm-private\n  - github-registry\nexclude-paths:\n  - \"build/*\"\n  - \".cache/*\"\nvendor: false\ninsecure-external-code-execution: deny\nmulti-ecosystem-group: updated-group\nenable-beta-ecosystems: true\n"
+        cooldown_yaml = "default-days: 5\nsemver-major-days: 30\nsemver-minor-days: 7\nsemver-patch-days: 3\ninclude:\n  - \"*\"\nexclude:\n  - \"@example-org/*\"\n"
+        groups_yaml   = "production-dependencies:\n  dependency-type: production\n  update-types:\n    - minor\n    - patch\ndevelopment-dependencies:\n  dependency-type: development\n  patterns:\n    - \"*\"\n"
+        options_yaml  = "time: \"09:00\"\ntimezone: America/New_York\nopen-pull-requests-limit: 10\nversioning-strategy: increase\nlabels:\n  - dependencies\n  - javascript\ncommit-message:\n  prefix: chore\n  prefix-development: build\n  include: scope\nignore:\n  - dependency-name: aws-sdk\n    versions:\n      - \"2.x\"\n"
       },
       {
         package  = "pip"
