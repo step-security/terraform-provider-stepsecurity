@@ -70,6 +70,21 @@ func (r *policyDrivenPRResource) Metadata(_ context.Context, req resource.Metada
 // Schema defines the schema for the resource.
 func (r *policyDrivenPRResource) Schema(_ context.Context, _ resource.SchemaRequest, resp *resource.SchemaResponse) {
 	resp.Schema = schema.Schema{
+		MarkdownDescription: "Manages policy-driven PRs for a GitHub organization in StepSecurity.\n\n" +
+			"Each resource applies one set of `auto_remediation_options` to the repositories it selects:\n\n" +
+			"- `selected_repos = [\"*\"]` applies the settings at the organization level, to every repository, " +
+			"and turns on \"Apply to all repositories\". Use `excluded_repos` to opt repositories out, and " +
+			"`selected_repos_filter` to limit it to repositories with given topics.\n" +
+			"- A list of repositories applies the settings to each of those repositories as its own repo-level configuration.\n\n" +
+			"To give some repositories different settings, use one resource per set of settings: an organization-level " +
+			"resource that lists those repositories in `excluded_repos`, plus a resource that selects them, as shown in the examples below. " +
+			"Each repository should be selected by only one resource, otherwise the resources overwrite each other's settings on every apply. " +
+			"Destroying an organization-level resource, or changing its `selected_repos` from `[\"*\"]` to specific repositories, " +
+			"resets the policy-driven PR configuration of every repository in the organization, including those managed by other resources; " +
+			"apply again to restore them.\n\n" +
+			"Import reads the organization's current configuration. It imports `[\"*\"]` when \"Apply to all repositories\" is on, " +
+			"and otherwise the repositories that are selected. Because one resource holds one set of settings, import fails when the " +
+			"selected repositories have different settings; give them the same settings first, or declare one resource per set of settings without importing.",
 		Attributes: map[string]schema.Attribute{
 			"id": schema.StringAttribute{
 				Computed: true,

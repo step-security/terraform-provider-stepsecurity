@@ -3,12 +3,25 @@
 page_title: "stepsecurity_policy_driven_pr Resource - stepsecurity"
 subcategory: ""
 description: |-
-  
+  Manages policy-driven PRs for a GitHub organization in StepSecurity.
+  Each resource applies one set of auto_remediation_options to the repositories it selects:
+  selected_repos = ["*"] applies the settings at the organization level, to every repository, and turns on "Apply to all repositories". Use excluded_repos to opt repositories out, and selected_repos_filter to limit it to repositories with given topics.A list of repositories applies the settings to each of those repositories as its own repo-level configuration.
+  To give some repositories different settings, use one resource per set of settings: an organization-level resource that lists those repositories in excluded_repos, plus a resource that selects them, as shown in the examples below. Each repository should be selected by only one resource, otherwise the resources overwrite each other's settings on every apply. Destroying an organization-level resource, or changing its selected_repos from ["*"] to specific repositories, resets the policy-driven PR configuration of every repository in the organization, including those managed by other resources; apply again to restore them.
+  Import reads the organization's current configuration. It imports ["*"] when "Apply to all repositories" is on, and otherwise the repositories that are selected. Because one resource holds one set of settings, import fails when the selected repositories have different settings; give them the same settings first, or declare one resource per set of settings without importing.
 ---
 
 # stepsecurity_policy_driven_pr (Resource)
 
+Manages policy-driven PRs for a GitHub organization in StepSecurity.
 
+Each resource applies one set of `auto_remediation_options` to the repositories it selects:
+
+- `selected_repos = ["*"]` applies the settings at the organization level, to every repository, and turns on "Apply to all repositories". Use `excluded_repos` to opt repositories out, and `selected_repos_filter` to limit it to repositories with given topics.
+- A list of repositories applies the settings to each of those repositories as its own repo-level configuration.
+
+To give some repositories different settings, use one resource per set of settings: an organization-level resource that lists those repositories in `excluded_repos`, plus a resource that selects them, as shown in the examples below. Each repository should be selected by only one resource, otherwise the resources overwrite each other's settings on every apply. Destroying an organization-level resource, or changing its `selected_repos` from `["*"]` to specific repositories, resets the policy-driven PR configuration of every repository in the organization, including those managed by other resources; apply again to restore them.
+
+Import reads the organization's current configuration. It imports `["*"]` when "Apply to all repositories" is on, and otherwise the repositories that are selected. Because one resource holds one set of settings, import fails when the selected repositories have different settings; give them the same settings first, or declare one resource per set of settings without importing.
 
 ## Example Usage
 
@@ -119,8 +132,10 @@ resource "stepsecurity_policy_driven_pr" "repo_level_config" {
 # ============================================================================
 # Scenario 3: Org-level config with exclusions (opt-out specific repos)
 # ============================================================================
-# Applies org-level config to all repos EXCEPT the ones in excluded_repos
-# Excluded repos will not have any policy-driven PR config applied
+# Applies org-level config to all repos EXCEPT the ones in excluded_repos.
+# Excluded repos keep the configuration they already had (for example one set by
+# another stepsecurity_policy_driven_pr resource, see Scenario 5); repos that had
+# none are left without policy-driven PR config.
 resource "stepsecurity_policy_driven_pr" "org_level_with_exclusions" {
   owner          = "test-organization"
   selected_repos = ["*"]
@@ -140,7 +155,7 @@ resource "stepsecurity_policy_driven_pr" "org_level_with_exclusions" {
 # Scenario 4: Org-level config with filter
 # ============================================================================
 # Applies org-level config to all repos that match the filter
-resource "stepsecurity_policy_driven_pr" "org_level_with_exclusions" {
+resource "stepsecurity_policy_driven_pr" "org_level_with_filter" {
   owner          = "test-organization"
   selected_repos = ["*"]
   selected_repos_filter = {
@@ -161,10 +176,94 @@ resource "stepsecurity_policy_driven_pr" "org_level_with_exclusions" {
 
 
 # ============================================================================
+# Scenario 5: Org-level config, with a few repos on their own shared config
+# ============================================================================
+# Every repo gets the org-level settings except repo-x and repo-y, which share a
+# different set of settings. Use one resource per set of settings:
+#   - the org-level resource lists repo-x and repo-y in excluded_repos, so the org
+#     settings never overwrite them;
+#   - a second resource selects exactly those repos with their own settings.
+# depends_on makes the second resource apply after the org-level one. Without it both
+# can run at the same time, and the org-level resource can clear repo-x and repo-y
+# while the second resource is writing them.
+#
+# Keep excluded_repos and the second resource's selected_repos in sync, and select
+# each repo in only one resource: two resources that select the same repo overwrite
+# each other's settings on every apply.
+#
+# Destroying the org-level resource, or changing its selected_repos from ["*"] to
+# specific repos, resets the configuration of every repo in the organization,
+# including repo-x and repo-y; apply again to restore them.
+resource "stepsecurity_policy_driven_pr" "org_default" {
+  owner          = "test-organization"
+  selected_repos = ["*"]
+  excluded_repos = ["repo-x", "repo-y"] # managed by org_exempted_repos below
+  auto_remediation_options = {
+    create_pr                         = true
+    create_issue                      = false
+    harden_github_hosted_runner       = true
+    pin_actions_to_sha                = true
+    restrict_github_token_permissions = true
+  }
+}
+
+resource "stepsecurity_policy_driven_pr" "org_exempted_repos" {
+  owner          = "test-organization"
+  selected_repos = ["repo-x", "repo-y"]
+  auto_remediation_options = {
+    create_pr                       = true
+    create_issue                    = false
+    pin_actions_to_sha              = true
+    actions_to_exempt_while_pinning = ["actions/checkout"]
+  }
+
+  depends_on = [stepsecurity_policy_driven_pr.org_default]
+}
+
+# ============================================================================
+# Scenario 6: Different settings for different groups of repos (no org-level config)
+# ============================================================================
+# Each group of repos that shares settings is its own resource with an explicit
+# list of repos. Repos not listed in any resource have no policy-driven PR config.
+# Select each repo in only one resource.
+resource "stepsecurity_policy_driven_pr" "backend_repos" {
+  owner          = "test-organization"
+  selected_repos = ["api-service", "worker-service"]
+  auto_remediation_options = {
+    create_pr                         = true
+    create_issue                      = false
+    harden_github_hosted_runner       = true
+    restrict_github_token_permissions = true
+    secure_docker_file                = true
+  }
+}
+
+resource "stepsecurity_policy_driven_pr" "frontend_repos" {
+  owner          = "test-organization"
+  selected_repos = ["web-app", "docs-site"]
+  auto_remediation_options = {
+    create_pr          = false
+    create_issue       = true # open issues instead of PRs for these repos
+    pin_actions_to_sha = true
+  }
+}
+
+# ============================================================================
 # For importing existing policy driven pr config to terraform state
 # ============================================================================
 # This will be helpful to manage existing policy driven pr config using terraform
 # Alternative to this is to use terraform import command
+#
+# The import ID is the organization name, and import produces one resource:
+#   - When "Apply to all repositories" is on, it imports selected_repos = ["*"]
+#     with the org-level settings. Repos that are excluded or have their own
+#     repo-level settings are not imported; declare them as in Scenario 5.
+#   - Otherwise it imports the repos that are selected, when they all have the same
+#     settings.
+#   - When the selected repos have different settings, import fails and lists the
+#     repos grouped by settings, because one resource can only hold one set of
+#     settings. Give them the same settings in StepSecurity and import again, or
+#     declare one resource per group (as in Scenario 6) instead of importing.
 import {
   to = stepsecurity_policy_driven_pr.org_level_all
   id = "test-organization"

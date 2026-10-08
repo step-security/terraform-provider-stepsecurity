@@ -2,6 +2,7 @@ package stepsecurityapi
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -29,6 +30,8 @@ const (
 	repoRowRepoSelected = `{"full_repo_name":"org/repoC","policy_driven_pr_configuration":{"use_repo_level_config":true,"use_org_level_config":false,"control_checks_config":{"ActionsShouldBePinned":{"trigger_github_issue":false,"trigger_github_pr":true}},"trigger_github_alert":false,"trigger_pr_instead_of_issue":true,"control_settings":{"apply_issue_pr_config_for_all_repos":false}}}`
 	// repoRowStaleTriggers keeps triggers but uses neither org nor repo config, so it is not part of the policy.
 	repoRowStaleTriggers = `{"full_repo_name":"org/repoD","policy_driven_pr_configuration":{"use_repo_level_config":false,"use_org_level_config":false,"control_checks_config":{"GitHubHostedRunnerShouldBeHardened":{"trigger_github_issue":false,"trigger_github_pr":true}},"trigger_github_alert":false,"trigger_pr_instead_of_issue":true,"control_settings":{}}}`
+	// repoRowRepoSelectedSameAsB has its own repo-level config with repoB's settings.
+	repoRowRepoSelectedSameAsB = `{"full_repo_name":"org/repoE","policy_driven_pr_configuration":{"use_repo_level_config":true,"use_org_level_config":false,"control_checks_config":{"GitHubHostedRunnerShouldBeHardened":{"trigger_github_issue":false,"trigger_github_pr":true}},"trigger_github_alert":false,"trigger_pr_instead_of_issue":true,"control_settings":{}}}`
 )
 
 // newConfigsClient returns a client whose config GETs all answer with the given rows,
@@ -93,11 +96,11 @@ func TestDiscoverPolicyDrivenPRConfig_ApplyToAll(t *testing.T) {
 			wantHardening: true,
 		},
 		{
-			// Both org-config and repo-config selections count; a row with triggers but
-			// neither flag set does not.
-			name:          "selection_follows_level_flags",
-			rows:          []string{allRowNotAppliedToAll, repoRowOrgSelected, repoRowRepoSelected, repoRowStaleTriggers},
-			wantRepos:     []string{"repoB", "repoC"},
+			// Org-config and repo-config selections both count when their settings
+			// match; a row with triggers but neither flag set does not.
+			name:          "matching_org_and_repo_level_selections_import_together",
+			rows:          []string{allRowNotAppliedToAll, repoRowOrgSelected, repoRowRepoSelectedSameAsB, repoRowStaleTriggers},
+			wantRepos:     []string{"repoB", "repoE"},
 			wantOrgLevel:  false,
 			wantHardening: true,
 		},
@@ -184,4 +187,72 @@ func TestGetPolicyDrivenPRPolicy_SpecificReposIgnoreAllRow(t *testing.T) {
 		assert.True(t, policy.UseRepoLevelConfig)
 		assert.False(t, policy.OrgConfigNotAppliedToAllRepos)
 	}
+}
+
+// One resource sends one set of settings to every repo it selects. Importing repos
+// whose settings differ into one resource would overwrite all but one group on the
+// next apply, so import has to refuse instead of picking one repo's settings.
+func TestDiscoverPolicyDrivenPRConfig_MixedSettings(t *testing.T) {
+	t.Run("different_controls_fail_import", func(t *testing.T) {
+		client := newConfigsClient(t, allRowNotAppliedToAll, repoRowOrgSelected, repoRowRepoSelected, repoRowRepoSelectedSameAsB)
+
+		_, err := client.DiscoverPolicyDrivenPRConfig(context.Background(), "org")
+		require.Error(t, err)
+
+		msg := err.Error()
+		assert.Contains(t, msg, "do not all have the same policy-driven PR settings")
+		assert.Contains(t, msg, "  - repoB, repoE: create_pr, harden_github_hosted_runner\n")
+		assert.Contains(t, msg, "  - repoC: create_pr, pin_actions_to_sha\n")
+		assert.Contains(t, msg, "declare one stepsecurity_policy_driven_pr resource per group")
+	})
+
+	// Two repos with the same enabled controls can still differ in their lists.
+	t.Run("different_exemptions_fail_import", func(t *testing.T) {
+		client := newConfigsClient(t,
+			`{"full_repo_name":"org/r1","policy_driven_pr_configuration":{"use_repo_level_config":true,"control_checks_config":{"ActionsShouldBePinned":{"trigger_github_pr":true}},"trigger_pr_instead_of_issue":true,"control_settings":{"exempted_actions":["actions/checkout"]}}}`,
+			`{"full_repo_name":"org/r2","policy_driven_pr_configuration":{"use_repo_level_config":true,"control_checks_config":{"ActionsShouldBePinned":{"trigger_github_pr":true}},"trigger_pr_instead_of_issue":true,"control_settings":{"exempted_actions":["actions/setup-node"]}}}`,
+		)
+
+		_, err := client.DiscoverPolicyDrivenPRConfig(context.Background(), "org")
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "  - r1: create_pr, pin_actions_to_sha\n")
+		assert.Contains(t, err.Error(), "  - r2: create_pr, pin_actions_to_sha\n")
+	})
+
+	// List order, and an absent versus an empty list or map, mean the same to the API,
+	// so they must not split repos with the same settings into separate groups.
+	t.Run("order_and_empty_values_do_not_split_groups", func(t *testing.T) {
+		client := newConfigsClient(t,
+			`{"full_repo_name":"org/r1","policy_driven_pr_configuration":{"use_repo_level_config":true,"control_checks_config":{"ActionsShouldBePinned":{"trigger_github_pr":true}},"trigger_pr_instead_of_issue":true,"control_settings":{"exempted_actions":["a/x","b/y"],"labels_to_replace":{},"package_ecosystem":[{"package":"pip","interval":"weekly"},{"package":"npm","interval":"daily"}]}}}`,
+			`{"full_repo_name":"org/r2","policy_driven_pr_configuration":{"use_org_level_config":true,"control_checks_config":{"ActionsShouldBePinned":{"trigger_github_pr":true}},"trigger_pr_instead_of_issue":true,"control_settings":{"exempted_actions":["b/y","a/x"],"package_ecosystem":[{"package":"npm","interval":"daily"},{"package":"pip","interval":"weekly"}],"apply_issue_pr_config_for_all_repos":false}}}`,
+		)
+
+		policy, err := client.DiscoverPolicyDrivenPRConfig(context.Background(), "org")
+		require.NoError(t, err)
+		assert.Equal(t, []string{"r1", "r2"}, policy.SelectedRepos)
+		assert.True(t, policy.AutoRemdiationOptions.PinActionsToSHA)
+	})
+
+	// Large orgs must still get a readable error.
+	t.Run("long_groups_are_truncated", func(t *testing.T) {
+		rows := []string{repoRowRepoSelected}
+		for i := range 15 {
+			rows = append(rows, fmt.Sprintf(`{"full_repo_name":"org/h%02d","policy_driven_pr_configuration":{"use_org_level_config":true,"control_checks_config":{"GitHubHostedRunnerShouldBeHardened":{"trigger_github_pr":true}},"trigger_pr_instead_of_issue":true}}`, i))
+		}
+		client := newConfigsClient(t, rows...)
+
+		_, err := client.DiscoverPolicyDrivenPRConfig(context.Background(), "org")
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "h09 and 5 more: create_pr, harden_github_hosted_runner\n")
+		assert.NotContains(t, err.Error(), "h10")
+	})
+
+	// A wildcard policy is one set of settings by definition, whatever repo rows hold.
+	t.Run("apply_to_all_on_ignores_repo_rows", func(t *testing.T) {
+		client := newConfigsClient(t, allRowAppliedToAll, repoRowOrgSelected, repoRowRepoSelected)
+
+		policy, err := client.DiscoverPolicyDrivenPRConfig(context.Background(), "org")
+		require.NoError(t, err)
+		assert.Equal(t, []string{"*"}, policy.SelectedRepos)
+	})
 }
