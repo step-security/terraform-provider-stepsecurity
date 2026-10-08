@@ -756,6 +756,11 @@ func testRunPolicyConfigObjectValue(policyConfig policyConfigModel) types.Object
 		pinnedActionsExemptions = types.SetNull(types.StringType)
 	}
 
+	hardenRunnerExcludedLabels := policyConfig.HardenRunnerExcludedLabels
+	if reflect.DeepEqual(hardenRunnerExcludedLabels, types.Set{}) {
+		hardenRunnerExcludedLabels = types.SetNull(types.StringType)
+	}
+
 	allowedRunnerLabels := policyConfig.AllowedRunnerLabels
 	if reflect.DeepEqual(allowedRunnerLabels, types.Set{}) {
 		allowedRunnerLabels = types.SetNull(types.StringType)
@@ -773,6 +778,7 @@ func testRunPolicyConfigObjectValue(policyConfig policyConfigModel) types.Object
 		"allowed_actions":                   types.MapType{ElemType: types.StringType},
 		"enable_harden_runner_policy":       types.BoolType,
 		"harden_runner_target_labels":       types.SetType{ElemType: types.StringType},
+		"harden_runner_excluded_labels":     types.SetType{ElemType: types.StringType},
 		"harden_runner_custom_actions":      types.SetType{ElemType: types.StringType},
 		"enable_runs_on_policy":             types.BoolType,
 		"enable_standard_runner_labels":     types.BoolType,
@@ -798,6 +804,7 @@ func testRunPolicyConfigObjectValue(policyConfig policyConfigModel) types.Object
 		"allowed_actions":                   policyConfig.AllowedActions,
 		"enable_harden_runner_policy":       policyConfig.EnableHardenRunnerPolicy,
 		"harden_runner_target_labels":       policyConfig.HardenRunnerTargetLabels,
+		"harden_runner_excluded_labels":     hardenRunnerExcludedLabels,
 		"harden_runner_custom_actions":      policyConfig.HardenRunnerCustomActions,
 		"enable_runs_on_policy":             policyConfig.EnableRunsOnPolicy,
 		"enable_standard_runner_labels":     policyConfig.EnableStandardRunnerLabels,
