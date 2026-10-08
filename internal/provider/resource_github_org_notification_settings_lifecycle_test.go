@@ -287,3 +287,120 @@ func TestAccGithubOrgNotificationSettingsThreatIntelUpdate(t *testing.T) {
 		},
 	)
 }
+
+// TestAccGithubOrgNotificationSettingsImportConsoleOrg imports an org set up in
+// the console, which stores "empty" for a cleared channel and no Slack method
+// until OAuth is configured, and checks that the plan stays empty and that
+// clearing a channel still reaches the backend.
+func TestAccGithubOrgNotificationSettingsImportConsoleOrg(t *testing.T) {
+	backend := newFakeGithubNotificationSettingsBackend(map[string]any{
+		"email":                        "security@example.com",
+		"slackWebhookURL":              "empty",
+		"teamsWebhookURL":              "empty",
+		"notifyWhenDomainBlocked":      "true",
+		"notifyWhenEndpointDiscovered": "true",
+		"orgThreatIntelLevel":          "off",
+	})
+
+	config := githubOrgNotificationSettingsFixture("")
+	testAccGithubOrgNotificationSettings(t, backend,
+		resource.TestStep{
+			Config:             config,
+			ResourceName:       "stepsecurity_github_org_notification_settings.test",
+			ImportState:        true,
+			ImportStateId:      "step-terraform-tests",
+			ImportStatePersist: true,
+		},
+		resource.TestStep{
+			Config:   config,
+			PlanOnly: true,
+		},
+		resource.TestStep{
+			Config: strings.Replace(config, `email = "security@example.com"`, `slack_webhook_url = "https://hooks.slack.com/x"`, 1),
+			Check: func(*terraform.State) error {
+				if got := backend.storedString("email"); got != "empty" {
+					return fmt.Errorf("email = %q, want the cleared value %q", got, "empty")
+				}
+				if got := backend.storedString("slackNotificationMethod"); got != "webhook" {
+					return fmt.Errorf("slackNotificationMethod = %q, want %q", got, "webhook")
+				}
+				return nil
+			},
+		},
+	)
+}
+
+// TestAccGithubOrgNotificationSettingsLegacyBlankChannels refreshes an org
+// written by earlier provider versions, which stored " " for every cleared
+// channel and for the Slack method on destroy, and checks the plan stays empty.
+func TestAccGithubOrgNotificationSettingsLegacyBlankChannels(t *testing.T) {
+	backend := newFakeGithubNotificationSettingsBackend(map[string]any{
+		"email":                        "security@example.com",
+		"slackWebhookURL":              " ",
+		"teamsWebhookURL":              " ",
+		"slackChannelID":               " ",
+		"slackNotificationMethod":      " ",
+		"notifyWhenDomainBlocked":      "true",
+		"notifyWhenEndpointDiscovered": "true",
+		"orgThreatIntelLevel":          "off",
+	})
+
+	config := githubOrgNotificationSettingsFixture("")
+	testAccGithubOrgNotificationSettings(t, backend,
+		resource.TestStep{
+			Config:             config,
+			ResourceName:       "stepsecurity_github_org_notification_settings.test",
+			ImportState:        true,
+			ImportStateId:      "step-terraform-tests",
+			ImportStatePersist: true,
+		},
+		resource.TestStep{
+			Config:   config,
+			PlanOnly: true,
+		},
+	)
+}
+
+// TestAccGithubOrgNotificationSettingsLegacyClearSpellings keeps configurations
+// that spelled a cleared channel the way earlier provider versions needed (" "
+// or "empty", and an empty Slack method) planning clean, and checks the channel
+// still reaches the backend as cleared.
+func TestAccGithubOrgNotificationSettingsLegacyClearSpellings(t *testing.T) {
+	backend := newFakeGithubNotificationSettingsBackend(map[string]any{
+		"slackWebhookURL": "https://hooks.slack.com/old",
+	})
+
+	config := `
+resource "stepsecurity_github_org_notification_settings" "test" {
+  owner = "step-terraform-tests"
+
+  notification_channels = {
+    email                     = "security@example.com"
+    slack_webhook_url         = " "
+    teams_webhook_url         = "empty"
+    slack_notification_method = ""
+  }
+
+  notification_events = {
+    domain_blocked = true
+  }
+}
+`
+	testAccGithubOrgNotificationSettings(t, backend,
+		resource.TestStep{
+			Config: config,
+			Check: func(*terraform.State) error {
+				for _, key := range []string{"slackWebhookURL", "teamsWebhookURL", "slackChannelID"} {
+					if got := backend.storedString(key); got != "empty" {
+						return fmt.Errorf("%s = %q, want the cleared value %q", key, got, "empty")
+					}
+				}
+				return nil
+			},
+		},
+		resource.TestStep{
+			Config:   config,
+			PlanOnly: true,
+		},
+	)
+}
