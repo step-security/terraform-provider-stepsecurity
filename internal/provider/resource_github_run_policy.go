@@ -3,9 +3,11 @@ package provider
 import (
 	"context"
 	"fmt"
+	"regexp"
 	"strings"
 	"time"
 
+	"github.com/hashicorp/terraform-plugin-framework-validators/setvalidator"
 	"github.com/hashicorp/terraform-plugin-framework-validators/stringvalidator"
 	"github.com/hashicorp/terraform-plugin-framework/attr"
 	"github.com/hashicorp/terraform-plugin-framework/diag"
@@ -14,6 +16,7 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/booldefault"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
+	"github.com/hashicorp/terraform-plugin-framework/resource/schema/setplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringdefault"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/schema/validator"
@@ -30,6 +33,10 @@ var (
 	_ resource.ResourceWithConfigure   = &githubRunPolicyResource{}
 	_ resource.ResourceWithImportState = &githubRunPolicyResource{}
 )
+
+// nonBlankTrimmedPattern matches values with no leading or trailing whitespace. The
+// API trims entries and drops blank ones, so either would otherwise show up as drift.
+var nonBlankTrimmedPattern = regexp.MustCompile(`^\S(.*\S)?$`)
 
 // NewGithubRunPolicyResource is a helper function to simplify the provider implementation.
 func NewGithubRunPolicyResource() resource.Resource {
@@ -64,6 +71,7 @@ type policyConfigModel struct {
 	AllowedActions                 types.Map    `tfsdk:"allowed_actions"`
 	EnableHardenRunnerPolicy       types.Bool   `tfsdk:"enable_harden_runner_policy"`
 	HardenRunnerTargetLabels       types.Set    `tfsdk:"harden_runner_target_labels"`
+	HardenRunnerExcludedLabels     types.Set    `tfsdk:"harden_runner_excluded_labels"`
 	HardenRunnerCustomActions      types.Set    `tfsdk:"harden_runner_custom_actions"`
 	EnableRunsOnPolicy             types.Bool   `tfsdk:"enable_runs_on_policy"`
 	DisallowedRunnerLabels         types.Set    `tfsdk:"disallowed_runner_labels"`
@@ -168,6 +176,21 @@ func (r *githubRunPolicyResource) Schema(_ context.Context, _ resource.SchemaReq
 						ElementType:         types.StringType,
 						Optional:            true,
 						MarkdownDescription: "Set of runner labels that target Harden Runner enforcement. Set to `[]` to apply the policy to every job; set a non-empty list to filter to jobs whose `runs-on` matches at least one label. Omitting the attribute leaves any existing backend value untouched (additive-only).",
+					},
+					"harden_runner_excluded_labels": schema.SetAttribute{
+						ElementType:         types.StringType,
+						Optional:            true,
+						Computed:            true,
+						MarkdownDescription: "Set of runner labels excluded from Harden Runner enforcement. A job whose `runs-on` matches any entry is skipped, regardless of `harden_runner_target_labels`, so an org-wide policy can carve out runners that cannot run Harden Runner. Entries support a `*` wildcard (e.g. `custom-runner-*`), match case-insensitively, and are also tested against labels containing `${{ }}` expressions. A lone `*` is rejected because it would exclude every job. Set to `[]` to clear the exclusions; omitting the attribute leaves any existing backend value untouched.",
+						PlanModifiers: []planmodifier.Set{
+							setplanmodifier.UseStateForUnknown(),
+						},
+						Validators: []validator.Set{
+							setvalidator.ValueStringsAre(
+								stringvalidator.NoneOf("*"),
+								stringvalidator.RegexMatches(nonBlankTrimmedPattern, "must be non-empty and must not have leading or trailing whitespace"),
+							),
+						},
 					},
 					"harden_runner_custom_actions": schema.SetAttribute{
 						ElementType:         types.StringType,
@@ -386,6 +409,16 @@ func (r *githubRunPolicyResource) Create(ctx context.Context, req resource.Creat
 			return
 		}
 		createRequest.PolicyConfig.HardenRunnerTargetLabels = hardenRunnerTargetLabels
+	}
+
+	if !policyConfig.HardenRunnerExcludedLabels.IsNull() && !policyConfig.HardenRunnerExcludedLabels.IsUnknown() {
+		var hardenRunnerExcludedLabels []string
+		diags = policyConfig.HardenRunnerExcludedLabels.ElementsAs(ctx, &hardenRunnerExcludedLabels, false)
+		resp.Diagnostics.Append(diags...)
+		if resp.Diagnostics.HasError() {
+			return
+		}
+		createRequest.PolicyConfig.HardenRunnerExcludedLabels = hardenRunnerExcludedLabels
 	}
 
 	if !policyConfig.HardenRunnerCustomActions.IsNull() {
@@ -641,6 +674,18 @@ func (r *githubRunPolicyResource) Update(ctx context.Context, req resource.Updat
 			return
 		}
 		updateRequest.PolicyConfig.HardenRunnerTargetLabels = hardenRunnerTargetLabelValues
+	}
+
+	// The PUT replaces the whole policy, so an omitted attribute must still send the
+	// current value. UseStateForUnknown puts the prior state value in the plan for that.
+	if !policyConfig.HardenRunnerExcludedLabels.IsNull() && !policyConfig.HardenRunnerExcludedLabels.IsUnknown() {
+		var hardenRunnerExcludedLabelValues []string
+		diags = policyConfig.HardenRunnerExcludedLabels.ElementsAs(ctx, &hardenRunnerExcludedLabelValues, false)
+		resp.Diagnostics.Append(diags...)
+		if resp.Diagnostics.HasError() {
+			return
+		}
+		updateRequest.PolicyConfig.HardenRunnerExcludedLabels = hardenRunnerExcludedLabelValues
 	}
 
 	if !hardenRunnerCustomActions.IsNull() {
@@ -910,6 +955,20 @@ func (r *githubRunPolicyResource) updateModelFromAPI(ctx context.Context, model 
 		policyConfigAttrs["harden_runner_target_labels"] = types.SetNull(types.StringType)
 	}
 
+	if len(policy.PolicyConfig.HardenRunnerExcludedLabels) > 0 {
+		hardenRunnerExcludedLabelsList := make([]attr.Value, len(policy.PolicyConfig.HardenRunnerExcludedLabels))
+		for i, label := range policy.PolicyConfig.HardenRunnerExcludedLabels {
+			hardenRunnerExcludedLabelsList[i] = types.StringValue(label)
+		}
+		setValue, setDiags := types.SetValue(types.StringType, hardenRunnerExcludedLabelsList)
+		diags.Append(setDiags...)
+		policyConfigAttrs["harden_runner_excluded_labels"] = setValue
+	} else if preservedValue, ok := preservePreviousEmptySet(existingPolicyConfig.HardenRunnerExcludedLabels); hasExistingPolicyConfig && ok {
+		policyConfigAttrs["harden_runner_excluded_labels"] = preservedValue
+	} else {
+		policyConfigAttrs["harden_runner_excluded_labels"] = types.SetNull(types.StringType)
+	}
+
 	if len(policy.PolicyConfig.HardenRunnerCustomActions) > 0 {
 		hardenRunnerCustomActionsList := make([]attr.Value, len(policy.PolicyConfig.HardenRunnerCustomActions))
 		for i, action := range policy.PolicyConfig.HardenRunnerCustomActions {
@@ -1009,6 +1068,7 @@ func (r *githubRunPolicyResource) updateModelFromAPI(ctx context.Context, model 
 		"allowed_actions":                   types.MapType{ElemType: types.StringType},
 		"enable_harden_runner_policy":       types.BoolType,
 		"harden_runner_target_labels":       types.SetType{ElemType: types.StringType},
+		"harden_runner_excluded_labels":     types.SetType{ElemType: types.StringType},
 		"harden_runner_custom_actions":      types.SetType{ElemType: types.StringType},
 		"enable_runs_on_policy":             types.BoolType,
 		"enable_standard_runner_labels":     types.BoolType,
