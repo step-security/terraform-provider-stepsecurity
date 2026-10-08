@@ -244,6 +244,17 @@ func (r *policyDrivenPRResource) Schema(_ context.Context, _ resource.SchemaRequ
 							},
 						},
 					},
+					// A set rather than a list: the patterns are an unordered
+					// collection, so ordering carries no meaning and duplicates are
+					// never intended. Declaring that in the schema makes Terraform
+					// dedupe the config and ignore element order when diffing, instead
+					// of the provider realigning the API ordering against state to
+					// avoid a spurious diff.
+					"dockerfile_patterns": schema.SetAttribute{
+						ElementType: types.StringType,
+						Optional:    true,
+						Description: "Extra shell-glob patterns, matched case-insensitively against a file's name only (not its path), naming files that the Docker base image pinning control (secure_docker_file) should pin in addition to files named exactly 'Dockerfile'. The built-in rule always applies, so these can only ever pin more files, never fewer. Use this for repositories naming files 'Dockerfile.dev' or 'Containerfile'. Example: [\"Dockerfile.*\", \"Containerfile\"].",
+					},
 					"update_existing_configuration": schema.BoolAttribute{
 						Optional:    true,
 						Computed:    true,
@@ -414,6 +425,18 @@ func (r *policyDrivenPRResource) ImportState(ctx context.Context, req resource.I
 	}
 	exemptedFromReplacementList, _ := types.ListValueFrom(ctx, types.StringType, exemptedFromReplacementElements)
 
+	// Null rather than an empty set when unset: dockerfile_patterns is Optional
+	// and not Computed, so returning [] for a config that omits it would read as
+	// a permanent diff.
+	dockerfilePatternsSet := types.SetNull(types.StringType)
+	if len(policy.AutoRemdiationOptions.DockerfilePatterns) > 0 {
+		elements := make([]types.String, len(policy.AutoRemdiationOptions.DockerfilePatterns))
+		for i, pattern := range policy.AutoRemdiationOptions.DockerfilePatterns {
+			elements[i] = types.StringValue(pattern)
+		}
+		dockerfilePatternsSet, _ = types.SetValueFrom(ctx, types.StringType, elements)
+	}
+
 	var packageEcosystemList types.List
 	if len(policy.AutoRemdiationOptions.PackageEcosystem) > 0 {
 		var ecosystemObjects []attr.Value
@@ -539,6 +562,7 @@ func (r *policyDrivenPRResource) ImportState(ctx context.Context, req resource.I
 					},
 				},
 			},
+			"dockerfile_patterns":           types.SetType{ElemType: types.StringType},
 			"update_existing_configuration": types.BoolType,
 			"add_workflows":                 types.StringType,
 			"action_commit_map":             types.MapType{ElemType: types.StringType},
@@ -570,6 +594,7 @@ func (r *policyDrivenPRResource) ImportState(ctx context.Context, req resource.I
 			}()),
 			"update_precommit_file":             updatePrecommitFileList,
 			"package_ecosystem":                 packageEcosystemList,
+			"dockerfile_patterns":               dockerfilePatternsSet,
 			"actions_exempted_from_replacement": exemptedFromReplacementList,
 			"update_existing_configuration": types.BoolValue(func() bool {
 				if policy.AutoRemdiationOptions.Subtractive != nil {
@@ -670,6 +695,7 @@ type autoRemdiationOptionsModel struct {
 	UpdatePrecommitFile                     types.List   `tfsdk:"update_precommit_file"`
 	CustomPrecommitConfig                   types.Object `tfsdk:"custom_precommit_config"`
 	PackageEcosystem                        types.List   `tfsdk:"package_ecosystem"`
+	DockerfilePatterns                      types.Set    `tfsdk:"dockerfile_patterns"`
 	UpdateExistingConfiguration             types.Bool   `tfsdk:"update_existing_configuration"`
 	AddWorkflows                            types.String `tfsdk:"add_workflows"`
 	ActionCommitMap                         types.Map    `tfsdk:"action_commit_map"`
@@ -811,6 +837,20 @@ func (r *policyDrivenPRResource) ValidateConfig(ctx context.Context, req resourc
 				resp.Diagnostics.AddError(
 					"Invalid Configuration",
 					"harden_runner_config can only be set when harden_github_hosted_runner is true",
+				)
+			}
+		}
+
+		// The API reads dockerfile_patterns only when the base image pinning
+		// control is on, and drops it silently otherwise. Configuring patterns
+		// against a disabled control then looks like the patterns are broken
+		// rather than unused, so fail at plan time instead.
+		hasDockerfilePatterns := !options.DockerfilePatterns.IsNull() && !options.DockerfilePatterns.IsUnknown() && len(options.DockerfilePatterns.Elements()) > 0
+		if hasDockerfilePatterns {
+			if options.SecureDockerFile.IsNull() || !options.SecureDockerFile.ValueBool() {
+				resp.Diagnostics.AddError(
+					"Invalid Configuration",
+					"dockerfile_patterns can only be set when secure_docker_file is true",
 				)
 			}
 		}
@@ -1026,6 +1066,15 @@ func (r *policyDrivenPRResource) Create(ctx context.Context, req resource.Create
 		}
 	}
 
+	var dockerfilePatterns []string
+	if !options.DockerfilePatterns.IsNull() {
+		elements := options.DockerfilePatterns.Elements()
+		dockerfilePatterns = make([]string, len(elements))
+		for i, elem := range elements {
+			dockerfilePatterns[i] = elem.(types.String).ValueString()
+		}
+	}
+
 	// Extract new optional fields
 	var packageEcosystem []stepsecurityapi.DependabotConfig
 	if !options.PackageEcosystem.IsNull() {
@@ -1152,6 +1201,7 @@ func (r *policyDrivenPRResource) Create(ctx context.Context, req resource.Create
 			ExemptedFromReplacement:                 exemptedFromReplacement,
 			UpdatePrecommitFile:                     updatePrecommitFile,
 			PackageEcosystem:                        packageEcosystem,
+			DockerfilePatterns:                      dockerfilePatterns,
 			Subtractive:                             subtractive,
 			AddWorkflows:                            options.AddWorkflows.ValueString(),
 			ActionCommitMap:                         actionCommitMap,
@@ -1622,6 +1672,15 @@ func (r *policyDrivenPRResource) Update(ctx context.Context, req resource.Update
 		}
 	}
 
+	var dockerfilePatternsUpdate []string
+	if !planOptions.DockerfilePatterns.IsNull() {
+		elements := planOptions.DockerfilePatterns.Elements()
+		dockerfilePatternsUpdate = make([]string, len(elements))
+		for i, elem := range elements {
+			dockerfilePatternsUpdate[i] = elem.(types.String).ValueString()
+		}
+	}
+
 	// Extract new optional fields for update
 	var packageEcosystemPlan []stepsecurityapi.DependabotConfig
 	if !planOptions.PackageEcosystem.IsNull() {
@@ -1749,6 +1808,7 @@ func (r *policyDrivenPRResource) Update(ctx context.Context, req resource.Update
 			ExemptedFromReplacement:                 exemptedFromReplacementUpdate,
 			UpdatePrecommitFile:                     updatePrecommitFilePlan,
 			PackageEcosystem:                        packageEcosystemPlan,
+			DockerfilePatterns:                      dockerfilePatternsUpdate,
 			Subtractive:                             subtractiveUpdate,
 			AddWorkflows:                            planOptions.AddWorkflows.ValueString(),
 			ActionCommitMap:                         actionCommitMapPlan,
@@ -1900,6 +1960,18 @@ func (r *policyDrivenPRResource) updatePolicyDrivenPRState(ctx context.Context, 
 	}
 	exemptedFromReplacementList, _ := types.ListValueFrom(ctx, types.StringType, exemptedFromReplacementElements)
 
+	// Null rather than an empty set when unset: dockerfile_patterns is Optional
+	// and not Computed, so returning [] for a config that omits it would read as
+	// a permanent diff.
+	dockerfilePatternsSet := types.SetNull(types.StringType)
+	if len(stepSecurityPolicy.AutoRemdiationOptions.DockerfilePatterns) > 0 {
+		elements := make([]types.String, len(stepSecurityPolicy.AutoRemdiationOptions.DockerfilePatterns))
+		for i, pattern := range stepSecurityPolicy.AutoRemdiationOptions.DockerfilePatterns {
+			elements[i] = types.StringValue(pattern)
+		}
+		dockerfilePatternsSet, _ = types.SetValueFrom(ctx, types.StringType, elements)
+	}
+
 	// Handle new optional fields
 	var packageEcosystemList types.List
 	if len(stepSecurityPolicy.AutoRemdiationOptions.PackageEcosystem) > 0 {
@@ -2026,6 +2098,7 @@ func (r *policyDrivenPRResource) updatePolicyDrivenPRState(ctx context.Context, 
 					},
 				},
 			},
+			"dockerfile_patterns":           types.SetType{ElemType: types.StringType},
 			"update_existing_configuration": types.BoolType,
 			"add_workflows":                 types.StringType,
 			"action_commit_map":             types.MapType{ElemType: types.StringType},
@@ -2057,6 +2130,7 @@ func (r *policyDrivenPRResource) updatePolicyDrivenPRState(ctx context.Context, 
 			}()),
 			"update_precommit_file":             updatePrecommitFileList,
 			"package_ecosystem":                 packageEcosystemList,
+			"dockerfile_patterns":               dockerfilePatternsSet,
 			"actions_exempted_from_replacement": exemptedFromReplacementList,
 			"update_existing_configuration": types.BoolValue(func() bool {
 				if stepSecurityPolicy.AutoRemdiationOptions.Subtractive != nil {
