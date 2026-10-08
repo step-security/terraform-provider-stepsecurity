@@ -304,9 +304,11 @@ func TestAccGithubRunPolicyExcludedLabelsRejectedAtPlan(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			testAccGithubRunPolicyAgainstFake(t, newFakeRunPolicyBackend(),
 				resource.TestStep{
-					Config:      githubRunPolicyExcludedLabelsFixture(false, "    harden_runner_excluded_labels = "+tc.labels),
-					PlanOnly:    true,
-					ExpectError: regexp.MustCompile(`(?s)Invalid excluded runner label.*` + tc.want),
+					Config:   githubRunPolicyExcludedLabelsFixture(false, "    harden_runner_excluded_labels = "+tc.labels),
+					PlanOnly: true,
+					// Terraform wraps long diagnostics, so any run of whitespace may be a line break.
+					ExpectError: regexp.MustCompile(`(?s)Invalid excluded runner label.*policy_config\.harden_runner_excluded_labels.*` +
+						strings.ReplaceAll(tc.want, " ", `\s+`)),
 				},
 			)
 		})

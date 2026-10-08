@@ -2,6 +2,7 @@ package provider
 
 import (
 	"context"
+	"fmt"
 	"strings"
 
 	"github.com/hashicorp/terraform-plugin-framework/schema/validator"
@@ -30,16 +31,19 @@ func (v excludedRunnerLabelValidator) ValidateString(_ context.Context, req vali
 		return
 	}
 
+	// Terraform points the diagnostic at the resource block rather than the nested
+	// attribute, so the detail names the attribute path itself.
 	label := req.ConfigValue.ValueString()
+	var problem string
 	switch {
 	case strings.TrimSpace(label) == "":
-		resp.Diagnostics.AddAttributeError(req.Path, "Invalid excluded runner label",
-			"Excluded runner labels must not be empty.")
+		problem = "must not be empty."
 	case strings.TrimSpace(label) != label:
-		resp.Diagnostics.AddAttributeError(req.Path, "Invalid excluded runner label",
-			"Excluded runner label "+`"`+label+`"`+" has leading or trailing whitespace. Remove it; the API trims labels, so the stored value would not match the configuration.")
+		problem = fmt.Sprintf("%q has leading or trailing whitespace. Remove it; the API trims labels, so the stored value would not match the configuration.", label)
 	case label == "*":
-		resp.Diagnostics.AddAttributeError(req.Path, "Invalid excluded runner label",
-			`"*" excludes every job, leaving enable_harden_runner_policy enabled but enforcing nothing. Remove the entry to target all jobs, or narrow it to the runner labels you want to skip (e.g. "custom-runner-*").`)
+		problem = `"*" excludes every job, leaving enable_harden_runner_policy enabled but enforcing nothing. Remove the entry to target all jobs, or narrow it to the runner labels you want to skip (e.g. "custom-runner-*").`
+	default:
+		return
 	}
+	resp.Diagnostics.AddAttributeError(req.Path, "Invalid excluded runner label", fmt.Sprintf("%s: %s", req.Path, problem))
 }
