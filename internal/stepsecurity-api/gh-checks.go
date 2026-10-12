@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"maps"
 	"sort"
 )
 
@@ -90,29 +91,46 @@ func (c *APIClient) GetPRChecksConfig(ctx context.Context, owner string) (GitHub
 	return prChecksConfig, nil
 }
 
+// UpdatePRChecksConfig replaces the PR checks config of an org with req.
+//
+// The backend PUT is a merge: it overwrites the checks and repos it receives and never
+// deletes the ones it doesn't. To make req the full desired state, checks that exist in the
+// backend but not in req are sent disabled, and repos that exist in the backend but not in
+// req are sent with the org-wide defaults (on when the matching "*" is set, off otherwise).
+// req itself is not modified, since callers build Terraform state from it.
 func (c *APIClient) UpdatePRChecksConfig(ctx context.Context, owner string, req GitHubPRChecksConfig) error {
-
-	if getBooleanPointerValue(req.EnableBaselineCheckForAllNewRepos) ||
-		getBooleanPointerValue(req.EnableRequiredChecksForAllNewRepos) ||
-		getBooleanPointerValue(req.EnableOptionalChecksForAllNewRepos) {
-		existingConfig, err := c.GetPRChecksConfig(ctx, owner)
-		if err != nil {
-			return fmt.Errorf("failed to get PR checks config: %w", err)
-		}
-		for repo := range existingConfig.Repos {
-			if _, ok := req.Repos[repo]; !ok {
-				req.Repos[repo] = CheckOptions{
-					Baseline:          getBooleanPointerValue(req.EnableBaselineCheckForAllNewRepos),
-					RunRequiredChecks: getBooleanPointerValue(req.EnableRequiredChecksForAllNewRepos),
-					RunOptionalChecks: getBooleanPointerValue(req.EnableOptionalChecksForAllNewRepos),
-				}
-			}
-		}
-
+	existingConfig, err := c.GetPRChecksConfig(ctx, owner)
+	if err != nil {
+		return fmt.Errorf("failed to get PR checks config: %w", err)
 	}
 
+	checks := make(map[string]CheckConfig, len(req.Checks)+len(existingConfig.Checks))
+	maps.Copy(checks, req.Checks)
+	for name, check := range existingConfig.Checks {
+		if _, ok := checks[name]; !ok && check.Enabled {
+			check.Enabled = false
+			checks[name] = check
+		}
+	}
+	req.Checks = checks
+
+	repos := make(map[string]CheckOptions, len(req.Repos)+len(existingConfig.Repos))
+	maps.Copy(repos, req.Repos)
+	defaults := CheckOptions{
+		Baseline:          getBooleanPointerValue(req.EnableBaselineCheckForAllNewRepos),
+		RunRequiredChecks: getBooleanPointerValue(req.EnableRequiredChecksForAllNewRepos),
+		RunOptionalChecks: getBooleanPointerValue(req.EnableOptionalChecksForAllNewRepos),
+	}
+	for repo, opts := range existingConfig.Repos {
+		// Repos already at the defaults are left out to keep the request small.
+		if _, ok := repos[repo]; !ok && opts != defaults {
+			repos[repo] = defaults
+		}
+	}
+	req.Repos = repos
+
 	URI := fmt.Sprintf("%s/v1/github/%s/checks/config", c.BaseURL, owner)
-	_, err := c.put(ctx, URI, req)
+	_, err = c.put(ctx, URI, req)
 	if err != nil {
 		return fmt.Errorf("failed to update PR checks config: %w", err)
 	}

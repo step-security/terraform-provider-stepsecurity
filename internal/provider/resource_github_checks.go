@@ -80,7 +80,7 @@ func (r *githubChecksResource) Schema(_ context.Context, _ resource.SchemaReques
 				Description: "Custom description text appended to all check summaries.",
 			},
 			"controls": schema.ListNestedAttribute{
-				Optional: true,
+				Required: true,
 				NestedObject: schema.NestedAttributeObject{
 					Attributes: map[string]schema.Attribute{
 						"control": schema.StringAttribute{
@@ -293,6 +293,15 @@ func controlObjectType() types.ObjectType {
 	}
 }
 
+// isCooldownControl reports whether a control takes cooldown settings.
+func isCooldownControl(name string) bool {
+	switch name {
+	case "NPM Package Cooldown", "PyPI Package Cooldown", "Maven Package Cooldown", "NuGet Package Cooldown":
+		return true
+	}
+	return false
+}
+
 // diagsToError flattens error diagnostics into a single error.
 func diagsToError(diags diag.Diagnostics) error {
 	msgs := make([]string, 0, len(diags))
@@ -354,7 +363,19 @@ func (r *githubChecksResource) ValidateConfig(ctx context.Context, req resource.
 			return
 		}
 
+		seen := make(map[string]bool, len(controls))
 		for _, control := range controls {
+			if !control.Control.IsUnknown() && !control.Control.IsNull() {
+				name := control.Control.ValueString()
+				if seen[name] {
+					resp.Diagnostics.AddError(
+						"Duplicate control",
+						"control "+name+" is listed more than once",
+					)
+				}
+				seen[name] = true
+			}
+
 			// Skip validation if control attributes are unknown (e.g., when using for_each or count)
 			if control.Control.IsUnknown() || control.Type.IsUnknown() || control.Enable.IsUnknown() {
 				controlsIndeterminate = true
@@ -381,18 +402,15 @@ func (r *githubChecksResource) ValidateConfig(ctx context.Context, req resource.
 				)
 			}
 
-			isCooldownControl := control.Control.ValueString() == "NPM Package Cooldown" ||
-				control.Control.ValueString() == "PyPI Package Cooldown" ||
-				control.Control.ValueString() == "Maven Package Cooldown" ||
-				control.Control.ValueString() == "NuGet Package Cooldown"
-			if !isCooldownControl && !control.Settings.IsNull() && !control.Settings.IsUnknown() {
+			isCooldown := isCooldownControl(control.Control.ValueString())
+			if !isCooldown && !control.Settings.IsNull() && !control.Settings.IsUnknown() {
 				resp.Diagnostics.AddError(
 					"can't provide settings",
 					"can't provide settings for control "+control.Control.ValueString(),
 				)
 			}
 
-			if isCooldownControl && !control.Settings.IsNull() && !control.Settings.IsUnknown() {
+			if isCooldown && !control.Settings.IsNull() && !control.Settings.IsUnknown() {
 				// Extract cooldown period from the object
 				if cooldownAttr := control.Settings.Attributes()["cool_down_period"]; cooldownAttr != nil {
 					if cooldownValue, ok := cooldownAttr.(types.Int64); ok {
@@ -523,20 +541,48 @@ func (r *githubChecksResource) ModifyPlan(ctx context.Context, req resource.Modi
 		return
 	}
 
+	// settings is Optional+Computed, so when a control leaves it out of the config the
+	// framework plans it as unknown on every create/update, which shows as
+	// "(known after apply)". Apply always resolves an omitted settings the same way (the
+	// cooldown defaults for cooldown controls, null for the rest), so plan that value
+	// directly. The config is matched by index, since the plan's controls list mirrors it.
+	var configControls []control
+	if !req.Config.Raw.IsNull() {
+		var configControlsList types.List
+		resp.Diagnostics.Append(req.Config.GetAttribute(ctx, path.Root("controls"), &configControlsList)...)
+		if resp.Diagnostics.HasError() {
+			return
+		}
+		if configControlsList.IsNull() || configControlsList.IsUnknown() {
+			return
+		}
+		resp.Diagnostics.Append(configControlsList.ElementsAs(ctx, &configControls, false)...)
+		if resp.Diagnostics.HasError() {
+			return
+		}
+	}
+	if len(configControls) != len(controls) {
+		return
+	}
+
 	modified := false
 
 	for ind, control := range controls {
+		if !configControls[ind].Settings.IsNull() || control.Control.IsUnknown() {
+			continue
+		}
 
-		if (control.Control.ValueString() == "NPM Package Cooldown" ||
-			control.Control.ValueString() == "PyPI Package Cooldown" ||
-			control.Control.ValueString() == "Maven Package Cooldown" ||
-			control.Control.ValueString() == "NuGet Package Cooldown") && control.Settings.IsNull() {
-			// Create object with default settings
-			settingsMap := map[string]attr.Value{
+		var planned types.Object
+		if isCooldownControl(control.Control.ValueString()) {
+			planned, _ = types.ObjectValue(controlSettingsAttrTypes(), map[string]attr.Value{
 				"cool_down_period":                     types.Int64Value(2),
 				"packages_to_exempt_in_cooldown_check": types.ListNull(types.StringType),
-			}
-			control.Settings, _ = types.ObjectValue(controlSettingsAttrTypes(), settingsMap)
+			})
+		} else {
+			planned = types.ObjectNull(controlSettingsAttrTypes())
+		}
+		if !control.Settings.Equal(planned) {
+			control.Settings = planned
 			controls[ind] = control
 			modified = true
 		}
@@ -725,7 +771,7 @@ func (r *githubChecksResource) convertToCreateRequest(ctx context.Context, plan 
 			Enabled: control.Enable.ValueBool(),
 			Type:    control.Type.ValueString(),
 		}
-		if controlName == "NPM Package Cooldown" || controlName == "PyPI Package Cooldown" || controlName == "Maven Package Cooldown" || controlName == "NuGet Package Cooldown" {
+		if isCooldownControl(controlName) {
 			if control.Settings.IsNull() {
 				control.Settings = types.ObjectNull(map[string]attr.Type{
 					"cool_down_period":                     types.Int64Type,
@@ -933,7 +979,7 @@ func (r *githubChecksResource) convertToState(ctx context.Context, owner string,
 		}
 
 		// Handle settings for cooldown controls
-		if (controlName == "NPM Package Cooldown" || controlName == "PyPI Package Cooldown" || controlName == "Maven Package Cooldown" || controlName == "NuGet Package Cooldown") && checkConfig.Settings != nil {
+		if isCooldownControl(controlName) && checkConfig.Settings != nil {
 			var cooldownPeriod types.Int64
 			var packagesList types.List
 
@@ -1069,26 +1115,13 @@ func (r *githubChecksResource) convertToState(ctx context.Context, owner string,
 		}
 	}
 
-	// Check if we have any controls of each type to determine if we need check configs
-	hasRequiredControls := false
-	hasOptionalControls := false
+	// Each block is built only from what the backend stores (repos, omit_repos, '*'). The
+	// backend has no record of whether the user wrote an empty block, so the block's shape
+	// is brought in line with the plan (or prior state) afterwards in
+	// updateStateListsWithOrderFromPlan.
 
-	for _, control := range controls {
-		if control.Enable.ValueBool() {
-			switch control.Type.ValueString() {
-			case "required":
-				hasRequiredControls = true
-			case "optional":
-				hasOptionalControls = true
-			}
-		}
-	}
-
-	// Always initialize all check configs to prevent null values in Terraform state
-	// This ensures that if any configuration exists, all nested lists are properly initialized
-
-	// RequiredChecks - initialize if there are required controls or any required activity
-	if hasRequiredControls || isRequiredAll || len(requiredRepos) > 0 || len(requiredOmitRepos) > 0 {
+	// RequiredChecks
+	if isRequiredAll || len(requiredRepos) > 0 || len(requiredOmitRepos) > 0 {
 		requiredChecks = &checksConfig{}
 		if isRequiredAll {
 			requiredChecks.Repos, _ = types.ListValue(types.StringType, []attr.Value{types.StringValue("*")})
@@ -1104,8 +1137,8 @@ func (r *githubChecksResource) convertToState(ctx context.Context, owner string,
 		}
 	}
 
-	// OptionalChecks - initialize if there are optional controls or any optional activity
-	if hasOptionalControls || isOptionalAll || len(optionalRepos) > 0 || len(optionalOmitRepos) > 0 {
+	// OptionalChecks
+	if isOptionalAll || len(optionalRepos) > 0 || len(optionalOmitRepos) > 0 {
 		optionalChecks = &checksConfig{}
 		if isOptionalAll {
 			optionalChecks.Repos, _ = types.ListValue(types.StringType, []attr.Value{types.StringValue("*")})
@@ -1121,7 +1154,7 @@ func (r *githubChecksResource) convertToState(ctx context.Context, owner string,
 		}
 	}
 
-	// BaselineCheck - initialize if baseline is enabled globally or has any baseline activity
+	// BaselineCheck
 	if isBaselineAll || len(baselineRepos) > 0 || len(baselineOmitRepos) > 0 {
 		baselineCheck = &checksConfig{}
 		if isBaselineAll {
@@ -1145,128 +1178,138 @@ func (r *githubChecksResource) convertToState(ctx context.Context, owner string,
 	return model
 }
 
+// updateStateListsWithOrderFromPlan brings state built from the API in line with plan, which
+// is the plan in Create/Update and the prior state in Read (null blocks/controls on import).
+// The backend only stores controls and per-repo flags, so anything it can't express is taken
+// from plan:
+//   - the shape of required_checks/optional_checks/baseline_check (see alignChecksBlock);
+//   - list order, and null vs empty for repos, omit_repos and packages_to_exempt_in_cooldown_check;
+//   - the order of controls.
+//
+// Controls that the backend has enabled but plan doesn't contain are kept (appended), so a
+// control enabled outside Terraform shows up as drift. Disabled controls that plan doesn't
+// contain are dropped: the backend keeps every control it has ever seen (removing a control
+// or destroying the resource only disables it), so those are not drift.
 func (r *githubChecksResource) updateStateListsWithOrderFromPlan(ctx context.Context, plan githubChecksModel, state *githubChecksModel) {
 	if state == nil {
 		return
 	}
 
-	planRequiredChecks, diags := decodeChecksConfig(ctx, plan.RequiredChecks)
-	if diags.HasError() {
-		return
-	}
-	stateRequiredChecks, diags := decodeChecksConfig(ctx, state.RequiredChecks)
-	if diags.HasError() {
-		return
-	}
-	planOptionalChecks, diags := decodeChecksConfig(ctx, plan.OptionalChecks)
-	if diags.HasError() {
-		return
-	}
-	stateOptionalChecks, diags := decodeChecksConfig(ctx, state.OptionalChecks)
-	if diags.HasError() {
-		return
-	}
-	planBaselineCheck, diags := decodeChecksConfig(ctx, plan.BaselineCheck)
-	if diags.HasError() {
-		return
-	}
-	stateBaselineCheck, diags := decodeChecksConfig(ctx, state.BaselineCheck)
-	if diags.HasError() {
-		return
-	}
+	state.RequiredChecks = r.alignChecksBlock(ctx, plan.RequiredChecks, state.RequiredChecks)
+	state.OptionalChecks = r.alignChecksBlock(ctx, plan.OptionalChecks, state.OptionalChecks)
+	state.BaselineCheck = r.alignChecksBlock(ctx, plan.BaselineCheck, state.BaselineCheck)
 
-	// Update state with plan if the lists are equal for required checks
-	if planRequiredChecks != nil && stateRequiredChecks != nil {
-		changed := false
-		planRepos := r.listToStringSlice(planRequiredChecks.Repos)
-		stateRepos := r.listToStringSlice(stateRequiredChecks.Repos)
-		if cmp.Equal(planRepos, stateRepos, cmpopts.SortSlices(func(a, b string) bool { return a < b })) {
-			stateRequiredChecks.Repos = planRequiredChecks.Repos
-			changed = true
-		}
-		planOmitRepos := r.listToStringSlice(planRequiredChecks.OmitRepos)
-		stateOmitRepos := r.listToStringSlice(stateRequiredChecks.OmitRepos)
-		if cmp.Equal(planOmitRepos, stateOmitRepos, cmpopts.SortSlices(func(a, b string) bool { return a < b })) {
-			stateRequiredChecks.OmitRepos = planRequiredChecks.OmitRepos
-			changed = true
-		}
-		if changed {
-			state.RequiredChecks = encodeChecksConfig(ctx, stateRequiredChecks)
-		}
-	}
-
-	// Update state with plan if the lists are equal for optional checks
-	if planOptionalChecks != nil && stateOptionalChecks != nil {
-		changed := false
-		planRepos := r.listToStringSlice(planOptionalChecks.Repos)
-		stateRepos := r.listToStringSlice(stateOptionalChecks.Repos)
-		if cmp.Equal(planRepos, stateRepos, cmpopts.SortSlices(func(a, b string) bool { return a < b })) {
-			stateOptionalChecks.Repos = planOptionalChecks.Repos
-			changed = true
-		}
-		planOmitRepos := r.listToStringSlice(planOptionalChecks.OmitRepos)
-		stateOmitRepos := r.listToStringSlice(stateOptionalChecks.OmitRepos)
-		if cmp.Equal(planOmitRepos, stateOmitRepos, cmpopts.SortSlices(func(a, b string) bool { return a < b })) {
-			stateOptionalChecks.OmitRepos = planOptionalChecks.OmitRepos
-			changed = true
-		}
-		if changed {
-			state.OptionalChecks = encodeChecksConfig(ctx, stateOptionalChecks)
-		}
-	}
-
-	// Update state with plan if the lists are equal for baseline checks
-	if planBaselineCheck != nil && stateBaselineCheck != nil {
-		changed := false
-		planRepos := r.listToStringSlice(planBaselineCheck.Repos)
-		stateRepos := r.listToStringSlice(stateBaselineCheck.Repos)
-		if cmp.Equal(planRepos, stateRepos, cmpopts.SortSlices(func(a, b string) bool { return a < b })) {
-			stateBaselineCheck.Repos = planBaselineCheck.Repos
-			changed = true
-		}
-		planOmitRepos := r.listToStringSlice(planBaselineCheck.OmitRepos)
-		stateOmitRepos := r.listToStringSlice(stateBaselineCheck.OmitRepos)
-		if cmp.Equal(planOmitRepos, stateOmitRepos, cmpopts.SortSlices(func(a, b string) bool { return a < b })) {
-			stateBaselineCheck.OmitRepos = planBaselineCheck.OmitRepos
-			changed = true
-		}
-		if changed {
-			state.BaselineCheck = encodeChecksConfig(ctx, stateBaselineCheck)
-		}
-	}
-
-	// preserve order of controls
-	if plan.Controls.IsUnknown() || plan.Controls.IsNull() || state.Controls.IsUnknown() || state.Controls.IsNull() {
+	if state.Controls.IsUnknown() || state.Controls.IsNull() {
 		return
 	}
 
 	var planControls, stateControls []control
-	if diags := plan.Controls.ElementsAs(ctx, &planControls, false); diags.HasError() {
-		return
+	if !plan.Controls.IsUnknown() && !plan.Controls.IsNull() {
+		if diags := plan.Controls.ElementsAs(ctx, &planControls, false); diags.HasError() {
+			return
+		}
 	}
 	if diags := state.Controls.ElementsAs(ctx, &stateControls, false); diags.HasError() {
 		return
 	}
 
-	// Create a map of controls from state for efficient lookup
-	controls2Map := make(map[string]control)
+	stateByName := make(map[string]control, len(stateControls))
 	for _, ctrl := range stateControls {
-		controls2Map[ctrl.Control.ValueString()] = ctrl
+		stateByName[ctrl.Control.ValueString()] = ctrl
 	}
 
-	// Reorder state controls to match plan order
-	orderedControls := make([]control, 0, len(planControls))
-	for _, ctrl := range planControls {
-		if _, exists := controls2Map[ctrl.Control.ValueString()]; !exists {
-			tflog.Info(ctx, "Control not found in state", map[string]any{
-				"control": ctrl.Control.ValueString(),
-			})
-			return
+	// Controls in plan order, using the values from state. A control missing from state
+	// (removed outside Terraform) is left out so the diff is visible.
+	ordered := make([]control, 0, len(stateControls))
+	inPlan := make(map[string]bool, len(planControls))
+	for _, planCtrl := range planControls {
+		name := planCtrl.Control.ValueString()
+		stateCtrl, ok := stateByName[name]
+		if !ok || inPlan[name] {
+			continue
 		}
-		orderedControls = append(orderedControls, controls2Map[ctrl.Control.ValueString()])
+		inPlan[name] = true
+		stateCtrl.Settings = alignSettings(planCtrl.Settings, stateCtrl.Settings)
+		ordered = append(ordered, stateCtrl)
 	}
-	state.Controls, _ = types.ListValueFrom(ctx, controlObjectType(), orderedControls)
+	// stateControls is sorted by name, so extras are appended in a stable order.
+	for _, stateCtrl := range stateControls {
+		if !inPlan[stateCtrl.Control.ValueString()] && stateCtrl.Enable.ValueBool() {
+			ordered = append(ordered, stateCtrl)
+		}
+	}
+	state.Controls, _ = types.ListValueFrom(ctx, controlObjectType(), ordered)
+}
 
+// alignChecksBlock returns stateObj (a required_checks/optional_checks/baseline_check block
+// built from the API) reshaped to match planObj where the API data can't tell them apart.
+//   - plan null: stateObj as built from the API. In Create/Update that is null, since nothing
+//     was sent for the block; in Read/import a non-null block is real drift.
+//   - plan set, state null: the API has no repos for the block, so return an empty block in
+//     the plan's shape. An empty block in config is valid ("not applied to any repo yet").
+//   - both set: take the plan's repos/omit_repos where they hold the same repos, keeping the
+//     plan's order and its null vs [] choice.
+func (r *githubChecksResource) alignChecksBlock(ctx context.Context, planObj, stateObj types.Object) types.Object {
+	planCfg, diags := decodeChecksConfig(ctx, planObj)
+	if diags.HasError() || planCfg == nil {
+		return stateObj
+	}
+	stateCfg, diags := decodeChecksConfig(ctx, stateObj)
+	if diags.HasError() {
+		return stateObj
+	}
+
+	if stateCfg == nil {
+		stateCfg = &checksConfig{
+			Repos:     types.ListValueMust(types.StringType, []attr.Value{}),
+			OmitRepos: types.ListNull(types.StringType),
+		}
+	}
+
+	stateCfg.Repos = r.alignStringList(planCfg.Repos, stateCfg.Repos)
+	stateCfg.OmitRepos = r.alignStringList(planCfg.OmitRepos, stateCfg.OmitRepos)
+	return encodeChecksConfig(ctx, stateCfg)
+}
+
+// alignStringList returns planList when it holds the same strings as stateList, ignoring
+// order and treating null and [] as equal; otherwise stateList.
+func (r *githubChecksResource) alignStringList(planList, stateList types.List) types.List {
+	if planList.IsUnknown() {
+		return stateList
+	}
+	equal := cmp.Equal(
+		r.listToStringSlice(planList),
+		r.listToStringSlice(stateList),
+		cmpopts.SortSlices(func(a, b string) bool { return a < b }),
+		cmpopts.EquateEmpty(),
+	)
+	if equal {
+		return planList
+	}
+	return stateList
+}
+
+// alignSettings keeps an empty packages_to_exempt_in_cooldown_check from plan. Empty lists
+// aren't sent to the API, so state built from it has null there instead.
+func alignSettings(planSettings, stateSettings types.Object) types.Object {
+	if planSettings.IsNull() || planSettings.IsUnknown() || stateSettings.IsNull() || stateSettings.IsUnknown() {
+		return stateSettings
+	}
+	planPackages, ok := planSettings.Attributes()["packages_to_exempt_in_cooldown_check"].(types.List)
+	if !ok || planPackages.IsNull() || planPackages.IsUnknown() || len(planPackages.Elements()) != 0 {
+		return stateSettings
+	}
+	statePackages, ok := stateSettings.Attributes()["packages_to_exempt_in_cooldown_check"].(types.List)
+	if !ok || !statePackages.IsNull() {
+		return stateSettings
+	}
+	attrs := stateSettings.Attributes()
+	attrs["packages_to_exempt_in_cooldown_check"] = planPackages
+	aligned, diags := types.ObjectValue(controlSettingsAttrTypes(), attrs)
+	if diags.HasError() {
+		return stateSettings
+	}
+	return aligned
 }
 
 // listToStringSlice converts types.List to []string
