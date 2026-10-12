@@ -29,6 +29,7 @@ type RunPolicyConfig struct {
 	AllowedActions                 map[string]string   `json:"allowed_actions,omitempty"`
 	EnableHardenRunnerPolicy       bool                `json:"enable_harden_runner_policy,omitempty"`
 	HardenRunnerTargetLabels       []string            `json:"harden_runner_labels,omitempty"`
+	HardenRunnerExcludedLabels     []string            `json:"harden_runner_excluded_labels,omitempty"`
 	HardenRunnerCustomActions      []string            `json:"harden_runner_custom_actions,omitempty"`
 	EnableRunsOnPolicy             bool                `json:"enable_runs_on_policy,omitempty"`
 	DisallowedRunnerLabels         map[string]struct{} `json:"disallowed_runner_labels,omitempty"`

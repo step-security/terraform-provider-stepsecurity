@@ -64,34 +64,39 @@ func (r *GithubRepoNotificationSettingsResource) Schema(_ context.Context, _ res
 				Required: true,
 				Attributes: map[string]schema.Attribute{
 					"slack_webhook_url": schema.StringAttribute{
-						Optional:    true,
-						Computed:    true,
-						Description: "The Slack webhook URL to receive notifications. If not provided, no notifications will be sent to Slack.",
-						Default:     stringdefault.StaticString(" "),
+						Optional:      true,
+						Computed:      true,
+						Description:   "The Slack webhook URL to receive notifications. If not provided, no notifications will be sent to Slack.",
+						Default:       stringdefault.StaticString(""),
+						PlanModifiers: []planmodifier.String{githubEquivalentStateForDefault(stepsecurityapi.NormalizeNotificationChannel)},
 					},
 					"teams_webhook_url": schema.StringAttribute{
-						Optional:    true,
-						Computed:    true,
-						Description: "The Microsoft Teams webhook URL to receive notifications. If not provided, no notifications will be sent to Microsoft Teams.",
-						Default:     stringdefault.StaticString(" "),
+						Optional:      true,
+						Computed:      true,
+						Description:   "The Microsoft Teams webhook URL to receive notifications. If not provided, no notifications will be sent to Microsoft Teams.",
+						Default:       stringdefault.StaticString(""),
+						PlanModifiers: []planmodifier.String{githubEquivalentStateForDefault(stepsecurityapi.NormalizeNotificationChannel)},
 					},
 					"email": schema.StringAttribute{
-						Optional:    true,
-						Computed:    true,
-						Description: "The email address to receive notifications. If not provided, no notifications will be sent to the email address.",
-						Default:     stringdefault.StaticString(" "),
+						Optional:      true,
+						Computed:      true,
+						Description:   "The email address to receive notifications. If not provided, no notifications will be sent to the email address.",
+						Default:       stringdefault.StaticString(""),
+						PlanModifiers: []planmodifier.String{githubEquivalentStateForDefault(stepsecurityapi.NormalizeNotificationChannel)},
 					},
 					"slack_channel_id": schema.StringAttribute{
-						Optional:    true,
-						Computed:    true,
-						Description: "The Slack channel ID to post notifications to when using OAuth method. Required when slack_notification_method is 'oauth'.",
-						Default:     stringdefault.StaticString(" "),
+						Optional:      true,
+						Computed:      true,
+						Description:   "The Slack channel ID to post notifications to when using OAuth method. Required when slack_notification_method is 'oauth'.",
+						Default:       stringdefault.StaticString(""),
+						PlanModifiers: []planmodifier.String{githubEquivalentStateForDefault(stepsecurityapi.NormalizeNotificationChannel)},
 					},
 					"slack_notification_method": schema.StringAttribute{
-						Optional:    true,
-						Computed:    true,
-						Description: "The method to use for sending Slack notifications. Valid values are 'webhook' (default) or 'oauth'.",
-						Default:     stringdefault.StaticString("webhook"),
+						Optional:      true,
+						Computed:      true,
+						Description:   "The method to use for sending Slack notifications. Valid values are 'webhook' (default) or 'oauth'.",
+						Default:       stringdefault.StaticString(stepsecurityapi.SlackNotificationMethodWebhook),
+						PlanModifiers: []planmodifier.String{githubEquivalentStateForDefault(stepsecurityapi.NormalizeSlackNotificationMethod)},
 					},
 				},
 			},
@@ -428,6 +433,16 @@ func (r *GithubRepoNotificationSettingsResource) Read(ctx context.Context, req r
 	// Update state with latest data
 	state.ID = types.StringValue(state.Owner.ValueString())
 
+	// Keep a configured spelling of a cleared channel (" " or "empty", which
+	// earlier provider versions needed) so it does not drift against "".
+	var prior githubNotificationChannelsModel
+	if !state.NotificationChannels.IsNull() && !state.NotificationChannels.IsUnknown() {
+		resp.Diagnostics.Append(state.NotificationChannels.As(ctx, &prior, basetypes.ObjectAsOptions{})...)
+		if resp.Diagnostics.HasError() {
+			return
+		}
+	}
+
 	// Create notification channels object
 	channelsObj, _ := types.ObjectValue(
 		map[string]attr.Type{
@@ -438,11 +453,11 @@ func (r *GithubRepoNotificationSettingsResource) Read(ctx context.Context, req r
 			"slack_notification_method": types.StringType,
 		},
 		map[string]attr.Value{
-			"slack_webhook_url":         types.StringValue(settings.SlackWebhookURL),
-			"teams_webhook_url":         types.StringValue(settings.TeamsWebhookURL),
-			"email":                     types.StringValue(settings.Email),
-			"slack_channel_id":          types.StringValue(settings.SlackChannelID),
-			"slack_notification_method": types.StringValue(settings.SlackNotificationMethod),
+			"slack_webhook_url":         githubChannelValue(prior.SlackWebhookURL, settings.SlackWebhookURL, stepsecurityapi.NormalizeNotificationChannel),
+			"teams_webhook_url":         githubChannelValue(prior.TeamsWebhookURL, settings.TeamsWebhookURL, stepsecurityapi.NormalizeNotificationChannel),
+			"email":                     githubChannelValue(prior.Email, settings.Email, stepsecurityapi.NormalizeNotificationChannel),
+			"slack_channel_id":          githubChannelValue(prior.SlackChannelID, settings.SlackChannelID, stepsecurityapi.NormalizeNotificationChannel),
+			"slack_notification_method": githubChannelValue(prior.SlackNotificationMethod, settings.SlackNotificationMethod, stepsecurityapi.NormalizeSlackNotificationMethod),
 		},
 	)
 	state.NotificationChannels = channelsObj
@@ -686,4 +701,43 @@ func githubPriorThreatIntelLevel(ctx context.Context, threatIntelObj types.Objec
 	}
 
 	return stepsecurityapi.ThreatIntelLevelAll
+}
+
+// githubChannelValue returns the prior state value when it means the same as
+// the value read from the API, and the API value otherwise.
+func githubChannelValue(prior types.String, read string, normalize func(string) string) types.String {
+	if !prior.IsNull() && !prior.IsUnknown() && normalize(prior.ValueString()) == read {
+		return prior
+	}
+	return types.StringValue(read)
+}
+
+// githubEquivalentStateForDefault keeps the prior state value when the
+// attribute is left to its default and the state value means the same thing.
+// State written by earlier provider versions holds " " for a cleared channel
+// and "" for an unset Slack method, so without this the new defaults would plan
+// an update nobody asked for right after upgrading.
+func githubEquivalentStateForDefault(normalize func(string) string) planmodifier.String {
+	return githubEquivalentStateForDefaultModifier{normalize: normalize}
+}
+
+type githubEquivalentStateForDefaultModifier struct {
+	normalize func(string) string
+}
+
+func (m githubEquivalentStateForDefaultModifier) Description(_ context.Context) string {
+	return "Keeps the prior state value when the default means the same thing."
+}
+
+func (m githubEquivalentStateForDefaultModifier) MarkdownDescription(ctx context.Context) string {
+	return m.Description(ctx)
+}
+
+func (m githubEquivalentStateForDefaultModifier) PlanModifyString(_ context.Context, req planmodifier.StringRequest, resp *planmodifier.StringResponse) {
+	if !req.ConfigValue.IsNull() || req.StateValue.IsNull() || req.StateValue.IsUnknown() || req.PlanValue.IsUnknown() || req.PlanValue.IsNull() {
+		return
+	}
+	if m.normalize(req.StateValue.ValueString()) == m.normalize(req.PlanValue.ValueString()) {
+		resp.PlanValue = req.StateValue
+	}
 }
