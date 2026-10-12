@@ -25,6 +25,10 @@ type fakeGithubNotificationSettingsBackend struct {
 	mu     sync.Mutex
 	stored map[string]any
 	writes int
+	// profileWrites counts writes that carried notificationChannels, and ids
+	// numbers the profile ids this fake assigns.
+	profileWrites int
+	ids           int
 }
 
 func newFakeGithubNotificationSettingsBackend(seed map[string]any) *fakeGithubNotificationSettingsBackend {
@@ -69,6 +73,23 @@ func (b *fakeGithubNotificationSettingsBackend) ServeHTTP(w http.ResponseWriter,
 				continue
 			}
 			b.stored[key] = value
+		}
+
+		// Like the real handler, a profile list replaces the stored one, and
+		// new profiles get an id and an explicit "off" threat intel level.
+		if _, ok := incoming["notificationChannels"]; ok {
+			b.profileWrites++
+			profiles, _ := b.stored["notificationChannels"].([]any)
+			for _, p := range profiles {
+				profile, _ := p.(map[string]any)
+				if id, _ := profile["id"].(string); id == "" {
+					b.ids++
+					profile["id"] = fmt.Sprintf("profile-%d", b.ids)
+				}
+				if level, _ := profile["orgThreatIntelLevel"].(string); level == "" {
+					profile["orgThreatIntelLevel"] = "off"
+				}
+			}
 		}
 
 		fmt.Fprint(w, `{}`)

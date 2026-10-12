@@ -33,18 +33,23 @@ type fakeTenantNotificationsBackend struct {
 	mu     sync.Mutex
 	stored fakeTenantNotificationRecord
 	writes int
+	// profileWrites counts writes that carried notification_channels, and ids
+	// numbers the profile ids this fake assigns.
+	profileWrites int
+	ids           int
 }
 
 type fakeTenantNotificationRecord struct {
-	Customer                string          `json:"customer"`
-	Email                   string          `json:"email"`
-	SlackWebhookURL         string          `json:"slack_webhook_url"`
-	TeamsWebhookURL         string          `json:"teams_webhook_url"`
-	SlackNotificationMethod string          `json:"slack_notification_method"`
-	SlackChannelID          string          `json:"slack_channel_id"`
-	ThreatIntel             json.RawMessage `json:"threat_intel_notification_options,omitempty"`
-	DeveloperMDM            json.RawMessage `json:"developer_mdm_notification_options,omitempty"`
-	ADO                     json.RawMessage `json:"ado_notification_options,omitempty"`
+	Customer                string           `json:"customer"`
+	Email                   string           `json:"email"`
+	SlackWebhookURL         string           `json:"slack_webhook_url"`
+	TeamsWebhookURL         string           `json:"teams_webhook_url"`
+	SlackNotificationMethod string           `json:"slack_notification_method"`
+	SlackChannelID          string           `json:"slack_channel_id"`
+	ThreatIntel             json.RawMessage  `json:"threat_intel_notification_options,omitempty"`
+	DeveloperMDM            json.RawMessage  `json:"developer_mdm_notification_options,omitempty"`
+	ADO                     json.RawMessage  `json:"ado_notification_options,omitempty"`
+	NotificationChannels    []map[string]any `json:"notification_channels,omitempty"`
 }
 
 func (b *fakeTenantNotificationsBackend) ServeHTTP(w http.ResponseWriter, req *http.Request) {
@@ -103,6 +108,21 @@ func (b *fakeTenantNotificationsBackend) ServeHTTP(w http.ResponseWriter, req *h
 		}
 		if source == "tenant" {
 			b.stored.DeveloperMDM = incoming.DeveloperMDM
+		}
+
+		// Like the real handler, a profile list (only accepted with
+		// source=tenant) replaces the stored one, and new profiles get an id.
+		var raw map[string]json.RawMessage
+		_ = json.Unmarshal(body, &raw)
+		if _, ok := raw["notification_channels"]; ok && source == "tenant" {
+			b.profileWrites++
+			for _, profile := range incoming.NotificationChannels {
+				if id, _ := profile["id"].(string); id == "" {
+					b.ids++
+					profile["id"] = fmt.Sprintf("profile-%d", b.ids)
+				}
+			}
+			b.stored.NotificationChannels = incoming.NotificationChannels
 		}
 
 		fmt.Fprint(w, `{"message":"Notification settings updated successfully"}`)
