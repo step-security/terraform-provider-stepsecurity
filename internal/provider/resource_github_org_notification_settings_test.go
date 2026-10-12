@@ -9,6 +9,8 @@ import (
 	stepsecurityapi "github.com/step-security/terraform-provider-stepsecurity/internal/stepsecurity-api"
 
 	"github.com/hashicorp/terraform-plugin-framework/resource"
+	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
+	"github.com/hashicorp/terraform-plugin-framework/types"
 	res "github.com/hashicorp/terraform-plugin-testing/helper/resource"
 	"github.com/stretchr/testify/mock"
 )
@@ -433,4 +435,46 @@ resource "stepsecurity_github_org_notification_settings" "test" {
   }
 }
 `, owner)
+}
+
+// TestGithubEquivalentStateForDefault covers state written by earlier provider
+// versions: " " for a cleared channel and "" for an unset Slack method, both of
+// which must plan no change against the new defaults.
+func TestGithubEquivalentStateForDefault(t *testing.T) {
+	t.Parallel()
+
+	channel := githubEquivalentStateForDefault(stepsecurityapi.NormalizeNotificationChannel)
+	method := githubEquivalentStateForDefault(stepsecurityapi.NormalizeSlackNotificationMethod)
+
+	tests := []struct {
+		name     string
+		modifier planmodifier.String
+		config   types.String
+		state    types.String
+		plan     types.String
+		want     types.String
+	}{
+		{"legacy blank channel keeps state", channel, types.StringNull(), types.StringValue(" "), types.StringValue(""), types.StringValue(" ")},
+		{"console sentinel keeps state", channel, types.StringNull(), types.StringValue("empty"), types.StringValue(""), types.StringValue("empty")},
+		{"removed channel clears", channel, types.StringNull(), types.StringValue("https://hooks.slack.com/x"), types.StringValue(""), types.StringValue("")},
+		{"configured value wins", channel, types.StringValue("https://x"), types.StringValue(" "), types.StringValue("https://x"), types.StringValue("https://x")},
+		{"create has no state", channel, types.StringNull(), types.StringNull(), types.StringValue(""), types.StringValue("")},
+		{"legacy empty method keeps state", method, types.StringNull(), types.StringValue(""), types.StringValue("webhook"), types.StringValue("")},
+		{"oauth method reverts to default", method, types.StringNull(), types.StringValue("oauth"), types.StringValue("webhook"), types.StringValue("webhook")},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			resp := &planmodifier.StringResponse{PlanValue: tt.plan}
+			tt.modifier.PlanModifyString(context.Background(), planmodifier.StringRequest{
+				ConfigValue: tt.config,
+				StateValue:  tt.state,
+				PlanValue:   tt.plan,
+			}, resp)
+			if !resp.PlanValue.Equal(tt.want) {
+				t.Errorf("plan = %s, want %s", resp.PlanValue, tt.want)
+			}
+		})
+	}
 }

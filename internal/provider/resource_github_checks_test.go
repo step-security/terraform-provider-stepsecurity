@@ -331,10 +331,10 @@ func TestGithubChecksResource_Schema(t *testing.T) {
 		}
 	}
 
-	// Test that controls is optional
+	// Test that controls is required
 	if controlsAttr, exists := resp.Schema.Attributes["controls"]; exists {
-		if !controlsAttr.IsOptional() {
-			t.Error("Expected controls attribute to be optional")
+		if !controlsAttr.IsRequired() {
+			t.Error("Expected controls attribute to be required")
 		}
 	}
 }
