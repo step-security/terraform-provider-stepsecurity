@@ -177,7 +177,7 @@ Required:
 
 Optional:
 
-- `events` (Set of String) Events this profile receives. Names match `notification_events`, plus `secret_exfiltration_detected` and the PAT governance events.
+- `events` (Set of String) Events this profile receives: `domain_blocked`, `new_endpoint_discovered`, `https_detections`, `suspicious_network_call_detected`, `suspicious_process_events_detected`, `secret_exfiltration_detected`, `secrets_detected`, `artifacts_secrets_detected`, `run_blocked_by_policy`, `baseline_check_failures`, `required_check_failures`, `optional_check_failures`, `non_compliant_artifact_detected`, and the PAT governance events `pat_max_age_violation`, `pat_no_expiry_violation`, `pat_over_scoped_violation`, `pat_unused_violation`, `pat_inactive_owner_violation`, `pat_expiry_reminder`, `pat_revocation` and `pat_abuse_detected`. Names match `notification_events` where an event is in both. `file_overwrite` and `imposter_commits_detected` are not available on profiles.
 - `threat_intel_level` (String) Threat Intel notifications for this profile: `off` (default), `all`, `name` or `version`, with the same meaning as the resource's `threat_intel.level`.
 
 Read-Only:

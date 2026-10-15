@@ -50,6 +50,12 @@ var profileThreatIntelLevels = []string{
 // orgProfileEvent maps an event name in configuration to the org notification
 // settings field the API stores in a profile's events list. The names match
 // notification_events where an event is in both.
+//
+// The list has to match the events the API accepts on a profile
+// (channelEventFields in agent-api): an event missing from the API fails apply
+// with "unknown event", and an event missing here cannot be configured and is
+// removed on the next apply. File overwrite and imposter commit detections are
+// left out because the API never notifies on them.
 type orgProfileEvent struct {
 	name    string
 	apiName string
@@ -61,7 +67,6 @@ var orgProfileEvents = []orgProfileEvent{
 	{"https_detections", "notifyForHttpsDetections"},
 	{"suspicious_network_call_detected", "notifyForSuspiciousNetworkCall"},
 	{"suspicious_process_events_detected", "notifyForSuspiciousProcessEvents"},
-	{"file_overwrite", "notifyOnFileOverwrite"},
 	{"secret_exfiltration_detected", "notifyForSecretExfilDetection"},
 	{"secrets_detected", "notifyForSecretsDetection"},
 	{"artifacts_secrets_detected", "notifyForArtifactSecretsDetection"},
@@ -70,13 +75,13 @@ var orgProfileEvents = []orgProfileEvent{
 	{"required_check_failures", "notifyForRequiredCheckFailures"},
 	{"optional_check_failures", "notifyForOptionalCheckFailures"},
 	{"non_compliant_artifact_detected", "notifyForNonCompliantArtifacts"},
-	{"imposter_commits_detected", "notifyForImposterCommitsDetection"},
 	{"pat_max_age_violation", "notifyForPATMaxAgeViolation"},
 	{"pat_no_expiry_violation", "notifyForPATNoExpiryViolation"},
 	{"pat_over_scoped_violation", "notifyForPATOverScopedViolation"},
 	{"pat_unused_violation", "notifyForPATUnusedViolation"},
 	{"pat_inactive_owner_violation", "notifyForPATInactiveOwnerViolation"},
 	{"pat_expiry_reminder", "notifyForPATExpiryReminder"},
+	{"pat_revocation", "notifyForPATRevocation"},
 	{"pat_abuse_detected", "notifyForPATAbuseDetection"},
 }
 
@@ -192,8 +197,15 @@ func profilesAttribute(description string, attributes map[string]schema.Attribut
 func orgProfilesSchemaAttribute() schema.ListNestedAttribute {
 	attributes := profileBaseAttributes()
 	attributes["events"] = eventSetAttribute(
-		"Events this profile receives. Names match `notification_events`, plus `secret_exfiltration_detected` "+
-			"and the PAT governance events.",
+		"Events this profile receives: `domain_blocked`, `new_endpoint_discovered`, `https_detections`, "+
+			"`suspicious_network_call_detected`, `suspicious_process_events_detected`, "+
+			"`secret_exfiltration_detected`, `secrets_detected`, `artifacts_secrets_detected`, "+
+			"`run_blocked_by_policy`, `baseline_check_failures`, `required_check_failures`, "+
+			"`optional_check_failures`, `non_compliant_artifact_detected`, and the PAT governance events "+
+			"`pat_max_age_violation`, `pat_no_expiry_violation`, `pat_over_scoped_violation`, "+
+			"`pat_unused_violation`, `pat_inactive_owner_violation`, `pat_expiry_reminder`, `pat_revocation` "+
+			"and `pat_abuse_detected`. Names match `notification_events` where an event is in both. "+
+			"`file_overwrite` and `imposter_commits_detected` are not available on profiles.",
 		orgProfileEventNames(),
 	)
 	return profilesAttribute(

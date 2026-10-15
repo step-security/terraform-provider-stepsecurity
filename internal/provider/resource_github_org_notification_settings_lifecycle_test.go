@@ -67,6 +67,22 @@ func (b *fakeGithubNotificationSettingsBackend) ServeHTTP(w http.ResponseWriter,
 			return
 		}
 
+		// Like the real handler, reject the whole write when a profile names an
+		// event the API does not accept on profiles.
+		if profiles, ok := incoming["notificationChannels"].([]any); ok {
+			for i, p := range profiles {
+				profile, _ := p.(map[string]any)
+				events, _ := profile["events"].([]any)
+				for _, event := range events {
+					if name, _ := event.(string); !apiProfileEvents[name] {
+						w.WriteHeader(http.StatusBadRequest)
+						fmt.Fprintf(w, `{"message":"notification channel %d: unknown event %q"}`, i+1, name)
+						return
+					}
+				}
+			}
+		}
+
 		b.writes++
 		for key, value := range incoming {
 			if text, ok := value.(string); ok && text == "" {

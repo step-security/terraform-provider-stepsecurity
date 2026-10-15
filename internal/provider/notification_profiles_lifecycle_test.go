@@ -3,6 +3,7 @@ package provider
 import (
 	"encoding/json"
 	"fmt"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -305,6 +306,128 @@ func TestAccTenantNotificationProfilesOmittedAdopts(t *testing.T) {
 				}
 				return nil
 			},
+		),
+	})
+}
+
+// apiProfileEvents is the set of events the API accepts on an org profile,
+// copied from channelEventFields in agent-api's notification_channels.go. The
+// fake backend rejects anything else with a 400, as the real one does.
+var apiProfileEvents = map[string]bool{
+	"notifyWhenDomainBlocked":            true,
+	"notifyWhenEndpointDiscovered":       true,
+	"notifyForHttpsDetections":           true,
+	"notifyForSuspiciousNetworkCall":     true,
+	"notifyForSuspiciousProcessEvents":   true,
+	"notifyForSecretExfilDetection":      true,
+	"notifyForSecretsDetection":          true,
+	"notifyForArtifactSecretsDetection":  true,
+	"notifyForBlockedRunPolicy":          true,
+	"notifyForBaselineCheckFailures":     true,
+	"notifyForRequiredCheckFailures":     true,
+	"notifyForOptionalCheckFailures":     true,
+	"notifyForNonCompliantArtifacts":     true,
+	"notifyForPATMaxAgeViolation":        true,
+	"notifyForPATNoExpiryViolation":      true,
+	"notifyForPATOverScopedViolation":    true,
+	"notifyForPATUnusedViolation":        true,
+	"notifyForPATInactiveOwnerViolation": true,
+	"notifyForPATExpiryReminder":         true,
+	"notifyForPATRevocation":             true,
+	"notifyForPATAbuseDetection":         true,
+}
+
+// TestOrgProfileEventsMatchAPI keeps the configurable events and the API's
+// accepted events identical in both directions. An event only the provider
+// knows passes plan and fails apply with "unknown event"; an event only the API
+// knows can be set in the console but not in configuration, and is removed on
+// the next apply.
+func TestOrgProfileEventsMatchAPI(t *testing.T) {
+	provider := map[string]bool{}
+	for _, event := range orgProfileEvents {
+		if !apiProfileEvents[event.apiName] {
+			t.Errorf("%s maps to %s, which the API does not accept on a profile", event.name, event.apiName)
+		}
+		provider[event.apiName] = true
+	}
+	for apiName := range apiProfileEvents {
+		if !provider[apiName] {
+			t.Errorf("the API accepts %s on a profile, but no configurable event maps to it", apiName)
+		}
+	}
+}
+
+// TestAccGithubOrgNotificationProfilesRejectsUnsupportedEvents fails at plan,
+// before anything is written, for events the API does not accept on a profile.
+func TestAccGithubOrgNotificationProfilesRejectsUnsupportedEvents(t *testing.T) {
+	for _, event := range []string{"file_overwrite", "imposter_commits_detected"} {
+		t.Run(event, func(t *testing.T) {
+			backend := newFakeGithubNotificationSettingsBackend(nil)
+
+			testAccGithubOrgNotificationSettings(t, backend, resource.TestStep{
+				Config: githubOrgNotificationProfilesFixture(fmt.Sprintf(`[
+    {
+      name   = "Unsupported"
+      type   = "email"
+      target = "unsupported@example.com"
+      events = [%q]
+    },
+  ]`, event)),
+				ExpectError: regexp.MustCompile(`value must\s+be\s+one\s+of`),
+			})
+
+			if backend.writes != 0 {
+				t.Errorf("an invalid profile event was written %d time(s)", backend.writes)
+			}
+		})
+	}
+}
+
+// TestAccGithubOrgNotificationProfilesPATRevocation configures pat_revocation,
+// then adopts a console profile that has it, checking both read back as the
+// configurable name.
+func TestAccGithubOrgNotificationProfilesPATRevocation(t *testing.T) {
+	backend := newFakeGithubNotificationSettingsBackend(nil)
+
+	testAccGithubOrgNotificationSettings(t, backend, resource.TestStep{
+		Config: githubOrgNotificationProfilesFixture(`[
+    {
+      name   = "PAT"
+      type   = "email"
+      target = "pat@example.com"
+      events = ["pat_revocation", "pat_abuse_detected"]
+    },
+  ]`),
+		Check: resource.ComposeAggregateTestCheckFunc(
+			resource.TestCheckTypeSetElemAttr(orgProfilesResource, "notification_profiles.0.events.*", "pat_revocation"),
+			func(*terraform.State) error {
+				profiles := backend.storedProfiles()
+				if len(profiles) != 1 || !strings.Contains(strings.Join(profileEvents(profiles[0]), ","), "notifyForPATRevocation") {
+					return fmt.Errorf("API profiles = %v, want notifyForPATRevocation", profiles)
+				}
+				return nil
+			},
+		),
+	})
+
+	consoleBackend := newFakeGithubNotificationSettingsBackend(map[string]any{
+		"notificationChannels": []any{
+			map[string]any{
+				"id":                  "console-pat",
+				"name":                "PAT",
+				"type":                "email",
+				"target":              "pat@example.com",
+				"events":              []any{"notifyForPATRevocation"},
+				"orgThreatIntelLevel": "off",
+			},
+		},
+	})
+
+	testAccGithubOrgNotificationSettings(t, consoleBackend, resource.TestStep{
+		Config: githubOrgNotificationProfilesFixture(""),
+		Check: resource.ComposeAggregateTestCheckFunc(
+			resource.TestCheckResourceAttr(orgProfilesResource, "notification_profiles.0.events.#", "1"),
+			resource.TestCheckTypeSetElemAttr(orgProfilesResource, "notification_profiles.0.events.*", "pat_revocation"),
 		),
 	})
 }
