@@ -104,7 +104,7 @@ var runnerLabelRequirementObjectType = types.ObjectType{AttrTypes: map[string]at
 // surfaces as an inconsistent-result error after apply.
 var noSurroundingWhitespace = stringvalidator.RegexMatches(
 	regexp.MustCompile(`^\S(.*\S)?$`),
-	"must not contain leading or trailing whitespace",
+	"must not contain leading or trailing whitespace or line breaks",
 )
 
 // runnerLabelRequirementModel mirrors one runner_label_requirements element.
@@ -142,9 +142,12 @@ func flattenRunnerLabelRequirements(ctx context.Context, rules []stepsecurityapi
 			return false
 		}
 		var values []string
-		prevDiags := prev.ElementsAs(ctx, &values, false)
-		diags.Append(prevDiags...)
-		return !diags.HasError() && len(values) == 0
+		// A parse failure on PREVIOUS state only disables preservation for this
+		// value; it must neither consult nor pollute the shared diagnostics.
+		if prev.ElementsAs(ctx, &values, false).HasError() {
+			return false
+		}
+		return len(values) == 0
 	}
 	emptyStringSet := func() types.Set {
 		setValue, setDiags := types.SetValue(types.StringType, []attr.Value{})
@@ -155,7 +158,7 @@ func flattenRunnerLabelRequirements(ctx context.Context, rules []stepsecurityapi
 	for i, rule := range rules {
 		requireValue := stringSetValueOrNull(rule.RequireLabels, diags)
 		forbidValue := stringSetValueOrNull(rule.ForbidLabels, diags)
-		if i < len(previous) && previous[i].IfLabelMatches.ValueString() == rule.IfLabelMatches {
+		if len(previous) == len(rules) && previous[i].IfLabelMatches.ValueString() == rule.IfLabelMatches {
 			if len(rule.RequireLabels) == 0 && previousEmptySet(previous[i].RequireLabels) {
 				requireValue = emptyStringSet()
 			}
@@ -429,6 +432,8 @@ func (r *githubRunPolicyResource) Schema(_ context.Context, _ resource.SchemaReq
 						MarkdownDescription: "With `enforce_method = \"prejob\"`: only runs whose jobs all use these resolved runner labels defer cancellation to the prejob hook; other runs are cancelled via the API. Mutually exclusive with `prejob_disallowed_runner_labels`; omit both to defer for all non-standard-hosted runners. Expressions are not allowed. Labels are trimmed server-side and deduplicated case-insensitively (first occurrence wins); use trimmed, consistently cased values to avoid plan drift.",
 						Validators: []validator.Set{
 							setvalidator.ValueStringsAre(noSurroundingWhitespace),
+							caseInsensitiveUnique(),
+							setvalidator.ConflictsWith(path.MatchRelative().AtParent().AtName("prejob_disallowed_runner_labels")),
 						},
 					},
 					"prejob_disallowed_runner_labels": schema.SetAttribute{
@@ -437,12 +442,17 @@ func (r *githubRunPolicyResource) Schema(_ context.Context, _ resource.SchemaReq
 						MarkdownDescription: "With `enforce_method = \"prejob\"`: runs with any job on these resolved runner labels are cancelled via the API instead of deferring to the prejob hook. Mutually exclusive with `prejob_allowed_runner_labels`. Labels are trimmed server-side and deduplicated case-insensitively (first occurrence wins); use trimmed, consistently cased values to avoid plan drift.",
 						Validators: []validator.Set{
 							setvalidator.ValueStringsAre(noSurroundingWhitespace),
+							caseInsensitiveUnique(),
+							setvalidator.ConflictsWith(path.MatchRelative().AtParent().AtName("prejob_allowed_runner_labels")),
 						},
 					},
 					"runner_label_requirements": schema.ListNestedAttribute{
 						Optional:            true,
 						MarkdownDescription: "Conditional label rules evaluated per job in both runs-on modes, on top of the allow/block lists: when any of a job's runner labels matches `if_label_matches`, the rule's required labels must all be present on that job (or its forbidden labels absent), otherwise the run is blocked. Example: labels matching `codebuild-*` require `buildspec-override:true`. Only meaningful when `enable_runs_on_policy` is true.",
 						NestedObject: schema.NestedAttributeObject{
+							Validators: []validator.Object{
+								runnerLabelRequirementRule(),
+							},
 							Attributes: map[string]schema.Attribute{
 								"if_label_matches": schema.StringAttribute{
 									Required:            true,
@@ -457,6 +467,8 @@ func (r *githubRunPolicyResource) Schema(_ context.Context, _ resource.SchemaReq
 									MarkdownDescription: "Labels that must all be present on a matching job (exact match). A rule uses either required or forbidden labels, not both. Labels are trimmed and deduplicated case-insensitively server-side.",
 									Validators: []validator.Set{
 										setvalidator.ValueStringsAre(noSurroundingWhitespace),
+										caseInsensitiveUnique(),
+										setvalidator.ConflictsWith(path.MatchRelative().AtParent().AtName("forbid_labels")),
 									},
 								},
 								"forbid_labels": schema.SetAttribute{
@@ -465,6 +477,7 @@ func (r *githubRunPolicyResource) Schema(_ context.Context, _ resource.SchemaReq
 									MarkdownDescription: "Labels that must not be present on a matching job (exact match). A rule uses either required or forbidden labels, not both. Labels are trimmed and deduplicated case-insensitively server-side.",
 									Validators: []validator.Set{
 										setvalidator.ValueStringsAre(noSurroundingWhitespace),
+										caseInsensitiveUnique(),
 									},
 								},
 							},
