@@ -85,6 +85,95 @@ type policyConfigModel struct {
 	RequirePolicyStore             types.Bool   `tfsdk:"require_policy_store"`
 	BlockJobContainer              types.Bool   `tfsdk:"block_job_container"`
 	SecretsAnalyzeDefaultBranch    types.Bool   `tfsdk:"secrets_analyze_default_branch"`
+	EnforceMethod                  types.String `tfsdk:"enforce_method"`
+	PrejobAllowedRunnerLabels      types.Set    `tfsdk:"prejob_allowed_runner_labels"`
+	PrejobDisallowedRunnerLabels   types.Set    `tfsdk:"prejob_disallowed_runner_labels"`
+	RunnerLabelRequirements        types.List   `tfsdk:"runner_label_requirements"`
+}
+
+// runnerLabelRequirementObjectType is the element type of runner_label_requirements.
+var runnerLabelRequirementObjectType = types.ObjectType{AttrTypes: map[string]attr.Type{
+	"if_label_matches": types.StringType,
+	"require_labels":   types.SetType{ElemType: types.StringType},
+	"forbid_labels":    types.SetType{ElemType: types.StringType},
+}}
+
+// runnerLabelRequirementModel mirrors one runner_label_requirements element.
+type runnerLabelRequirementModel struct {
+	IfLabelMatches types.String `tfsdk:"if_label_matches"`
+	RequireLabels  types.Set    `tfsdk:"require_labels"`
+	ForbidLabels   types.Set    `tfsdk:"forbid_labels"`
+}
+
+// stringSetValueOrNull converts a server string slice into a Set, null when empty
+// (the backend omits empty lists, so null keeps the round-trip drift-free).
+func stringSetValueOrNull(values []string, diags *diag.Diagnostics) types.Set {
+	if len(values) == 0 {
+		return types.SetNull(types.StringType)
+	}
+	elems := make([]attr.Value, len(values))
+	for i, v := range values {
+		elems[i] = types.StringValue(v)
+	}
+	setValue, setDiags := types.SetValue(types.StringType, elems)
+	diags.Append(setDiags...)
+	return setValue
+}
+
+// flattenRunnerLabelRequirements converts the server's rules into the state list.
+func flattenRunnerLabelRequirements(rules []stepsecurityapi.RunnerLabelRequirement, diags *diag.Diagnostics) types.List {
+	if rules == nil {
+		return types.ListNull(runnerLabelRequirementObjectType)
+	}
+	elems := make([]attr.Value, 0, len(rules))
+	for _, rule := range rules {
+		obj, objDiags := types.ObjectValue(runnerLabelRequirementObjectType.AttrTypes, map[string]attr.Value{
+			"if_label_matches": types.StringValue(rule.IfLabelMatches),
+			"require_labels":   stringSetValueOrNull(rule.RequireLabels, diags),
+			"forbid_labels":    stringSetValueOrNull(rule.ForbidLabels, diags),
+		})
+		diags.Append(objDiags...)
+		elems = append(elems, obj)
+	}
+	listValue, listDiags := types.ListValue(runnerLabelRequirementObjectType, elems)
+	diags.Append(listDiags...)
+	return listValue
+}
+
+// expandRunnerLabelRequirements converts the planned rules into API form.
+func expandRunnerLabelRequirements(ctx context.Context, list types.List, diags *diag.Diagnostics) []stepsecurityapi.RunnerLabelRequirement {
+	if list.IsNull() || list.IsUnknown() {
+		return nil
+	}
+	var rows []runnerLabelRequirementModel
+	diags.Append(list.ElementsAs(ctx, &rows, false)...)
+	if diags.HasError() {
+		return nil
+	}
+	rules := make([]stepsecurityapi.RunnerLabelRequirement, 0, len(rows))
+	for _, row := range rows {
+		rule := stepsecurityapi.RunnerLabelRequirement{IfLabelMatches: row.IfLabelMatches.ValueString()}
+		if !row.RequireLabels.IsNull() {
+			diags.Append(row.RequireLabels.ElementsAs(ctx, &rule.RequireLabels, false)...)
+		}
+		if !row.ForbidLabels.IsNull() {
+			diags.Append(row.ForbidLabels.ElementsAs(ctx, &rule.ForbidLabels, false)...)
+		}
+		rules = append(rules, rule)
+	}
+	return rules
+}
+
+// expandPrejobAndRequirementFields copies the prejob scoping lists and the
+// conditional label requirements from the plan into an API policy config.
+func expandPrejobAndRequirementFields(ctx context.Context, policyConfig policyConfigModel, cfg *stepsecurityapi.RunPolicyConfig, diags *diag.Diagnostics) {
+	if !policyConfig.PrejobAllowedRunnerLabels.IsNull() {
+		diags.Append(policyConfig.PrejobAllowedRunnerLabels.ElementsAs(ctx, &cfg.PrejobAllowedRunnerLabels, false)...)
+	}
+	if !policyConfig.PrejobDisallowedRunnerLabels.IsNull() {
+		diags.Append(policyConfig.PrejobDisallowedRunnerLabels.ElementsAs(ctx, &cfg.PrejobDisallowedRunnerLabels, false)...)
+	}
+	cfg.RunnerLabelRequirements = expandRunnerLabelRequirements(ctx, policyConfig.RunnerLabelRequirements, diags)
 }
 
 // Metadata returns the resource type name.
@@ -289,6 +378,47 @@ func (r *githubRunPolicyResource) Schema(_ context.Context, _ resource.SchemaReq
 						Default:             booldefault.StaticBool(false),
 						MarkdownDescription: "Sub-feature of the secrets policy. When true, runs on the repository default branch are also evaluated (by default only non-default-branch runs are). Honors `bulk_secrets_only_mode` and `exempted_users`. Only meaningful when `enable_secrets_policy` is true.",
 					},
+					"enforce_method": schema.StringAttribute{
+						Optional:            true,
+						Computed:            true,
+						Default:             stringdefault.StaticString(""),
+						MarkdownDescription: "How a blocked run is stopped. `api` (the default; an empty string is treated the same) cancels via the GitHub API. `prejob` defers cancellation to the StepSecurity prejob hook on the runner for eligible runs; standard GitHub-hosted runners always fall back to API cancellation.",
+						Validators: []validator.String{
+							stringvalidator.OneOf("", "api", "prejob"),
+						},
+					},
+					"prejob_allowed_runner_labels": schema.SetAttribute{
+						ElementType:         types.StringType,
+						Optional:            true,
+						MarkdownDescription: "With `enforce_method = \"prejob\"`: only runs whose jobs all use these resolved runner labels defer cancellation to the prejob hook; other runs are cancelled via the API. Mutually exclusive with `prejob_disallowed_runner_labels`; omit both to defer for all non-standard-hosted runners. Expressions are not allowed.",
+					},
+					"prejob_disallowed_runner_labels": schema.SetAttribute{
+						ElementType:         types.StringType,
+						Optional:            true,
+						MarkdownDescription: "With `enforce_method = \"prejob\"`: runs with any job on these resolved runner labels are cancelled via the API instead of deferring to the prejob hook. Mutually exclusive with `prejob_allowed_runner_labels`.",
+					},
+					"runner_label_requirements": schema.ListNestedAttribute{
+						Optional:            true,
+						MarkdownDescription: "Conditional label rules evaluated per job in both runs-on modes, on top of the allow/block lists: when any of a job's runner labels matches `if_label_matches`, the rule's required labels must all be present on that job (or its forbidden labels absent), otherwise the run is blocked. Example: labels matching `codebuild-*` require `buildspec-override:true`. Only meaningful when `enable_runs_on_policy` is true.",
+						NestedObject: schema.NestedAttributeObject{
+							Attributes: map[string]schema.Attribute{
+								"if_label_matches": schema.StringAttribute{
+									Required:            true,
+									MarkdownDescription: "Anchored glob tested against each of the job's runner labels; `*` matches any text. Expressions are not allowed, use `*` wildcards instead.",
+								},
+								"require_labels": schema.SetAttribute{
+									ElementType:         types.StringType,
+									Optional:            true,
+									MarkdownDescription: "Labels that must all be present on a matching job (exact match). A rule uses either required or forbidden labels, not both.",
+								},
+								"forbid_labels": schema.SetAttribute{
+									ElementType:         types.StringType,
+									Optional:            true,
+									MarkdownDescription: "Labels that must not be present on a matching job (exact match). A rule uses either required or forbidden labels, not both.",
+								},
+							},
+						},
+					},
 				},
 			},
 			"created_by": schema.StringAttribute{
@@ -368,6 +498,7 @@ func (r *githubRunPolicyResource) Create(ctx context.Context, req resource.Creat
 			RequirePolicyStore:             policyConfig.RequirePolicyStore.ValueBool(),
 			BlockJobContainer:              policyConfig.BlockJobContainer.ValueBool(),
 			SecretsAnalyzeDefaultBranch:    policyConfig.SecretsAnalyzeDefaultBranch.ValueBool(),
+			EnforceMethod:                  policyConfig.EnforceMethod.ValueString(),
 		},
 	}
 
@@ -466,6 +597,11 @@ func (r *githubRunPolicyResource) Create(ctx context.Context, req resource.Creat
 			return
 		}
 		createRequest.PolicyConfig.AllowedRunnerConstraints = allowedConstraints
+	}
+
+	expandPrejobAndRequirementFields(ctx, policyConfig, &createRequest.PolicyConfig, &resp.Diagnostics)
+	if resp.Diagnostics.HasError() {
+		return
 	}
 
 	// Handle pinned actions exemptions set
@@ -633,6 +769,7 @@ func (r *githubRunPolicyResource) Update(ctx context.Context, req resource.Updat
 			RequirePolicyStore:             policyConfig.RequirePolicyStore.ValueBool(),
 			BlockJobContainer:              policyConfig.BlockJobContainer.ValueBool(),
 			SecretsAnalyzeDefaultBranch:    policyConfig.SecretsAnalyzeDefaultBranch.ValueBool(),
+			EnforceMethod:                  policyConfig.EnforceMethod.ValueString(),
 		},
 	}
 
@@ -733,6 +870,11 @@ func (r *githubRunPolicyResource) Update(ctx context.Context, req resource.Updat
 			return
 		}
 		updateRequest.PolicyConfig.AllowedRunnerConstraints = allowedConstraints
+	}
+
+	expandPrejobAndRequirementFields(ctx, policyConfig, &updateRequest.PolicyConfig, &resp.Diagnostics)
+	if resp.Diagnostics.HasError() {
+		return
 	}
 
 	// Handle pinned actions exemptions set
@@ -914,6 +1056,7 @@ func (r *githubRunPolicyResource) updateModelFromAPI(ctx context.Context, model 
 		"require_policy_store":              types.BoolValue(policy.PolicyConfig.RequirePolicyStore),
 		"block_job_container":               types.BoolValue(policy.PolicyConfig.BlockJobContainer),
 		"secrets_analyze_default_branch":    types.BoolValue(policy.PolicyConfig.SecretsAnalyzeDefaultBranch),
+		"enforce_method":                    types.StringValue(policy.PolicyConfig.EnforceMethod),
 	}
 
 	// Handle allowed actions map
@@ -1026,6 +1169,11 @@ func (r *githubRunPolicyResource) updateModelFromAPI(ctx context.Context, model 
 		policyConfigAttrs["allowed_runner_constraints"] = types.MapNull(types.SetType{ElemType: types.StringType})
 	}
 
+	// Prejob hook scoping lists and conditional label requirements.
+	policyConfigAttrs["prejob_allowed_runner_labels"] = stringSetValueOrNull(policy.PolicyConfig.PrejobAllowedRunnerLabels, diags)
+	policyConfigAttrs["prejob_disallowed_runner_labels"] = stringSetValueOrNull(policy.PolicyConfig.PrejobDisallowedRunnerLabels, diags)
+	policyConfigAttrs["runner_label_requirements"] = flattenRunnerLabelRequirements(policy.PolicyConfig.RunnerLabelRequirements, diags)
+
 	// Handle pinned actions exemptions set
 	if policy.PolicyConfig.PinnedActionsExemptions != nil {
 		pinnedExemptionsList := make([]attr.Value, len(policy.PolicyConfig.PinnedActionsExemptions))
@@ -1079,6 +1227,10 @@ func (r *githubRunPolicyResource) updateModelFromAPI(ctx context.Context, model 
 		"require_policy_store":              types.BoolType,
 		"block_job_container":               types.BoolType,
 		"secrets_analyze_default_branch":    types.BoolType,
+		"enforce_method":                    types.StringType,
+		"prejob_allowed_runner_labels":      types.SetType{ElemType: types.StringType},
+		"prejob_disallowed_runner_labels":   types.SetType{ElemType: types.StringType},
+		"runner_label_requirements":         types.ListType{ElemType: runnerLabelRequirementObjectType},
 	}
 
 	policyConfigObj, objDiags := types.ObjectValue(policyConfigAttrTypes, policyConfigAttrs)
