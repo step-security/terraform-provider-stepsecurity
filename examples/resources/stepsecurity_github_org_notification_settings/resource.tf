@@ -52,6 +52,40 @@ resource "stepsecurity_github_org_notification_settings" "test-organization" {
     enabled = true
     level   = "version" # all | name | version
   }
+
+  # Additional destinations, each receiving only its own events, on top of the
+  # channels above. Omit the list to leave profiles managed in the console
+  # alone; set it to [] to remove them all.
+  notification_profiles = [
+    {
+      name   = "Network detections"
+      type   = "slack_webhook" # email | slack_webhook | slack_oauth | teams
+      target = "https://hooks.slack.com/services/T00000000/B00000000/XXXXXXXXXXXXXXXXXXXXXXXX"
+      events = [
+        "domain_blocked",
+        "suspicious_network_call_detected",
+        "https_detections",
+      ]
+    },
+    {
+      name   = "Policy and checks"
+      type   = "teams"
+      target = "https://outlook.office.com/webhook/00000000-0000-0000-0000-000000000000@00000000-0000-0000-0000-000000000000/IncomingWebhook/11111111111111111111111111111111"
+      events = [
+        "run_blocked_by_policy",
+        "baseline_check_failures",
+        "required_check_failures",
+        "optional_check_failures",
+      ]
+    },
+    {
+      name               = "Secrets and supply chain"
+      type               = "email"
+      target             = "supply-chain@step-security.com"
+      events             = ["secrets_detected", "artifacts_secrets_detected"]
+      threat_intel_level = "version" # off (default) | all | name | version
+    },
+  ]
 }
 
 
