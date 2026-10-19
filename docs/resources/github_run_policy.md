@@ -555,16 +555,32 @@ Optional:
 - `enable_runs_on_policy` (Boolean) Whether to enable the runs-on policy.
 - `enable_secrets_policy` (Boolean) Whether to enable the secrets policy.
 - `enable_standard_runner_labels` (Boolean) When true, the GitHub-hosted standard runner label set (ubuntu-latest, windows-latest, macos-*, arm variants, ...; kept up to date automatically) is added to `disallowed_runner_labels` (runs-on policy) and `harden_runner_target_labels` (Harden Runner policy) at evaluation time.
+- `enforce_method` (String) How a blocked run is stopped. `api` (the default; an empty string is treated the same) cancels via the GitHub API. `prejob` defers cancellation to the StepSecurity prejob hook on the runner for eligible runs; standard GitHub-hosted runners always fall back to API cancellation.
 - `exempted_users` (Set of String) Set of exempted users (can be bots/usernames) for the secrets exfiltration policy. These users will not be subject to the secrets policy checks.
 - `harden_runner_custom_actions` (Set of String) Set of custom actions accepted as Harden Runner equivalents (in addition to `step-security/harden-runner`).
 - `harden_runner_excluded_labels` (Set of String) Set of runner labels excluded from Harden Runner enforcement. A job whose `runs-on` matches any entry is skipped, regardless of `harden_runner_target_labels`, so an org-wide policy can carve out runners that cannot run Harden Runner. Entries support a `*` wildcard (e.g. `custom-runner-*`), match case-insensitively, and are also tested against labels containing `${{ }}` expressions. A lone `*` is rejected because it would exclude every job. Set to `[]` to clear the exclusions; omitting the attribute leaves any existing backend value untouched.
 - `harden_runner_target_labels` (Set of String) Set of runner labels that target Harden Runner enforcement. Set to `[]` to apply the policy to every job; set a non-empty list to filter to jobs whose `runs-on` matches at least one label. Omitting the attribute leaves any existing backend value untouched (additive-only).
 - `is_dry_run` (Boolean) Whether this policy is in dry-run mode.
 - `pr_comment_template` (String) Optional custom template for the pull request comment posted when this policy blocks a run. Supports placeholder substitution; leave empty to use the default StepSecurity comment.
+- `prejob_allowed_runner_labels` (Set of String) With `enforce_method = "prejob"`: only runs whose jobs all use these resolved runner labels defer cancellation to the prejob hook; other runs are cancelled via the API. Mutually exclusive with `prejob_disallowed_runner_labels`; omit both to defer for all non-standard-hosted runners. Expressions are not allowed. Labels are trimmed server-side and deduplicated case-insensitively (first occurrence wins); use trimmed, consistently cased values to avoid plan drift.
+- `prejob_disallowed_runner_labels` (Set of String) With `enforce_method = "prejob"`: runs with any job on these resolved runner labels are cancelled via the API instead of deferring to the prejob hook. Mutually exclusive with `prejob_allowed_runner_labels`. Labels are trimmed server-side and deduplicated case-insensitively (first occurrence wins); use trimmed, consistently cased values to avoid plan drift.
 - `require_pinned_actions` (Boolean) Whether to require all actions to be pinned to full-length commit SHAs. Sub-feature of the allowed actions policy — only meaningful when `enable_action_policy` is true.
 - `require_policy_store` (Boolean) Sub-feature of the Harden Runner policy. When true, every targeted job's Harden Runner step must set `use-policy-store: true`; a missing or non-`true` value is a violation. The legacy `policy:` input does not satisfy this check. Only meaningful when `enable_harden_runner_policy` is true.
+- `runner_label_requirements` (Attributes List) Conditional label rules evaluated per job in both runs-on modes, on top of the allow/block lists: when any of a job's runner labels matches `if_label_matches`, the rule's required labels must all be present on that job (or its forbidden labels absent), otherwise the run is blocked. Example: labels matching `codebuild-*` require `buildspec-override:true`. Only meaningful when `enable_runs_on_policy` is true. (see [below for nested schema](#nestedatt--policy_config--runner_label_requirements))
 - `runs_on_mode` (String) Controls how the runs-on policy evaluates runner labels. `disallowed` (the default; an empty string is treated the same) blocks jobs whose `runs-on` matches `disallowed_runner_labels`. `allowed` instead only permits jobs whose `runs-on` matches `allowed_runner_labels` / `allowed_runner_constraints`. Only meaningful when `enable_runs_on_policy` is true.
 - `secrets_analyze_default_branch` (Boolean) Sub-feature of the secrets policy. When true, runs on the repository default branch are also evaluated (by default only non-default-branch runs are). Honors `bulk_secrets_only_mode` and `exempted_users`. Only meaningful when `enable_secrets_policy` is true.
+
+<a id="nestedatt--policy_config--runner_label_requirements"></a>
+### Nested Schema for `policy_config.runner_label_requirements`
+
+Required:
+
+- `if_label_matches` (String) Anchored glob tested against each of the job's runner labels; `*` matches any text. Expressions are not allowed, use `*` wildcards instead. The pattern is trimmed server-side.
+
+Optional:
+
+- `forbid_labels` (Set of String) Labels that must not be present on a matching job (exact match). A rule uses either required or forbidden labels, not both. Labels are trimmed and deduplicated case-insensitively server-side.
+- `require_labels` (Set of String) Labels that must all be present on a matching job (exact match). A rule uses either required or forbidden labels, not both. Labels are trimmed and deduplicated case-insensitively server-side.
 
 ## Import
 
