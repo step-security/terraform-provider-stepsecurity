@@ -2,6 +2,7 @@ package provider
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 
 	stepsecurityapi "github.com/step-security/terraform-provider-stepsecurity/internal/stepsecurity-api"
@@ -21,13 +22,16 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/schema/validator"
 	"github.com/hashicorp/terraform-plugin-framework/types"
 	"github.com/hashicorp/terraform-plugin-framework/types/basetypes"
+	"github.com/hashicorp/terraform-plugin-go/tfprotov6"
+	"github.com/hashicorp/terraform-plugin-go/tftypes"
 )
 
 // Ensure the implementation satisfies the expected interfaces.
 var (
-	_ resource.Resource                = &GithubRepoNotificationSettingsResource{}
-	_ resource.ResourceWithConfigure   = &GithubRepoNotificationSettingsResource{}
-	_ resource.ResourceWithImportState = &GithubRepoNotificationSettingsResource{}
+	_ resource.Resource                 = &GithubRepoNotificationSettingsResource{}
+	_ resource.ResourceWithConfigure    = &GithubRepoNotificationSettingsResource{}
+	_ resource.ResourceWithImportState  = &GithubRepoNotificationSettingsResource{}
+	_ resource.ResourceWithUpgradeState = &GithubRepoNotificationSettingsResource{}
 )
 
 // NewOrderResource is a helper function to simplify the provider implementation.
@@ -48,6 +52,9 @@ func (r *GithubRepoNotificationSettingsResource) Metadata(_ context.Context, req
 // Schema defines the schema for the resource.
 func (r *GithubRepoNotificationSettingsResource) Schema(_ context.Context, _ resource.SchemaRequest, resp *resource.SchemaResponse) {
 	resp.Schema = schema.Schema{
+		// Version 1 added the PAT toggles to notification_events; UpgradeState
+		// backfills them so states written by earlier releases plan no changes.
+		Version: 1,
 		Attributes: map[string]schema.Attribute{
 			"id": schema.StringAttribute{
 				Computed: true,
@@ -806,4 +813,69 @@ func (m githubEquivalentStateForDefaultModifier) PlanModifyString(_ context.Cont
 	if m.normalize(req.StateValue.ValueString()) == m.normalize(req.PlanValue.ValueString()) {
 		resp.PlanValue = req.StateValue
 	}
+}
+
+// notificationEventsPATToggles are the notification_events attributes added
+// in schema version 1. States written by earlier releases lack them, and a
+// plan would otherwise add each one as false; the backend treats an absent
+// toggle as off, so false is the faithful value.
+var notificationEventsPATToggles = []string{
+	"pat_max_age_violation",
+	"pat_no_expiry_violation",
+	"pat_over_scoped_violation",
+	"pat_unused_violation",
+	"pat_inactive_owner_violation",
+	"pat_expiry_reminder",
+}
+
+// UpgradeState upgrades states written with schema version 0.
+func (r *GithubRepoNotificationSettingsResource) UpgradeState(context.Context) map[int64]resource.StateUpgrader {
+	return map[int64]resource.StateUpgrader{
+		0: {StateUpgrader: upgradeGithubOrgNotificationSettingsStateV0},
+	}
+}
+
+// upgradeGithubOrgNotificationSettingsStateV0 adds the PAT toggles to a
+// version 0 state and leaves every other value untouched.
+func upgradeGithubOrgNotificationSettingsStateV0(ctx context.Context, req resource.UpgradeStateRequest, resp *resource.UpgradeStateResponse) {
+	if req.RawState == nil || len(req.RawState.JSON) == 0 {
+		return
+	}
+	upgraded, err := backfillNotificationEventsPATToggles(req.RawState.JSON)
+	if err != nil {
+		resp.Diagnostics.AddError("Unable to Upgrade Notification Settings State", err.Error())
+		return
+	}
+	schemaType := resp.State.Schema.Type().TerraformType(ctx)
+	value, err := tftypes.ValueFromJSON(upgraded, schemaType)
+	if err != nil {
+		resp.Diagnostics.AddError("Unable to Upgrade Notification Settings State", err.Error())
+		return
+	}
+	dynamic, err := tfprotov6.NewDynamicValue(schemaType, value)
+	if err != nil {
+		resp.Diagnostics.AddError("Unable to Upgrade Notification Settings State", err.Error())
+		return
+	}
+	resp.DynamicValue = &dynamic
+}
+
+// backfillNotificationEventsPATToggles returns the state JSON with every
+// missing or null PAT toggle set to false inside notification_events. A state
+// without notification_events is returned unchanged.
+func backfillNotificationEventsPATToggles(raw []byte) ([]byte, error) {
+	var state map[string]any
+	if err := json.Unmarshal(raw, &state); err != nil {
+		return nil, fmt.Errorf("failed to decode the prior state: %w", err)
+	}
+	events, ok := state["notification_events"].(map[string]any)
+	if !ok {
+		return raw, nil
+	}
+	for _, name := range notificationEventsPATToggles {
+		if value, present := events[name]; !present || value == nil {
+			events[name] = false
+		}
+	}
+	return json.Marshal(state)
 }
