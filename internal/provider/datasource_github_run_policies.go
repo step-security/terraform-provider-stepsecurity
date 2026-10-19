@@ -336,7 +336,7 @@ func (d *githubRunPoliciesDataSource) Read(ctx context.Context, req datasource.R
 		var labelDiags diag.Diagnostics
 		policyConfigAttrs["prejob_allowed_runner_labels"] = stringSetValueOrNull(policy.PolicyConfig.PrejobAllowedRunnerLabels, &labelDiags)
 		policyConfigAttrs["prejob_disallowed_runner_labels"] = stringSetValueOrNull(policy.PolicyConfig.PrejobDisallowedRunnerLabels, &labelDiags)
-		policyConfigAttrs["runner_label_requirements"] = flattenRunnerLabelRequirements(policy.PolicyConfig.RunnerLabelRequirements, &labelDiags)
+		policyConfigAttrs["runner_label_requirements"] = flattenRunnerLabelRequirements(ctx, policy.PolicyConfig.RunnerLabelRequirements, nil, &labelDiags)
 		resp.Diagnostics.Append(labelDiags...)
 
 		// Handle allowed actions map

@@ -3,6 +3,7 @@ package provider
 import (
 	"context"
 	"fmt"
+	"regexp"
 	"strings"
 	"time"
 
@@ -98,6 +99,14 @@ var runnerLabelRequirementObjectType = types.ObjectType{AttrTypes: map[string]at
 	"forbid_labels":    types.SetType{ElemType: types.StringType},
 }}
 
+// noSurroundingWhitespace rejects values the server would silently trim;
+// without it a padded label plans one value and reads back another, which
+// surfaces as an inconsistent-result error after apply.
+var noSurroundingWhitespace = stringvalidator.RegexMatches(
+	regexp.MustCompile(`^\S(.*\S)?$`),
+	"must not contain leading or trailing whitespace",
+)
+
 // runnerLabelRequirementModel mirrors one runner_label_requirements element.
 type runnerLabelRequirementModel struct {
 	IfLabelMatches types.String `tfsdk:"if_label_matches"`
@@ -120,17 +129,44 @@ func stringSetValueOrNull(values []string, diags *diag.Diagnostics) types.Set {
 	return setValue
 }
 
-// flattenRunnerLabelRequirements converts the server's rules into the state list.
-func flattenRunnerLabelRequirements(rules []stepsecurityapi.RunnerLabelRequirement, diags *diag.Diagnostics) types.List {
+// flattenRunnerLabelRequirements converts the server's rules into the state
+// list. previous (the prior state's rules, optional) preserves the empty-vs-null
+// signal of a rule's require/forbid sets: a planned empty set round-trips as
+// omitted JSON, and index-plus-pattern matching keeps it from drifting to null.
+func flattenRunnerLabelRequirements(ctx context.Context, rules []stepsecurityapi.RunnerLabelRequirement, previous []runnerLabelRequirementModel, diags *diag.Diagnostics) types.List {
 	if rules == nil {
 		return types.ListNull(runnerLabelRequirementObjectType)
 	}
+	previousEmptySet := func(prev types.Set) bool {
+		if prev.IsNull() || prev.IsUnknown() {
+			return false
+		}
+		var values []string
+		prevDiags := prev.ElementsAs(ctx, &values, false)
+		diags.Append(prevDiags...)
+		return !diags.HasError() && len(values) == 0
+	}
+	emptyStringSet := func() types.Set {
+		setValue, setDiags := types.SetValue(types.StringType, []attr.Value{})
+		diags.Append(setDiags...)
+		return setValue
+	}
 	elems := make([]attr.Value, 0, len(rules))
-	for _, rule := range rules {
+	for i, rule := range rules {
+		requireValue := stringSetValueOrNull(rule.RequireLabels, diags)
+		forbidValue := stringSetValueOrNull(rule.ForbidLabels, diags)
+		if i < len(previous) && previous[i].IfLabelMatches.ValueString() == rule.IfLabelMatches {
+			if len(rule.RequireLabels) == 0 && previousEmptySet(previous[i].RequireLabels) {
+				requireValue = emptyStringSet()
+			}
+			if len(rule.ForbidLabels) == 0 && previousEmptySet(previous[i].ForbidLabels) {
+				forbidValue = emptyStringSet()
+			}
+		}
 		obj, objDiags := types.ObjectValue(runnerLabelRequirementObjectType.AttrTypes, map[string]attr.Value{
 			"if_label_matches": types.StringValue(rule.IfLabelMatches),
-			"require_labels":   stringSetValueOrNull(rule.RequireLabels, diags),
-			"forbid_labels":    stringSetValueOrNull(rule.ForbidLabels, diags),
+			"require_labels":   requireValue,
+			"forbid_labels":    forbidValue,
 		})
 		diags.Append(objDiags...)
 		elems = append(elems, obj)
@@ -390,12 +426,18 @@ func (r *githubRunPolicyResource) Schema(_ context.Context, _ resource.SchemaReq
 					"prejob_allowed_runner_labels": schema.SetAttribute{
 						ElementType:         types.StringType,
 						Optional:            true,
-						MarkdownDescription: "With `enforce_method = \"prejob\"`: only runs whose jobs all use these resolved runner labels defer cancellation to the prejob hook; other runs are cancelled via the API. Mutually exclusive with `prejob_disallowed_runner_labels`; omit both to defer for all non-standard-hosted runners. Expressions are not allowed.",
+						MarkdownDescription: "With `enforce_method = \"prejob\"`: only runs whose jobs all use these resolved runner labels defer cancellation to the prejob hook; other runs are cancelled via the API. Mutually exclusive with `prejob_disallowed_runner_labels`; omit both to defer for all non-standard-hosted runners. Expressions are not allowed. Labels are trimmed server-side and deduplicated case-insensitively (first occurrence wins); use trimmed, consistently cased values to avoid plan drift.",
+						Validators: []validator.Set{
+							setvalidator.ValueStringsAre(noSurroundingWhitespace),
+						},
 					},
 					"prejob_disallowed_runner_labels": schema.SetAttribute{
 						ElementType:         types.StringType,
 						Optional:            true,
-						MarkdownDescription: "With `enforce_method = \"prejob\"`: runs with any job on these resolved runner labels are cancelled via the API instead of deferring to the prejob hook. Mutually exclusive with `prejob_allowed_runner_labels`.",
+						MarkdownDescription: "With `enforce_method = \"prejob\"`: runs with any job on these resolved runner labels are cancelled via the API instead of deferring to the prejob hook. Mutually exclusive with `prejob_allowed_runner_labels`. Labels are trimmed server-side and deduplicated case-insensitively (first occurrence wins); use trimmed, consistently cased values to avoid plan drift.",
+						Validators: []validator.Set{
+							setvalidator.ValueStringsAre(noSurroundingWhitespace),
+						},
 					},
 					"runner_label_requirements": schema.ListNestedAttribute{
 						Optional:            true,
@@ -404,17 +446,26 @@ func (r *githubRunPolicyResource) Schema(_ context.Context, _ resource.SchemaReq
 							Attributes: map[string]schema.Attribute{
 								"if_label_matches": schema.StringAttribute{
 									Required:            true,
-									MarkdownDescription: "Anchored glob tested against each of the job's runner labels; `*` matches any text. Expressions are not allowed, use `*` wildcards instead.",
+									MarkdownDescription: "Anchored glob tested against each of the job's runner labels; `*` matches any text. Expressions are not allowed, use `*` wildcards instead. The pattern is trimmed server-side.",
+									Validators: []validator.String{
+										noSurroundingWhitespace,
+									},
 								},
 								"require_labels": schema.SetAttribute{
 									ElementType:         types.StringType,
 									Optional:            true,
-									MarkdownDescription: "Labels that must all be present on a matching job (exact match). A rule uses either required or forbidden labels, not both.",
+									MarkdownDescription: "Labels that must all be present on a matching job (exact match). A rule uses either required or forbidden labels, not both. Labels are trimmed and deduplicated case-insensitively server-side.",
+									Validators: []validator.Set{
+										setvalidator.ValueStringsAre(noSurroundingWhitespace),
+									},
 								},
 								"forbid_labels": schema.SetAttribute{
 									ElementType:         types.StringType,
 									Optional:            true,
-									MarkdownDescription: "Labels that must not be present on a matching job (exact match). A rule uses either required or forbidden labels, not both.",
+									MarkdownDescription: "Labels that must not be present on a matching job (exact match). A rule uses either required or forbidden labels, not both. Labels are trimmed and deduplicated case-insensitively server-side.",
+									Validators: []validator.Set{
+										setvalidator.ValueStringsAre(noSurroundingWhitespace),
+									},
 								},
 							},
 						},
@@ -1169,10 +1220,41 @@ func (r *githubRunPolicyResource) updateModelFromAPI(ctx context.Context, model 
 		policyConfigAttrs["allowed_runner_constraints"] = types.MapNull(types.SetType{ElemType: types.StringType})
 	}
 
-	// Prejob hook scoping lists and conditional label requirements.
-	policyConfigAttrs["prejob_allowed_runner_labels"] = stringSetValueOrNull(policy.PolicyConfig.PrejobAllowedRunnerLabels, diags)
-	policyConfigAttrs["prejob_disallowed_runner_labels"] = stringSetValueOrNull(policy.PolicyConfig.PrejobDisallowedRunnerLabels, diags)
-	policyConfigAttrs["runner_label_requirements"] = flattenRunnerLabelRequirements(policy.PolicyConfig.RunnerLabelRequirements, diags)
+	// Prejob hook scoping lists and conditional label requirements. A planned
+	// empty list round-trips as omitted JSON (nil), so the previous state's
+	// empty-vs-null signal is preserved to avoid an inconsistent result after
+	// apply, the same contract as the harden-runner label sets above.
+	if len(policy.PolicyConfig.PrejobAllowedRunnerLabels) > 0 {
+		policyConfigAttrs["prejob_allowed_runner_labels"] = stringSetValueOrNull(policy.PolicyConfig.PrejobAllowedRunnerLabels, diags)
+	} else if preservedValue, ok := preservePreviousEmptySet(existingPolicyConfig.PrejobAllowedRunnerLabels); hasExistingPolicyConfig && ok {
+		policyConfigAttrs["prejob_allowed_runner_labels"] = preservedValue
+	} else {
+		policyConfigAttrs["prejob_allowed_runner_labels"] = types.SetNull(types.StringType)
+	}
+	if len(policy.PolicyConfig.PrejobDisallowedRunnerLabels) > 0 {
+		policyConfigAttrs["prejob_disallowed_runner_labels"] = stringSetValueOrNull(policy.PolicyConfig.PrejobDisallowedRunnerLabels, diags)
+	} else if preservedValue, ok := preservePreviousEmptySet(existingPolicyConfig.PrejobDisallowedRunnerLabels); hasExistingPolicyConfig && ok {
+		policyConfigAttrs["prejob_disallowed_runner_labels"] = preservedValue
+	} else {
+		policyConfigAttrs["prejob_disallowed_runner_labels"] = types.SetNull(types.StringType)
+	}
+	var previousRequirements []runnerLabelRequirementModel
+	hasPreviousRequirements := hasExistingPolicyConfig &&
+		!existingPolicyConfig.RunnerLabelRequirements.IsNull() &&
+		!existingPolicyConfig.RunnerLabelRequirements.IsUnknown()
+	if hasPreviousRequirements {
+		reqDiags := existingPolicyConfig.RunnerLabelRequirements.ElementsAs(ctx, &previousRequirements, false)
+		diags.Append(reqDiags...)
+	}
+	if policy.PolicyConfig.RunnerLabelRequirements != nil {
+		policyConfigAttrs["runner_label_requirements"] = flattenRunnerLabelRequirements(ctx, policy.PolicyConfig.RunnerLabelRequirements, previousRequirements, diags)
+	} else if hasPreviousRequirements && len(previousRequirements) == 0 {
+		emptyList, emptyDiags := types.ListValue(runnerLabelRequirementObjectType, []attr.Value{})
+		diags.Append(emptyDiags...)
+		policyConfigAttrs["runner_label_requirements"] = emptyList
+	} else {
+		policyConfigAttrs["runner_label_requirements"] = types.ListNull(runnerLabelRequirementObjectType)
+	}
 
 	// Handle pinned actions exemptions set
 	if policy.PolicyConfig.PinnedActionsExemptions != nil {
