@@ -154,3 +154,55 @@ func (c *APIClient) DeletePATGovernancePolicy(ctx context.Context, owner string)
 
 	return nil
 }
+
+// tenantPATGovernancePolicyEnvelope wraps GET /v1/{customer}/github/pat-policy.
+// "policy" is the built-in default when the customer has stored nothing;
+// servers that can tell the two apart say so with has_tenant_policy.
+type tenantPATGovernancePolicyEnvelope struct {
+	Policy          *PATGovernancePolicy `json:"policy"`
+	HasTenantPolicy *bool                `json:"has_tenant_policy,omitempty"`
+}
+
+func (c *APIClient) tenantPATGovernancePolicyURI() string {
+	return fmt.Sprintf("%s/v1/%s/github/pat-policy", c.BaseURL, c.Customer)
+}
+
+// GetTenantPATGovernancePolicy returns the configured customer's stored
+// tenant-wide policy, or nil when the server reports that none is stored.
+// Older servers cannot report that and return their built-in default as if it
+// were stored.
+func (c *APIClient) GetTenantPATGovernancePolicy(ctx context.Context) (*PATGovernancePolicy, error) {
+	respBody, err := c.get(ctx, c.tenantPATGovernancePolicyURI())
+	if err != nil {
+		return nil, fmt.Errorf("failed to get tenant PAT governance policy: %w", err)
+	}
+
+	var envelope tenantPATGovernancePolicyEnvelope
+	if err := json.Unmarshal(respBody, &envelope); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal tenant PAT governance policy: %w", err)
+	}
+	if envelope.HasTenantPolicy != nil && !*envelope.HasTenantPolicy {
+		return nil, nil
+	}
+
+	return envelope.Policy, nil
+}
+
+// UpdateTenantPATGovernancePolicy creates or replaces the tenant-wide policy.
+func (c *APIClient) UpdateTenantPATGovernancePolicy(ctx context.Context, policy PATGovernancePolicy) error {
+	if _, err := c.put(ctx, c.tenantPATGovernancePolicyURI(), policy); err != nil {
+		return fmt.Errorf("failed to update tenant PAT governance policy: %w", err)
+	}
+
+	return nil
+}
+
+// DeleteTenantPATGovernancePolicy removes the tenant-wide policy, so
+// organizations without a policy of their own follow the built-in default.
+func (c *APIClient) DeleteTenantPATGovernancePolicy(ctx context.Context) error {
+	if _, err := c.delete(ctx, c.tenantPATGovernancePolicyURI()); err != nil {
+		return fmt.Errorf("failed to delete tenant PAT governance policy: %w", err)
+	}
+
+	return nil
+}

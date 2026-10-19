@@ -132,7 +132,7 @@ func (r *githubPATGovernancePolicyResource) Schema(_ context.Context, _ resource
 			"personal-access-token controls on the StepSecurity dashboard (max age, no expiration, over-scoped, " +
 			"unused, inactive owner) and the resulting violation alerts and pre-expiry reminders. " +
 			"An enabled policy needs at least one active control. The resource is the organization's own policy; an organization without one follows the customer's tenant-wide policy, which this resource does not manage. Destroying the resource removes the organization's own policy, so it follows the tenant-wide policy (or the built-in default) again.",
-		Attributes: map[string]schema.Attribute{
+		Attributes: withPATPolicySettings(map[string]schema.Attribute{
 			"id": schema.StringAttribute{
 				Computed: true,
 				PlanModifiers: []planmodifier.String{
@@ -147,176 +147,194 @@ func (r *githubPATGovernancePolicyResource) Schema(_ context.Context, _ resource
 				},
 				Description: "The owner/organization name the policy applies to.",
 			},
-			"enabled": schema.BoolAttribute{
-				Required:    true,
-				Description: "Whether the PAT governance policy is enforced. An enabled policy needs at least one active control.",
-			},
-			"fine_grained_max_age_days": schema.Int64Attribute{
-				Optional:    true,
-				Computed:    true,
-				Default:     int64default.StaticInt64(0),
-				Description: "Maximum allowed age in days for fine-grained PATs, measured from the org-access grant time. 0 disables the check.",
-				Validators: []validator.Int64{
-					int64validator.Between(0, maxPATThresholdDays),
-				},
-			},
-			"classic_max_age_days": schema.Int64Attribute{
-				Optional:    true,
-				Computed:    true,
-				Default:     int64default.StaticInt64(0),
-				Description: "Maximum allowed age in days for classic PATs, measured from the SSO authorization time. 0 disables the check.",
-				Validators: []validator.Int64{
-					int64validator.Between(0, maxPATThresholdDays),
-				},
-			},
-			"flag_no_expiry": schema.BoolAttribute{
-				Optional:    true,
-				Computed:    true,
-				Default:     booldefault.StaticBool(false),
-				Description: "Flag tokens without an expiration date, or whose expiration is set further out than the class max age allows.",
-			},
-			"flag_over_scoped": schema.BoolAttribute{
-				Optional:    true,
-				Computed:    true,
-				Default:     booldefault.StaticBool(false),
-				Description: "Flag over-scoped tokens: classic PATs carrying coarse scopes, and fine-grained PATs granting write access across all repositories.",
-			},
-			"over_scoped_scopes": schema.ListAttribute{
-				ElementType: types.StringType,
-				Optional:    true,
-				Description: "Classic PAT scopes treated as over-scoped. Omit to use the server default (repo, admin:org, workflow). Only used when flag_over_scoped is true.",
-				Validators: []validator.List{
-					listvalidator.SizeAtLeast(1),
-				},
-			},
-			"unused_days": schema.Int64Attribute{
-				Optional:    true,
-				Computed:    true,
-				Default:     int64default.StaticInt64(0),
-				Description: "Flag tokens with no sign of use for more than this many days (never-used tokens count from their grant/authorization time). 0 disables the check.",
-				Validators: []validator.Int64{
-					int64validator.Between(0, maxPATThresholdDays),
-				},
-			},
-			"github_issue_repo": schema.StringAttribute{
-				Optional:    true,
-				Computed:    true,
-				Default:     stringdefault.StaticString(""),
-				Description: "Bare repository name in this organization where a violations issue is filed and kept up to date on each alert. Empty disables the GitHub-issue alert channel.",
-			},
-			"expiry_reminder_days": schema.ListAttribute{
-				ElementType: types.Int64Type,
-				Optional:    true,
-				Description: "Pre-expiry reminder bands in days before expiry, each reminded once per token, shared by both token classes unless a per-class list is set. Omit to use the server default (30, 7, 1); a 0 entry disables that band.",
-				Validators: []validator.List{
-					listvalidator.SizeAtLeast(1),
-					listvalidator.ValueInt64sAre(int64validator.Between(0, maxPATThresholdDays)),
-				},
-			},
-			"fine_grained_unused_days": schema.Int64Attribute{
-				Optional:    true,
-				Description: "Unused limit in days for fine-grained PATs. Omit to use unused_days; 0 disables the staleness check for this class.",
-				Validators:  []validator.Int64{int64validator.Between(0, maxPATThresholdDays)},
-			},
-			"classic_unused_days": schema.Int64Attribute{
-				Optional:    true,
-				Description: "Unused limit in days for classic PATs. Omit to use unused_days; 0 disables the staleness check for this class.",
-				Validators:  []validator.Int64{int64validator.Between(0, maxPATThresholdDays)},
-			},
-			"fine_grained_expiry_reminder_days": schema.ListAttribute{
-				ElementType: types.Int64Type,
-				Optional:    true,
-				Description: "Reminder bands for fine-grained PATs. A class with its own list ignores expiry_reminder_days entirely; omit to share it, set [0] to send no reminders for this class.",
-				Validators: []validator.List{
-					listvalidator.SizeAtLeast(1),
-					listvalidator.ValueInt64sAre(int64validator.Between(0, maxPATThresholdDays)),
-				},
-			},
-			"classic_expiry_reminder_days": schema.ListAttribute{
-				ElementType: types.Int64Type,
-				Optional:    true,
-				Description: "Reminder bands for classic PATs. A class with its own list ignores expiry_reminder_days entirely; omit to share it, set [0] to send no reminders for this class.",
-				Validators: []validator.List{
-					listvalidator.SizeAtLeast(1),
-					listvalidator.ValueInt64sAre(int64validator.Between(0, maxPATThresholdDays)),
-				},
-			},
-			"expiry_reminder_templates": schema.MapAttribute{
-				ElementType: patTemplateBandMapType,
-				Optional:    true,
-				Description: "Custom reminder emails keyed by token class (\"classic\" or \"fine_grained\") and then by reminder band in whole days before expiry (as a string, e.g. \"7\"), each with a subject (at most 200 characters) and body (HTML, at most 20000 characters). Bands without a template use the built-in email. Subject and body may use {{owner}}, {{token_name}}, {{organization}}, {{days_left}}, {{expires_at}} and {{manage_url}}.",
-				Validators:  []validator.Map{mapvalidator.KeysAre(stringvalidator.OneOf("classic", "fine_grained"))},
-			},
-			"expiry_reminder_cc": schema.ListAttribute{
-				ElementType: types.StringType,
-				Optional:    true,
-				Description: "Email addresses copied on every reminder email and revocation notice, at most 10.",
-				Validators:  []validator.List{listvalidator.SizeBetween(1, 10)},
-			},
-			"expiry_reminder_to_owner": schema.BoolAttribute{
-				Optional:    true,
-				Computed:    true,
-				Default:     booldefault.StaticBool(false),
-				Description: "Address each reminder email to the token's user at their linked SSO identity when it is an email address, falling back to the organization's notification address when unknown.",
-			},
-			"owner_email_fallback_domain": schema.StringAttribute{
-				Optional:    true,
-				Computed:    true,
-				Default:     stringdefault.StaticString(""),
-				Description: "Bare email domain (for example example.com) used to derive an address for a token's user when the SSO directory returns nothing, from the enterprise managed user login convention: the trailing _shortcode is dropped, the first hyphen becomes a dot and the domain is appended. The derived address counts as a linked identity. Empty disables the fallback.",
-				Validators:  []validator.String{stringvalidator.RegexMatches(ownerEmailFallbackDomainPattern, "must be a bare domain like example.com")},
-			},
-			"notify_on_revocation": schema.BoolAttribute{
-				Optional:    true,
-				Computed:    true,
-				Default:     booldefault.StaticBool(false),
-				Description: "Email the token's user when StepSecurity itself revokes the token (after the final reminder, or at the end of the non-compliance window), copying expiry_reminder_cc. Revocations a person performs from the dashboard are not notified.",
-			},
-			"classic_notify_on_revocation": schema.BoolAttribute{
-				Optional:    true,
-				Description: "Revocation notices for classic PATs. Omit to follow notify_on_revocation.",
-			},
-			"fine_grained_notify_on_revocation": schema.BoolAttribute{
-				Optional:    true,
-				Description: "Revocation notices for fine-grained PATs. Omit to follow notify_on_revocation.",
-			},
-			"revocation_notification_template":              patTemplateSchema("Custom revocation notice sent to the token's user, for every token class without a class template. Omit to use the built-in email. Subject and body may use {{owner}}, {{token_name}}, {{token_type}}, {{organization}}, {{revoked_at}}, {{reason}} and {{manage_url}}."),
-			"classic_revocation_notification_template":      patTemplateSchema("Custom revocation notice for classic PATs. Omit to use revocation_notification_template, then the built-in email."),
-			"fine_grained_revocation_notification_template": patTemplateSchema("Custom revocation notice for fine-grained PATs. Omit to use revocation_notification_template, then the built-in email."),
-			"classic_noncompliant_revoke_after_days": schema.Int64Attribute{
-				Optional:    true,
-				Computed:    true,
-				Default:     int64default.StaticInt64(0),
-				Description: "Revoke classic PATs that have remained non-compliant for this many days without an approved exception. 0 disables the control.",
-				Validators:  []validator.Int64{int64validator.Between(0, maxPATThresholdDays)},
-			},
-			"fine_grained_noncompliant_revoke_after_days": schema.Int64Attribute{
-				Optional:    true,
-				Computed:    true,
-				Default:     int64default.StaticInt64(0),
-				Description: "Revoke fine-grained PATs that have remained non-compliant for this many days without an approved exception. 0 disables the control.",
-				Validators:  []validator.Int64{int64validator.Between(0, maxPATThresholdDays)},
-			},
-			"auto_revoke_after_reminders": schema.BoolAttribute{
-				Optional:    true,
-				Computed:    true,
-				Default:     booldefault.StaticBool(false),
-				Description: "Revoke a token 24 hours after the last configured reminder band for its class was sent, while it is still active, whether or not it violates a control. Tokens with an approved exception are skipped; a class with no reminder bands never revokes here.",
-			},
-			"classic_auto_revoke_after_reminders": schema.BoolAttribute{
-				Optional:    true,
-				Description: "Revoke after the final reminder for classic PATs. Omit to follow auto_revoke_after_reminders.",
-			},
-			"fine_grained_auto_revoke_after_reminders": schema.BoolAttribute{
-				Optional:    true,
-				Description: "Revoke after the final reminder for fine-grained PATs. Omit to follow auto_revoke_after_reminders.",
-			},
 			"use_tenant_policy": schema.BoolAttribute{
 				Optional:    true,
 				Description: "Follow the customer's tenant-wide PAT policy instead of this organization's own settings, which stay stored but dormant. Omit or set false to enforce the settings in this resource.",
 			},
+		}),
+	}
+}
+
+// patPolicySettingsAttributes are the policy settings shared by the
+// organization resource and the tenant-wide resource: every attribute except
+// the organization's identity and its follow-tenant switch.
+func patPolicySettingsAttributes() map[string]schema.Attribute {
+	return map[string]schema.Attribute{
+		"enabled": schema.BoolAttribute{
+			Required:    true,
+			Description: "Whether the PAT governance policy is enforced. An enabled policy needs at least one active control.",
+		},
+		"fine_grained_max_age_days": schema.Int64Attribute{
+			Optional:    true,
+			Computed:    true,
+			Default:     int64default.StaticInt64(0),
+			Description: "Maximum allowed age in days for fine-grained PATs, measured from the org-access grant time. 0 disables the check.",
+			Validators: []validator.Int64{
+				int64validator.Between(0, maxPATThresholdDays),
+			},
+		},
+		"classic_max_age_days": schema.Int64Attribute{
+			Optional:    true,
+			Computed:    true,
+			Default:     int64default.StaticInt64(0),
+			Description: "Maximum allowed age in days for classic PATs, measured from the SSO authorization time. 0 disables the check.",
+			Validators: []validator.Int64{
+				int64validator.Between(0, maxPATThresholdDays),
+			},
+		},
+		"flag_no_expiry": schema.BoolAttribute{
+			Optional:    true,
+			Computed:    true,
+			Default:     booldefault.StaticBool(false),
+			Description: "Flag tokens without an expiration date, or whose expiration is set further out than the class max age allows.",
+		},
+		"flag_over_scoped": schema.BoolAttribute{
+			Optional:    true,
+			Computed:    true,
+			Default:     booldefault.StaticBool(false),
+			Description: "Flag over-scoped tokens: classic PATs carrying coarse scopes, and fine-grained PATs granting write access across all repositories.",
+		},
+		"over_scoped_scopes": schema.ListAttribute{
+			ElementType: types.StringType,
+			Optional:    true,
+			Description: "Classic PAT scopes treated as over-scoped. Omit to use the server default (repo, admin:org, workflow). Only used when flag_over_scoped is true.",
+			Validators: []validator.List{
+				listvalidator.SizeAtLeast(1),
+			},
+		},
+		"unused_days": schema.Int64Attribute{
+			Optional:    true,
+			Computed:    true,
+			Default:     int64default.StaticInt64(0),
+			Description: "Flag tokens with no sign of use for more than this many days (never-used tokens count from their grant/authorization time). 0 disables the check.",
+			Validators: []validator.Int64{
+				int64validator.Between(0, maxPATThresholdDays),
+			},
+		},
+		"github_issue_repo": schema.StringAttribute{
+			Optional:    true,
+			Computed:    true,
+			Default:     stringdefault.StaticString(""),
+			Description: "Bare repository name in this organization where a violations issue is filed and kept up to date on each alert. Empty disables the GitHub-issue alert channel.",
+		},
+		"expiry_reminder_days": schema.ListAttribute{
+			ElementType: types.Int64Type,
+			Optional:    true,
+			Description: "Pre-expiry reminder bands in days before expiry, each reminded once per token, shared by both token classes unless a per-class list is set. Omit to use the server default (30, 7, 1); a 0 entry disables that band.",
+			Validators: []validator.List{
+				listvalidator.SizeAtLeast(1),
+				listvalidator.ValueInt64sAre(int64validator.Between(0, maxPATThresholdDays)),
+			},
+		},
+		"fine_grained_unused_days": schema.Int64Attribute{
+			Optional:    true,
+			Description: "Unused limit in days for fine-grained PATs. Omit to use unused_days; 0 disables the staleness check for this class.",
+			Validators:  []validator.Int64{int64validator.Between(0, maxPATThresholdDays)},
+		},
+		"classic_unused_days": schema.Int64Attribute{
+			Optional:    true,
+			Description: "Unused limit in days for classic PATs. Omit to use unused_days; 0 disables the staleness check for this class.",
+			Validators:  []validator.Int64{int64validator.Between(0, maxPATThresholdDays)},
+		},
+		"fine_grained_expiry_reminder_days": schema.ListAttribute{
+			ElementType: types.Int64Type,
+			Optional:    true,
+			Description: "Reminder bands for fine-grained PATs. A class with its own list ignores expiry_reminder_days entirely; omit to share it, set [0] to send no reminders for this class.",
+			Validators: []validator.List{
+				listvalidator.SizeAtLeast(1),
+				listvalidator.ValueInt64sAre(int64validator.Between(0, maxPATThresholdDays)),
+			},
+		},
+		"classic_expiry_reminder_days": schema.ListAttribute{
+			ElementType: types.Int64Type,
+			Optional:    true,
+			Description: "Reminder bands for classic PATs. A class with its own list ignores expiry_reminder_days entirely; omit to share it, set [0] to send no reminders for this class.",
+			Validators: []validator.List{
+				listvalidator.SizeAtLeast(1),
+				listvalidator.ValueInt64sAre(int64validator.Between(0, maxPATThresholdDays)),
+			},
+		},
+		"expiry_reminder_templates": schema.MapAttribute{
+			ElementType: patTemplateBandMapType,
+			Optional:    true,
+			Description: "Custom reminder emails keyed by token class (\"classic\" or \"fine_grained\") and then by reminder band in whole days before expiry (as a string, e.g. \"7\"), each with a subject (at most 200 characters) and body (HTML, at most 20000 characters). Bands without a template use the built-in email. Subject and body may use {{owner}}, {{token_name}}, {{organization}}, {{days_left}}, {{expires_at}} and {{manage_url}}.",
+			Validators:  []validator.Map{mapvalidator.KeysAre(stringvalidator.OneOf("classic", "fine_grained"))},
+		},
+		"expiry_reminder_cc": schema.ListAttribute{
+			ElementType: types.StringType,
+			Optional:    true,
+			Description: "Email addresses copied on every reminder email and revocation notice, at most 10.",
+			Validators:  []validator.List{listvalidator.SizeBetween(1, 10)},
+		},
+		"expiry_reminder_to_owner": schema.BoolAttribute{
+			Optional:    true,
+			Computed:    true,
+			Default:     booldefault.StaticBool(false),
+			Description: "Address each reminder email to the token's user at their linked SSO identity when it is an email address, falling back to the organization's notification address when unknown.",
+		},
+		"owner_email_fallback_domain": schema.StringAttribute{
+			Optional:    true,
+			Computed:    true,
+			Default:     stringdefault.StaticString(""),
+			Description: "Bare email domain (for example example.com) used to derive an address for a token's user when the SSO directory returns nothing, from the enterprise managed user login convention: the trailing _shortcode is dropped, the first hyphen becomes a dot and the domain is appended. The derived address counts as a linked identity. Empty disables the fallback.",
+			Validators:  []validator.String{stringvalidator.RegexMatches(ownerEmailFallbackDomainPattern, "must be a bare domain like example.com")},
+		},
+		"notify_on_revocation": schema.BoolAttribute{
+			Optional:    true,
+			Computed:    true,
+			Default:     booldefault.StaticBool(false),
+			Description: "Email the token's user when StepSecurity itself revokes the token (after the final reminder, or at the end of the non-compliance window), copying expiry_reminder_cc. Revocations a person performs from the dashboard are not notified.",
+		},
+		"classic_notify_on_revocation": schema.BoolAttribute{
+			Optional:    true,
+			Description: "Revocation notices for classic PATs. Omit to follow notify_on_revocation.",
+		},
+		"fine_grained_notify_on_revocation": schema.BoolAttribute{
+			Optional:    true,
+			Description: "Revocation notices for fine-grained PATs. Omit to follow notify_on_revocation.",
+		},
+		"revocation_notification_template":              patTemplateSchema("Custom revocation notice sent to the token's user, for every token class without a class template. Omit to use the built-in email. Subject and body may use {{owner}}, {{token_name}}, {{token_type}}, {{organization}}, {{revoked_at}}, {{reason}} and {{manage_url}}."),
+		"classic_revocation_notification_template":      patTemplateSchema("Custom revocation notice for classic PATs. Omit to use revocation_notification_template, then the built-in email."),
+		"fine_grained_revocation_notification_template": patTemplateSchema("Custom revocation notice for fine-grained PATs. Omit to use revocation_notification_template, then the built-in email."),
+		"classic_noncompliant_revoke_after_days": schema.Int64Attribute{
+			Optional:    true,
+			Computed:    true,
+			Default:     int64default.StaticInt64(0),
+			Description: "Revoke classic PATs that have remained non-compliant for this many days without an approved exception. 0 disables the control.",
+			Validators:  []validator.Int64{int64validator.Between(0, maxPATThresholdDays)},
+		},
+		"fine_grained_noncompliant_revoke_after_days": schema.Int64Attribute{
+			Optional:    true,
+			Computed:    true,
+			Default:     int64default.StaticInt64(0),
+			Description: "Revoke fine-grained PATs that have remained non-compliant for this many days without an approved exception. 0 disables the control.",
+			Validators:  []validator.Int64{int64validator.Between(0, maxPATThresholdDays)},
+		},
+		"auto_revoke_after_reminders": schema.BoolAttribute{
+			Optional:    true,
+			Computed:    true,
+			Default:     booldefault.StaticBool(false),
+			Description: "Revoke a token 24 hours after the last configured reminder band for its class was sent, while it is still active, whether or not it violates a control. Tokens with an approved exception are skipped; a class with no reminder bands never revokes here.",
+		},
+		"classic_auto_revoke_after_reminders": schema.BoolAttribute{
+			Optional:    true,
+			Description: "Revoke after the final reminder for classic PATs. Omit to follow auto_revoke_after_reminders.",
+		},
+		"fine_grained_auto_revoke_after_reminders": schema.BoolAttribute{
+			Optional:    true,
+			Description: "Revoke after the final reminder for fine-grained PATs. Omit to follow auto_revoke_after_reminders.",
 		},
 	}
+}
+
+// withPATPolicySettings adds resource-specific attributes to the shared policy
+// settings.
+func withPATPolicySettings(extra map[string]schema.Attribute) map[string]schema.Attribute {
+	attrs := patPolicySettingsAttributes()
+	for name, attribute := range extra {
+		attrs[name] = attribute
+	}
+	return attrs
 }
 
 // ImportState implements resource.ResourceWithImportState.
@@ -343,8 +361,16 @@ func (r *githubPATGovernancePolicyResource) ImportState(ctx context.Context, req
 }
 
 type githubPATGovernancePolicyModel struct {
-	ID                    types.String `tfsdk:"id"`
-	Owner                 types.String `tfsdk:"owner"`
+	ID              types.String `tfsdk:"id"`
+	Owner           types.String `tfsdk:"owner"`
+	UseTenantPolicy types.Bool   `tfsdk:"use_tenant_policy"`
+	patPolicySettingsModel
+}
+
+// patPolicySettingsModel holds the policy settings shared by the organization
+// and the tenant-wide resources. It is embedded by value, which the framework
+// flattens into the parent model.
+type patPolicySettingsModel struct {
 	Enabled               types.Bool   `tfsdk:"enabled"`
 	FineGrainedMaxAgeDays types.Int64  `tfsdk:"fine_grained_max_age_days"`
 	ClassicMaxAgeDays     types.Int64  `tfsdk:"classic_max_age_days"`
@@ -376,7 +402,6 @@ type githubPATGovernancePolicyModel struct {
 	AutoRevokeAfterReminders               types.Bool  `tfsdk:"auto_revoke_after_reminders"`
 	ClassicAutoRevokeAfterReminders        types.Bool  `tfsdk:"classic_auto_revoke_after_reminders"`
 	FineGrainedAutoRevokeAfterReminders    types.Bool  `tfsdk:"fine_grained_auto_revoke_after_reminders"`
-	UseTenantPolicy                        types.Bool  `tfsdk:"use_tenant_policy"`
 }
 
 // optionalBool maps an omitted attribute to nil (inherit) and a set one to a
@@ -526,7 +551,7 @@ func templatesFromAPI(ctx context.Context, in map[string]map[string]stepsecurity
 }
 
 // toAPIPolicy converts the planned model into the API request payload.
-func (m *githubPATGovernancePolicyModel) toAPIPolicy(ctx context.Context) (stepsecurityapi.PATGovernancePolicy, error) {
+func (m *patPolicySettingsModel) toAPIPolicy(ctx context.Context) (stepsecurityapi.PATGovernancePolicy, error) {
 	policy := stepsecurityapi.PATGovernancePolicy{
 		Enabled:               m.Enabled.ValueBool(),
 		FineGrainedMaxAgeDays: m.FineGrainedMaxAgeDays.ValueInt64(),
@@ -550,7 +575,6 @@ func (m *githubPATGovernancePolicyModel) toAPIPolicy(ctx context.Context) (steps
 		AutoRevokeAfterReminders:               m.AutoRevokeAfterReminders.ValueBool(),
 		ClassicAutoRevokeAfterReminders:        optionalBool(m.ClassicAutoRevokeAfterReminders),
 		FineGrainedAutoRevokeAfterReminders:    optionalBool(m.FineGrainedAutoRevokeAfterReminders),
-		UseTenantPolicy:                        optionalBool(m.UseTenantPolicy),
 	}
 
 	var err error
@@ -586,8 +610,7 @@ func (m *githubPATGovernancePolicyModel) toAPIPolicy(ctx context.Context) (steps
 }
 
 // setFromAPIPolicy refreshes the model from the API response.
-func (m *githubPATGovernancePolicyModel) setFromAPIPolicy(ctx context.Context, policy *stepsecurityapi.PATGovernancePolicy) error {
-	m.ID = types.StringValue(m.Owner.ValueString())
+func (m *patPolicySettingsModel) setFromAPIPolicy(ctx context.Context, policy *stepsecurityapi.PATGovernancePolicy) error {
 	m.Enabled = types.BoolValue(policy.Enabled)
 	m.FineGrainedMaxAgeDays = types.Int64Value(policy.FineGrainedMaxAgeDays)
 	m.ClassicMaxAgeDays = types.Int64Value(policy.ClassicMaxAgeDays)
@@ -613,7 +636,6 @@ func (m *githubPATGovernancePolicyModel) setFromAPIPolicy(ctx context.Context, p
 	m.AutoRevokeAfterReminders = types.BoolValue(policy.AutoRevokeAfterReminders)
 	m.ClassicAutoRevokeAfterReminders = boolFromOptional(policy.ClassicAutoRevokeAfterReminders)
 	m.FineGrainedAutoRevokeAfterReminders = boolFromOptional(policy.FineGrainedAutoRevokeAfterReminders)
-	m.UseTenantPolicy = boolFromOptional(policy.UseTenantPolicy)
 
 	var err error
 	if m.OverScopedScopes, err = stringListFromAPI(ctx, policy.OverScopedScopes); err != nil {
@@ -636,6 +658,25 @@ func (m *githubPATGovernancePolicyModel) setFromAPIPolicy(ctx context.Context, p
 	}
 
 	return nil
+}
+
+// toAPIPolicy adds the organization-only follow-tenant switch to the shared
+// settings.
+func (m *githubPATGovernancePolicyModel) toAPIPolicy(ctx context.Context) (stepsecurityapi.PATGovernancePolicy, error) {
+	policy, err := m.patPolicySettingsModel.toAPIPolicy(ctx)
+	if err != nil {
+		return policy, err
+	}
+	policy.UseTenantPolicy = optionalBool(m.UseTenantPolicy)
+	return policy, nil
+}
+
+// setFromAPIPolicy refreshes the organization model, including its identity
+// and follow-tenant switch, from the API response.
+func (m *githubPATGovernancePolicyModel) setFromAPIPolicy(ctx context.Context, policy *stepsecurityapi.PATGovernancePolicy) error {
+	m.ID = types.StringValue(m.Owner.ValueString())
+	m.UseTenantPolicy = boolFromOptional(policy.UseTenantPolicy)
+	return m.patPolicySettingsModel.setFromAPIPolicy(ctx, policy)
 }
 
 // Create creates the resource and sets the initial Terraform state.
