@@ -84,6 +84,10 @@ func TestGithubRunPoliciesDataSource_ReadMappingWithPinnedActions(t *testing.T) 
 		"require_policy_store":              types.BoolValue(policy.PolicyConfig.RequirePolicyStore),
 		"block_job_container":               types.BoolValue(policy.PolicyConfig.BlockJobContainer),
 		"secrets_analyze_default_branch":    types.BoolValue(policy.PolicyConfig.SecretsAnalyzeDefaultBranch),
+		"enforce_method":                    types.StringValue(policy.PolicyConfig.EnforceMethod),
+		"prejob_allowed_runner_labels":      types.SetNull(types.StringType),
+		"prejob_disallowed_runner_labels":   types.SetNull(types.StringType),
+		"runner_label_requirements":         types.ListNull(runnerLabelRequirementObjectType),
 	}
 
 	pinnedExemptionsList := make([]attr.Value, len(policy.PolicyConfig.PinnedActionsExemptions))
@@ -119,6 +123,10 @@ func TestGithubRunPoliciesDataSource_ReadMappingWithPinnedActions(t *testing.T) 
 		"require_policy_store":              types.BoolType,
 		"block_job_container":               types.BoolType,
 		"secrets_analyze_default_branch":    types.BoolType,
+		"enforce_method":                    types.StringType,
+		"prejob_allowed_runner_labels":      types.SetType{ElemType: types.StringType},
+		"prejob_disallowed_runner_labels":   types.SetType{ElemType: types.StringType},
+		"runner_label_requirements":         types.ListType{ElemType: runnerLabelRequirementObjectType},
 	}
 
 	policyConfigObj, objDiags := types.ObjectValue(policyConfigAttrTypes, policyConfigAttrs)
@@ -356,6 +364,10 @@ type githubRunPolicyDataSourcePolicyConfigModel struct {
 	RequirePolicyStore             types.Bool   `tfsdk:"require_policy_store"`
 	BlockJobContainer              types.Bool   `tfsdk:"block_job_container"`
 	SecretsAnalyzeDefaultBranch    types.Bool   `tfsdk:"secrets_analyze_default_branch"`
+	EnforceMethod                  types.String `tfsdk:"enforce_method"`
+	PrejobAllowedRunnerLabels      types.Set    `tfsdk:"prejob_allowed_runner_labels"`
+	PrejobDisallowedRunnerLabels   types.Set    `tfsdk:"prejob_disallowed_runner_labels"`
+	RunnerLabelRequirements        types.List   `tfsdk:"runner_label_requirements"`
 }
 
 func testGithubRunPoliciesDataSourceSchema(t *testing.T) datasourceschema.Schema {
@@ -420,6 +432,10 @@ func testRunPolicyDataSourceAttrTypes() map[string]attr.Type {
 			"require_policy_store":              types.BoolType,
 			"block_job_container":               types.BoolType,
 			"secrets_analyze_default_branch":    types.BoolType,
+			"enforce_method":                    types.StringType,
+			"prejob_allowed_runner_labels":      types.SetType{ElemType: types.StringType},
+			"prejob_disallowed_runner_labels":   types.SetType{ElemType: types.StringType},
+			"runner_label_requirements":         types.ListType{ElemType: runnerLabelRequirementObjectType},
 		}},
 	}
 }

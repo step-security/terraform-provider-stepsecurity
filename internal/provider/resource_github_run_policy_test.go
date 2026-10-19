@@ -771,6 +771,21 @@ func testRunPolicyConfigObjectValue(policyConfig policyConfigModel) types.Object
 		allowedRunnerConstraints = types.MapNull(types.SetType{ElemType: types.StringType})
 	}
 
+	prejobAllowedRunnerLabels := policyConfig.PrejobAllowedRunnerLabels
+	if reflect.DeepEqual(prejobAllowedRunnerLabels, types.Set{}) {
+		prejobAllowedRunnerLabels = types.SetNull(types.StringType)
+	}
+
+	prejobDisallowedRunnerLabels := policyConfig.PrejobDisallowedRunnerLabels
+	if reflect.DeepEqual(prejobDisallowedRunnerLabels, types.Set{}) {
+		prejobDisallowedRunnerLabels = types.SetNull(types.StringType)
+	}
+
+	runnerLabelRequirements := policyConfig.RunnerLabelRequirements
+	if reflect.DeepEqual(runnerLabelRequirements, types.List{}) {
+		runnerLabelRequirements = types.ListNull(runnerLabelRequirementObjectType)
+	}
+
 	return types.ObjectValueMust(map[string]attr.Type{
 		"owner":                             types.StringType,
 		"name":                              types.StringType,
@@ -797,6 +812,10 @@ func testRunPolicyConfigObjectValue(policyConfig policyConfigModel) types.Object
 		"require_policy_store":              types.BoolType,
 		"block_job_container":               types.BoolType,
 		"secrets_analyze_default_branch":    types.BoolType,
+		"enforce_method":                    types.StringType,
+		"prejob_allowed_runner_labels":      types.SetType{ElemType: types.StringType},
+		"prejob_disallowed_runner_labels":   types.SetType{ElemType: types.StringType},
+		"runner_label_requirements":         types.ListType{ElemType: runnerLabelRequirementObjectType},
 	}, map[string]attr.Value{
 		"owner":                             policyConfig.Owner,
 		"name":                              policyConfig.Name,
@@ -823,6 +842,10 @@ func testRunPolicyConfigObjectValue(policyConfig policyConfigModel) types.Object
 		"require_policy_store":              policyConfig.RequirePolicyStore,
 		"block_job_container":               policyConfig.BlockJobContainer,
 		"secrets_analyze_default_branch":    policyConfig.SecretsAnalyzeDefaultBranch,
+		"enforce_method":                    policyConfig.EnforceMethod,
+		"prejob_allowed_runner_labels":      prejobAllowedRunnerLabels,
+		"prejob_disallowed_runner_labels":   prejobDisallowedRunnerLabels,
+		"runner_label_requirements":         runnerLabelRequirements,
 	})
 }
 
