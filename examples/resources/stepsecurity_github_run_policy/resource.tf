@@ -179,6 +179,23 @@ resource "stepsecurity_github_run_policy" "harden_runner_policy_all_jobs" {
   }
 }
 
+# Harden Runner Policy Example (excluded runners) - Applies to every job except those on
+# runners that cannot run Harden Runner. A job is skipped when its runs-on matches any
+# excluded label; "*" wildcards are supported, but a lone "*" is rejected.
+resource "stepsecurity_github_run_policy" "harden_runner_policy_excluded_labels" {
+  owner     = "my-org"
+  name      = "Harden Runner Policy - Excluded Runners"
+  all_repos = true
+
+  policy_config = {
+    owner                         = "my-org"
+    name                          = "Harden Runner Policy - Excluded Runners"
+    enable_harden_runner_policy   = true
+    harden_runner_target_labels   = []
+    harden_runner_excluded_labels = ["self-hosted-gpu", "custom-runner-*"]
+  }
+}
+
 # Harden Runner Policy Example (custom actions) - Accepts additional Harden Runner-equivalent actions
 resource "stepsecurity_github_run_policy" "harden_runner_policy_custom_actions" {
   owner     = "my-org"

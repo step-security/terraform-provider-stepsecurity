@@ -58,10 +58,11 @@ output "harden_runner_policies" {
   value = [
     for policy in data.stepsecurity_github_run_policies.all_policies.run_policies :
     {
-      name                         = policy.name
-      policy_id                    = policy.policy_id
-      harden_runner_target_labels  = policy.policy_config.harden_runner_target_labels
-      harden_runner_custom_actions = policy.policy_config.harden_runner_custom_actions
+      name                          = policy.name
+      policy_id                     = policy.policy_id
+      harden_runner_target_labels   = policy.policy_config.harden_runner_target_labels
+      harden_runner_excluded_labels = policy.policy_config.harden_runner_excluded_labels
+      harden_runner_custom_actions  = policy.policy_config.harden_runner_custom_actions
     }
     if policy.policy_config.enable_harden_runner_policy
   ]

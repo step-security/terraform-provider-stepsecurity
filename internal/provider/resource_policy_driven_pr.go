@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"slices"
+	"strings"
 
 	stepsecurityapi "github.com/step-security/terraform-provider-stepsecurity/internal/stepsecurity-api"
 
@@ -13,6 +14,7 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/booldefault"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/listdefault"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
+	"github.com/hashicorp/terraform-plugin-framework/resource/schema/setdefault"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/types"
 	"github.com/hashicorp/terraform-plugin-framework/types/basetypes"
@@ -68,6 +70,21 @@ func (r *policyDrivenPRResource) Metadata(_ context.Context, req resource.Metada
 // Schema defines the schema for the resource.
 func (r *policyDrivenPRResource) Schema(_ context.Context, _ resource.SchemaRequest, resp *resource.SchemaResponse) {
 	resp.Schema = schema.Schema{
+		MarkdownDescription: "Manages policy-driven PRs for a GitHub organization in StepSecurity.\n\n" +
+			"Each resource applies one set of `auto_remediation_options` to the repositories it selects:\n\n" +
+			"- `selected_repos = [\"*\"]` applies the settings at the organization level, to every repository, " +
+			"and turns on \"Apply to all repositories\". Use `excluded_repos` to opt repositories out, and " +
+			"`selected_repos_filter` to limit it to repositories with given topics.\n" +
+			"- A list of repositories applies the settings to each of those repositories as its own repo-level configuration.\n\n" +
+			"To give some repositories different settings, use one resource per set of settings: an organization-level " +
+			"resource that lists those repositories in `excluded_repos`, plus a resource that selects them, as shown in the examples below. " +
+			"Each repository should be selected by only one resource, otherwise the resources overwrite each other's settings on every apply. " +
+			"Destroying an organization-level resource, or changing its `selected_repos` from `[\"*\"]` to specific repositories, " +
+			"resets the policy-driven PR configuration of every repository in the organization, including those managed by other resources; " +
+			"apply again to restore them.\n\n" +
+			"Import reads the organization's current configuration. It imports `[\"*\"]` when \"Apply to all repositories\" is on, " +
+			"and otherwise the repositories that are selected. Because one resource holds one set of settings, import fails when the " +
+			"selected repositories have different settings; give them the same settings first, or declare one resource per set of settings without importing.",
 		Attributes: map[string]schema.Attribute{
 			"id": schema.StringAttribute{
 				Computed: true,
@@ -202,6 +219,22 @@ func (r *policyDrivenPRResource) Schema(_ context.Context, _ resource.SchemaRequ
 							),
 						),
 					},
+					"custom_precommit_config": schema.SingleNestedAttribute{
+						Optional:    true,
+						Description: "Provide a full .pre-commit-config.yaml verbatim instead of assembling it from update_precommit_file hooks. Mutually exclusive with update_precommit_file.",
+						Attributes: map[string]schema.Attribute{
+							"config": schema.StringAttribute{
+								Required:    true,
+								Description: "The full .pre-commit-config.yaml content to write to the repository.",
+							},
+							"update_existing_configuration": schema.BoolAttribute{
+								Optional:    true,
+								Computed:    true,
+								Default:     booldefault.StaticBool(false),
+								Description: "When true, overwrite an existing .pre-commit-config.yaml. When false (default), an existing file is left untouched and one is only created when absent.",
+							},
+						},
+					},
 					"package_ecosystem": schema.ListNestedAttribute{
 						Optional:    true,
 						Description: "List of package ecosystems to enable for dependency updates.",
@@ -263,6 +296,15 @@ func (r *policyDrivenPRResource) Schema(_ context.Context, _ resource.SchemaRequ
 									types.ListValueMust(types.StringType, []attr.Value{}),
 								),
 								Description: "List of runner labels to apply the harden runner config to. When non-empty, skip_harden_runner is automatically set to true internally.",
+							},
+							"exempt_runner_labels": schema.SetAttribute{
+								ElementType: types.StringType,
+								Optional:    true,
+								Computed:    true,
+								Default: setdefault.StaticValue(
+									types.SetValueMust(types.StringType, []attr.Value{}),
+								),
+								Description: "Set of runner label glob patterns (e.g. \"gpu-*\") to exclude from harden runner. Jobs whose runs-on matches any pattern are skipped, regardless of target_runner_labels. Order is not significant.",
 							},
 						},
 					},
@@ -498,6 +540,10 @@ func (r *policyDrivenPRResource) ImportState(ctx context.Context, req resource.I
 			"replace_action_on_major_tag_match":             types.BoolType,
 			"actions_exempted_from_replacement":             types.ListType{ElemType: types.StringType},
 			"update_precommit_file":                         types.ListType{ElemType: types.StringType},
+			"custom_precommit_config": types.ObjectType{AttrTypes: map[string]attr.Type{
+				"config":                        types.StringType,
+				"update_existing_configuration": types.BoolType,
+			}},
 			"package_ecosystem": types.ListType{
 				ElemType: types.ObjectType{
 					AttrTypes: map[string]attr.Type{
@@ -515,6 +561,7 @@ func (r *policyDrivenPRResource) ImportState(ctx context.Context, req resource.I
 				"config":                        types.StringType,
 				"update_existing_configuration": types.BoolType,
 				"target_runner_labels":          types.ListType{ElemType: types.StringType},
+				"exempt_runner_labels":          types.SetType{ElemType: types.StringType},
 			}},
 		},
 		map[string]attr.Value{
@@ -547,6 +594,20 @@ func (r *policyDrivenPRResource) ImportState(ctx context.Context, req resource.I
 			}()),
 			"add_workflows":     addWorkflowsValue,
 			"action_commit_map": actionCommitMapValue,
+			"custom_precommit_config": func() attr.Value {
+				cpcAttrTypes := map[string]attr.Type{
+					"config":                        types.StringType,
+					"update_existing_configuration": types.BoolType,
+				}
+				if policy.AutoRemdiationOptions.CustomPrecommitConfig != nil {
+					obj, _ := types.ObjectValue(cpcAttrTypes, map[string]attr.Value{
+						"config":                        types.StringValue(policy.AutoRemdiationOptions.CustomPrecommitConfig.Config),
+						"update_existing_configuration": types.BoolValue(policy.AutoRemdiationOptions.CustomPrecommitConfig.UpdateExistingConfiguration),
+					})
+					return obj
+				}
+				return types.ObjectNull(cpcAttrTypes)
+			}(),
 			"harden_runner_config": func() attr.Value {
 				if policy.AutoRemdiationOptions.HardenRunnerConfig != nil {
 					hrLabels := policy.AutoRemdiationOptions.HardenRunnerConfig.RunnerLabels
@@ -555,16 +616,24 @@ func (r *policyDrivenPRResource) ImportState(ctx context.Context, req resource.I
 						labelElems[i] = types.StringValue(l)
 					}
 					labelsList, _ := types.ListValue(types.StringType, labelElems)
+					exemptLabels := policy.AutoRemdiationOptions.HardenRunnerConfig.ExemptRunnerLabels
+					exemptLabelElems := make([]attr.Value, len(exemptLabels))
+					for i, l := range exemptLabels {
+						exemptLabelElems[i] = types.StringValue(l)
+					}
+					exemptLabelsSet, _ := types.SetValue(types.StringType, exemptLabelElems)
 					obj, _ := types.ObjectValue(
 						map[string]attr.Type{
 							"config":                        types.StringType,
 							"update_existing_configuration": types.BoolType,
 							"target_runner_labels":          types.ListType{ElemType: types.StringType},
+							"exempt_runner_labels":          types.SetType{ElemType: types.StringType},
 						},
 						map[string]attr.Value{
 							"config":                        stringOrNull(policy.AutoRemdiationOptions.HardenRunnerConfig.Config),
 							"update_existing_configuration": types.BoolValue(policy.AutoRemdiationOptions.HardenRunnerConfig.Subtractive),
 							"target_runner_labels":          labelsList,
+							"exempt_runner_labels":          exemptLabelsSet,
 						},
 					)
 					return obj
@@ -573,6 +642,7 @@ func (r *policyDrivenPRResource) ImportState(ctx context.Context, req resource.I
 					"config":                        types.StringType,
 					"update_existing_configuration": types.BoolType,
 					"target_runner_labels":          types.ListType{ElemType: types.StringType},
+					"exempt_runner_labels":          types.SetType{ElemType: types.StringType},
 				})
 			}(),
 		},
@@ -613,6 +683,7 @@ type autoRemdiationOptionsModel struct {
 	ReplaceByMajorTag                       types.Bool   `tfsdk:"replace_action_on_major_tag_match"`
 	ExemptedFromReplacement                 types.List   `tfsdk:"actions_exempted_from_replacement"`
 	UpdatePrecommitFile                     types.List   `tfsdk:"update_precommit_file"`
+	CustomPrecommitConfig                   types.Object `tfsdk:"custom_precommit_config"`
 	PackageEcosystem                        types.List   `tfsdk:"package_ecosystem"`
 	UpdateExistingConfiguration             types.Bool   `tfsdk:"update_existing_configuration"`
 	AddWorkflows                            types.String `tfsdk:"add_workflows"`
@@ -631,6 +702,12 @@ type hardenRunnerConfigModel struct {
 	Config                      types.String `tfsdk:"config"`
 	UpdateExistingConfiguration types.Bool   `tfsdk:"update_existing_configuration"`
 	RunnerLabels                types.List   `tfsdk:"target_runner_labels"`
+	ExemptRunnerLabels          types.Set    `tfsdk:"exempt_runner_labels"`
+}
+
+type customPrecommitConfigModel struct {
+	Config                      types.String `tfsdk:"config"`
+	UpdateExistingConfiguration types.Bool   `tfsdk:"update_existing_configuration"`
 }
 
 type ActionsToReplaceModel struct {
@@ -753,6 +830,32 @@ func (r *policyDrivenPRResource) ValidateConfig(ctx context.Context, req resourc
 			}
 		}
 
+		// Pre-commit remediation has two mutually exclusive modes: selecting hooks
+		// (update_precommit_file) or pasting a full .pre-commit-config.yaml
+		// (custom_precommit_config). The API rejects a payload that sets both, so
+		// catch it at plan time with a clearer message. An empty hook list is not a
+		// conflict, that is how a previous selection is cleared.
+		if !options.CustomPrecommitConfig.IsNull() && !options.CustomPrecommitConfig.IsUnknown() {
+			var cpcModel customPrecommitConfigModel
+			diags := options.CustomPrecommitConfig.As(ctx, &cpcModel, basetypes.ObjectAsOptions{})
+			resp.Diagnostics.Append(diags...)
+			if resp.Diagnostics.HasError() {
+				return
+			}
+
+			hasCustomConfig := !cpcModel.Config.IsUnknown() && strings.TrimSpace(cpcModel.Config.ValueString()) != ""
+			hasPrecommitHooks := !options.UpdatePrecommitFile.IsNull() &&
+				!options.UpdatePrecommitFile.IsUnknown() &&
+				len(options.UpdatePrecommitFile.Elements()) > 0
+
+			if hasCustomConfig && hasPrecommitHooks {
+				resp.Diagnostics.AddError(
+					"Invalid Configuration",
+					"update_precommit_file and custom_precommit_config are mutually exclusive. Select hooks with update_precommit_file, or provide a full .pre-commit-config.yaml with custom_precommit_config, but not both",
+				)
+			}
+		}
+
 	}
 }
 
@@ -788,7 +891,8 @@ func (r *policyDrivenPRResource) ModifyPlan(ctx context.Context, req resource.Mo
 	hasUpdatePrecommit := !options.UpdatePrecommitFile.IsNull() && !options.UpdatePrecommitFile.IsUnknown() && len(options.UpdatePrecommitFile.Elements()) > 0
 	hasPackageEcosystem := !options.PackageEcosystem.IsNull() && !options.PackageEcosystem.IsUnknown() && len(options.PackageEcosystem.Elements()) > 0
 	hasAddWorkflows := !options.AddWorkflows.IsNull() && !options.AddWorkflows.IsUnknown() && options.AddWorkflows.ValueString() != ""
-	hasV2Features := hasUpdatePrecommit || hasPackageEcosystem || hasAddWorkflows
+	hasCustomPrecommitConfig := !options.CustomPrecommitConfig.IsNull() && !options.CustomPrecommitConfig.IsUnknown()
+	hasV2Features := hasUpdatePrecommit || hasPackageEcosystem || hasAddWorkflows || hasCustomPrecommitConfig
 
 	if !hasV2Features {
 		return
@@ -1018,11 +1122,28 @@ func (r *policyDrivenPRResource) Create(ctx context.Context, req resource.Create
 				runnerLabels = append(runnerLabels, elem.(types.String).ValueString())
 			}
 		}
+		var exemptRunnerLabels []string
+		if !hrcModel.ExemptRunnerLabels.IsNull() {
+			for _, elem := range hrcModel.ExemptRunnerLabels.Elements() {
+				exemptRunnerLabels = append(exemptRunnerLabels, elem.(types.String).ValueString())
+			}
+		}
 		hardenRunnerConfig = &stepsecurityapi.HardenRunnerConfig{
-			Config:           hrcModel.Config.ValueString(),
-			Subtractive:      hrcModel.UpdateExistingConfiguration.ValueBool(),
-			SkipHardenRunner: len(runnerLabels) > 0,
-			RunnerLabels:     runnerLabels,
+			Config:             hrcModel.Config.ValueString(),
+			Subtractive:        hrcModel.UpdateExistingConfiguration.ValueBool(),
+			SkipHardenRunner:   len(runnerLabels) > 0,
+			RunnerLabels:       runnerLabels,
+			ExemptRunnerLabels: exemptRunnerLabels,
+		}
+	}
+
+	var customPrecommitConfig *stepsecurityapi.CustomPrecommitConfig
+	if !options.CustomPrecommitConfig.IsNull() && !options.CustomPrecommitConfig.IsUnknown() {
+		var cpcModel customPrecommitConfigModel
+		options.CustomPrecommitConfig.As(ctx, &cpcModel, basetypes.ObjectAsOptions{})
+		customPrecommitConfig = &stepsecurityapi.CustomPrecommitConfig{
+			Config:                      cpcModel.Config.ValueString(),
+			UpdateExistingConfiguration: cpcModel.UpdateExistingConfiguration.ValueBool(),
 		}
 	}
 
@@ -1050,6 +1171,7 @@ func (r *policyDrivenPRResource) Create(ctx context.Context, req resource.Create
 			AddWorkflows:                            options.AddWorkflows.ValueString(),
 			ActionCommitMap:                         actionCommitMap,
 			HardenRunnerConfig:                      hardenRunnerConfig,
+			CustomPrecommitConfig:                   customPrecommitConfig,
 		},
 		SelectedRepos:       selectedRepos,
 		SelectedReposFilter: selectedReposFilterForAllRepos,
@@ -1185,6 +1307,17 @@ func (r *policyDrivenPRResource) Read(ctx context.Context, req resource.ReadRequ
 		return
 	}
 
+	if stepSecurityPolicy.OrgConfigNotAppliedToAllRepos {
+		resp.Diagnostics.AddWarning(
+			"Policy-Driven PR Not Applied to All Repositories",
+			fmt.Sprintf("selected_repos is [\"*\"], but \"Apply to all repositories\" is turned off for '%s' in StepSecurity, "+
+				"so the org-level configuration is not applied to every repository. "+
+				"Applying this configuration turns it back on for all repositories in the organization. "+
+				"To keep it limited to specific repositories, list them in selected_repos instead.",
+				state.Owner.ValueString()),
+		)
+	}
+
 	// Extract current state's v2 feature values before updating
 	var currentStateOptions autoRemdiationOptionsModel
 	var hasV2FeaturesInState bool
@@ -1200,7 +1333,8 @@ func (r *policyDrivenPRResource) Read(ctx context.Context, req resource.ReadRequ
 			hasAddWorkflows := !currentStateOptions.AddWorkflows.IsNull() && currentStateOptions.AddWorkflows.ValueString() != ""
 			hasUpdateExistingConfig := !currentStateOptions.UpdateExistingConfiguration.IsNull() && currentStateOptions.UpdateExistingConfiguration.ValueBool()
 			hasHardenRunnerConfig := !currentStateOptions.HardenRunnerConfig.IsNull()
-			hasV2FeaturesInState = hasUpdatePrecommit || hasPackageEcosystem || hasAddWorkflows || hasUpdateExistingConfig || hasHardenRunnerConfig
+			hasCustomPrecommitConfig := !currentStateOptions.CustomPrecommitConfig.IsNull()
+			hasV2FeaturesInState = hasUpdatePrecommit || hasPackageEcosystem || hasAddWorkflows || hasUpdateExistingConfig || hasHardenRunnerConfig || hasCustomPrecommitConfig
 		}
 	}
 
@@ -1268,11 +1402,27 @@ func (r *policyDrivenPRResource) Read(ctx context.Context, req resource.ReadRequ
 					runnerLabels = append(runnerLabels, elem.(types.String).ValueString())
 				}
 			}
+			var exemptRunnerLabels []string
+			if !hrcModel.ExemptRunnerLabels.IsNull() {
+				for _, elem := range hrcModel.ExemptRunnerLabels.Elements() {
+					exemptRunnerLabels = append(exemptRunnerLabels, elem.(types.String).ValueString())
+				}
+			}
 			stepSecurityPolicy.AutoRemdiationOptions.HardenRunnerConfig = &stepsecurityapi.HardenRunnerConfig{
-				Config:           hrcModel.Config.ValueString(),
-				Subtractive:      hrcModel.UpdateExistingConfiguration.ValueBool(),
-				SkipHardenRunner: len(runnerLabels) > 0,
-				RunnerLabels:     runnerLabels,
+				Config:             hrcModel.Config.ValueString(),
+				Subtractive:        hrcModel.UpdateExistingConfiguration.ValueBool(),
+				SkipHardenRunner:   len(runnerLabels) > 0,
+				RunnerLabels:       runnerLabels,
+				ExemptRunnerLabels: exemptRunnerLabels,
+			}
+		}
+
+		if !currentStateOptions.CustomPrecommitConfig.IsNull() {
+			var cpcModel customPrecommitConfigModel
+			currentStateOptions.CustomPrecommitConfig.As(ctx, &cpcModel, basetypes.ObjectAsOptions{})
+			stepSecurityPolicy.AutoRemdiationOptions.CustomPrecommitConfig = &stepsecurityapi.CustomPrecommitConfig{
+				Config:                      cpcModel.Config.ValueString(),
+				UpdateExistingConfiguration: cpcModel.UpdateExistingConfiguration.ValueBool(),
 			}
 		}
 
@@ -1581,11 +1731,28 @@ func (r *policyDrivenPRResource) Update(ctx context.Context, req resource.Update
 				runnerLabels = append(runnerLabels, elem.(types.String).ValueString())
 			}
 		}
+		var exemptRunnerLabels []string
+		if !hrcModel.ExemptRunnerLabels.IsNull() {
+			for _, elem := range hrcModel.ExemptRunnerLabels.Elements() {
+				exemptRunnerLabels = append(exemptRunnerLabels, elem.(types.String).ValueString())
+			}
+		}
 		hardenRunnerConfigUpdate = &stepsecurityapi.HardenRunnerConfig{
-			Config:           hrcModel.Config.ValueString(),
-			Subtractive:      hrcModel.UpdateExistingConfiguration.ValueBool(),
-			SkipHardenRunner: len(runnerLabels) > 0,
-			RunnerLabels:     runnerLabels,
+			Config:             hrcModel.Config.ValueString(),
+			Subtractive:        hrcModel.UpdateExistingConfiguration.ValueBool(),
+			SkipHardenRunner:   len(runnerLabels) > 0,
+			RunnerLabels:       runnerLabels,
+			ExemptRunnerLabels: exemptRunnerLabels,
+		}
+	}
+
+	var customPrecommitConfigUpdate *stepsecurityapi.CustomPrecommitConfig
+	if !planOptions.CustomPrecommitConfig.IsNull() && !planOptions.CustomPrecommitConfig.IsUnknown() {
+		var cpcModel customPrecommitConfigModel
+		planOptions.CustomPrecommitConfig.As(ctx, &cpcModel, basetypes.ObjectAsOptions{})
+		customPrecommitConfigUpdate = &stepsecurityapi.CustomPrecommitConfig{
+			Config:                      cpcModel.Config.ValueString(),
+			UpdateExistingConfiguration: cpcModel.UpdateExistingConfiguration.ValueBool(),
 		}
 	}
 
@@ -1612,6 +1779,7 @@ func (r *policyDrivenPRResource) Update(ctx context.Context, req resource.Update
 			AddWorkflows:                            planOptions.AddWorkflows.ValueString(),
 			ActionCommitMap:                         actionCommitMapPlan,
 			HardenRunnerConfig:                      hardenRunnerConfigUpdate,
+			CustomPrecommitConfig:                   customPrecommitConfigUpdate,
 		},
 		SelectedRepos:       planRepos,
 		SelectedReposFilter: selectedReposFilterForAllRepos,
@@ -1870,6 +2038,10 @@ func (r *policyDrivenPRResource) updatePolicyDrivenPRState(ctx context.Context, 
 			"replace_action_on_major_tag_match":             types.BoolType,
 			"actions_exempted_from_replacement":             types.ListType{ElemType: types.StringType},
 			"update_precommit_file":                         types.ListType{ElemType: types.StringType},
+			"custom_precommit_config": types.ObjectType{AttrTypes: map[string]attr.Type{
+				"config":                        types.StringType,
+				"update_existing_configuration": types.BoolType,
+			}},
 			"package_ecosystem": types.ListType{
 				ElemType: types.ObjectType{
 					AttrTypes: map[string]attr.Type{
@@ -1887,6 +2059,7 @@ func (r *policyDrivenPRResource) updatePolicyDrivenPRState(ctx context.Context, 
 				"config":                        types.StringType,
 				"update_existing_configuration": types.BoolType,
 				"target_runner_labels":          types.ListType{ElemType: types.StringType},
+				"exempt_runner_labels":          types.SetType{ElemType: types.StringType},
 			}},
 		},
 		map[string]attr.Value{
@@ -1919,6 +2092,20 @@ func (r *policyDrivenPRResource) updatePolicyDrivenPRState(ctx context.Context, 
 			}()),
 			"add_workflows":     addWorkflowsValue,
 			"action_commit_map": actionCommitMapValue,
+			"custom_precommit_config": func() attr.Value {
+				cpcAttrTypes := map[string]attr.Type{
+					"config":                        types.StringType,
+					"update_existing_configuration": types.BoolType,
+				}
+				if stepSecurityPolicy.AutoRemdiationOptions.CustomPrecommitConfig != nil {
+					obj, _ := types.ObjectValue(cpcAttrTypes, map[string]attr.Value{
+						"config":                        types.StringValue(stepSecurityPolicy.AutoRemdiationOptions.CustomPrecommitConfig.Config),
+						"update_existing_configuration": types.BoolValue(stepSecurityPolicy.AutoRemdiationOptions.CustomPrecommitConfig.UpdateExistingConfiguration),
+					})
+					return obj
+				}
+				return types.ObjectNull(cpcAttrTypes)
+			}(),
 			"harden_runner_config": func() attr.Value {
 				if stepSecurityPolicy.AutoRemdiationOptions.HardenRunnerConfig != nil {
 					hrLabels := stepSecurityPolicy.AutoRemdiationOptions.HardenRunnerConfig.RunnerLabels
@@ -1927,16 +2114,24 @@ func (r *policyDrivenPRResource) updatePolicyDrivenPRState(ctx context.Context, 
 						labelElems[i] = types.StringValue(l)
 					}
 					labelsList, _ := types.ListValue(types.StringType, labelElems)
+					exemptLabels := stepSecurityPolicy.AutoRemdiationOptions.HardenRunnerConfig.ExemptRunnerLabels
+					exemptLabelElems := make([]attr.Value, len(exemptLabels))
+					for i, l := range exemptLabels {
+						exemptLabelElems[i] = types.StringValue(l)
+					}
+					exemptLabelsSet, _ := types.SetValue(types.StringType, exemptLabelElems)
 					obj, _ := types.ObjectValue(
 						map[string]attr.Type{
 							"config":                        types.StringType,
 							"update_existing_configuration": types.BoolType,
 							"target_runner_labels":          types.ListType{ElemType: types.StringType},
+							"exempt_runner_labels":          types.SetType{ElemType: types.StringType},
 						},
 						map[string]attr.Value{
 							"config":                        stringOrNull(stepSecurityPolicy.AutoRemdiationOptions.HardenRunnerConfig.Config),
 							"update_existing_configuration": types.BoolValue(stepSecurityPolicy.AutoRemdiationOptions.HardenRunnerConfig.Subtractive),
 							"target_runner_labels":          labelsList,
+							"exempt_runner_labels":          exemptLabelsSet,
 						},
 					)
 					return obj
@@ -1945,6 +2140,7 @@ func (r *policyDrivenPRResource) updatePolicyDrivenPRState(ctx context.Context, 
 					"config":                        types.StringType,
 					"update_existing_configuration": types.BoolType,
 					"target_runner_labels":          types.ListType{ElemType: types.StringType},
+					"exempt_runner_labels":          types.SetType{ElemType: types.StringType},
 				})
 			}(),
 		},

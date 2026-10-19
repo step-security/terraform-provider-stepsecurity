@@ -3,6 +3,7 @@ package stepsecurityapi
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -11,6 +12,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/google/go-cmp/cmp"
+	"github.com/google/go-cmp/cmp/cmpopts"
 	"github.com/hashicorp/go-uuid"
 	"github.com/hashicorp/terraform-plugin-log/tflog"
 )
@@ -23,29 +26,34 @@ type PolicyDrivenPRPolicy struct {
 	SelectedReposFilter   ApplyIssuePRConfigForAllReposFilter `json:"selected_repos_filter"`
 	UseRepoLevelConfig    bool                                `json:"use_repo_level_config"`
 	UseOrgLevelConfig     bool                                `json:"use_org_level_config"`
+	// OrgConfigNotAppliedToAllRepos is set on a wildcard read when the org-level [all]
+	// config still carries settings but "apply to all repositories" is turned off, so
+	// those settings are not reaching every repo. It is read-only and never sent.
+	OrgConfigNotAppliedToAllRepos bool `json:"-"`
 }
 
 type AutoRemdiationOptions struct {
-	CreatePR                                bool                `json:"create_pr"`
-	CreateIssue                             bool                `json:"create_issue"`
-	CreateGitHubAdvancedSecurityAlert       bool                `json:"create_github_advanced_security_alert"`
-	HardenGitHubHostedRunner                bool                `json:"harden_github_hosted_runner"`
-	PinActionsToSHA                         bool                `json:"pin_actions_to_sha"`
-	RestrictGitHubTokenPermissions          bool                `json:"restrict_github_token_permissions"`
-	SecureDockerFile                        bool                `json:"secure_docker_file"`
-	ActionsToExemptWhilePinning             []string            `json:"actions_to_exempt_while_pinning"`
-	ImagesToExemptWhilePinning              []string            `json:"images_to_exempt_while_pinning"`
-	ActionsToReplaceWithStepSecurityActions []string            `json:"actions_to_replace_with_step_security_actions"`
-	CustomActionsToReplace                  map[string]string   `json:"custom_actions_to_replace,omitempty"`
-	ReplaceByMajorTag                       *bool               `json:"replace_by_major_tag,omitempty"`
-	ExemptedFromReplacement                 []string            `json:"exempted_from_replacement,omitempty"`
-	UpdatePrecommitFile                     []string            `json:"update_precommit_file,omitempty"`
-	PackageEcosystem                        []DependabotConfig  `json:"package_ecosystem,omitempty"`
-	Subtractive                             *bool               `json:"subtractive,omitempty"`
-	AddWorkflows                            string              `json:"add_workflows,omitempty"`
-	ActionCommitMap                         map[string]string   `json:"action_commit_map"`
-	HardenRunnerConfig                      *HardenRunnerConfig `json:"harden_runner_config,omitempty"`
-	LabelsToReplace                         map[string]string   `json:"labels_to_replace,omitempty"`
+	CreatePR                                bool                   `json:"create_pr"`
+	CreateIssue                             bool                   `json:"create_issue"`
+	CreateGitHubAdvancedSecurityAlert       bool                   `json:"create_github_advanced_security_alert"`
+	HardenGitHubHostedRunner                bool                   `json:"harden_github_hosted_runner"`
+	PinActionsToSHA                         bool                   `json:"pin_actions_to_sha"`
+	RestrictGitHubTokenPermissions          bool                   `json:"restrict_github_token_permissions"`
+	SecureDockerFile                        bool                   `json:"secure_docker_file"`
+	ActionsToExemptWhilePinning             []string               `json:"actions_to_exempt_while_pinning"`
+	ImagesToExemptWhilePinning              []string               `json:"images_to_exempt_while_pinning"`
+	ActionsToReplaceWithStepSecurityActions []string               `json:"actions_to_replace_with_step_security_actions"`
+	CustomActionsToReplace                  map[string]string      `json:"custom_actions_to_replace,omitempty"`
+	ReplaceByMajorTag                       *bool                  `json:"replace_by_major_tag,omitempty"`
+	ExemptedFromReplacement                 []string               `json:"exempted_from_replacement,omitempty"`
+	UpdatePrecommitFile                     []string               `json:"update_precommit_file,omitempty"`
+	CustomPrecommitConfig                   *CustomPrecommitConfig `json:"custom_precommit_config,omitempty"`
+	PackageEcosystem                        []DependabotConfig     `json:"package_ecosystem,omitempty"`
+	Subtractive                             *bool                  `json:"subtractive,omitempty"`
+	AddWorkflows                            string                 `json:"add_workflows,omitempty"`
+	ActionCommitMap                         map[string]string      `json:"action_commit_map"`
+	HardenRunnerConfig                      *HardenRunnerConfig    `json:"harden_runner_config,omitempty"`
+	LabelsToReplace                         map[string]string      `json:"labels_to_replace,omitempty"`
 }
 
 // API request/response structures matching agent-api
@@ -66,21 +74,22 @@ type issuePRConfig struct {
 }
 
 type controlSettings struct {
-	ExemptedActions                     []string                             `json:"exempted_actions,omitempty"`
-	ActionsToReplace                    map[string]string                    `json:"actions_to_replace,omitempty"`
-	CustomActionsToReplace              map[string]string                    `json:"custom_actions_to_replace,omitempty"`
+	ExemptedActions                     []string                             `json:"exempted_actions"`
+	ActionsToReplace                    map[string]string                    `json:"actions_to_replace"`
+	CustomActionsToReplace              map[string]string                    `json:"custom_actions_to_replace"`
 	ReplaceByMajorTag                   *bool                                `json:"replace_by_major_tag,omitempty"`
-	ExemptedFromReplacement             []string                             `json:"exempted_from_replacement,omitempty"`
+	ExemptedFromReplacement             []string                             `json:"exempted_from_replacement"`
 	ReplaceAllActions                   *bool                                `json:"replace_all_actions,omitempty"`
 	LabelsToReplace                     map[string]string                    `json:"labels_to_replace"`
-	UpdatePrecommitFile                 map[string]bool                      `json:"update_precommit_file,omitempty"`
+	UpdatePrecommitFile                 map[string]bool                      `json:"update_precommit_file"`
+	CustomPrecommitConfig               *CustomPrecommitConfig               `json:"custom_precommit_config,omitempty"`
 	PackageEcosystem                    []DependabotConfig                   `json:"package_ecosystem,omitempty"`
 	Subtractive                         *bool                                `json:"subtractive,omitempty"`
 	AddWorkflows                        string                               `json:"add_workflows,omitempty"`
 	ApplyIssuePRConfigForAllRepos       *bool                                `json:"apply_issue_pr_config_for_all_repos,omitempty"`
 	ApplyIssuePRConfigForAllReposFilter *ApplyIssuePRConfigForAllReposFilter `json:"apply_issue_pr_config_for_all_repos_filter,omitempty"`
 	ActionCommitMap                     map[string]string                    `json:"action_commit_map"`
-	ExemptedImages                      []string                             `json:"exempted_images,omitempty"`
+	ExemptedImages                      []string                             `json:"exempted_images"`
 	HardenRunnerConfig                  *HardenRunnerConfig                  `json:"harden_runner_config,omitempty"`
 }
 
@@ -95,11 +104,31 @@ type DependabotConfig struct {
 	GroupsYAML   string `json:"groups_yaml,omitempty"`
 }
 
+// HardenRunnerConfig is sent as a whole object: the API replaces it rather than merging
+// it field by field. Both label fields are serialized unconditionally, without omitempty,
+// so clearing either one reaches the API as an explicit empty list instead of a missing
+// key, and does not depend on that replace-vs-merge behavior staying as it is.
 type HardenRunnerConfig struct {
-	Config           string   `json:"config"`
-	Subtractive      bool     `json:"subtractive"`
-	SkipHardenRunner bool     `json:"skipHardenRunner"`
-	RunnerLabels     []string `json:"runnerLabels"`
+	Config             string   `json:"config"`
+	Subtractive        bool     `json:"subtractive"`
+	SkipHardenRunner   bool     `json:"skipHardenRunner"`
+	RunnerLabels       []string `json:"runnerLabels"`
+	ExemptRunnerLabels []string `json:"exemptRunnerLabels"`
+}
+
+// CustomPrecommitConfig is a full .pre-commit-config.yaml provided verbatim.
+// UpdateExistingConfiguration gates overwriting an existing file: false leaves an
+// existing config untouched (only creates when absent); true overwrites it.
+//
+// Neither field carries omitempty. The API stores this object wholesale, so both an
+// empty config and update_existing_configuration=false have to travel as explicit
+// values: with omitempty, turning the flag back off would drop the key and leave the
+// request unable to say "false" at all. Whether the object itself is present is carried
+// by the enclosing pointer, which is where omitempty belongs, since a nil pointer is the
+// only way to express "no custom config configured".
+type CustomPrecommitConfig struct {
+	Config                      string `json:"config"`
+	UpdateExistingConfiguration bool   `json:"update_existing_configuration"`
 }
 
 type featureConfigResponse struct {
@@ -155,6 +184,17 @@ func (c *APIClient) CreatePolicyDrivenPRPolicy(ctx context.Context, createReques
 		replaceAllActions = &t
 	}
 
+	// actions_to_replace and replace_all_actions are mutually exclusive on the API side,
+	// and the check there is for presence rather than content: a non-nil empty map still
+	// counts as sending the field. actions_to_replace is serialized without omitempty so
+	// that an empty map clears the stored value, which means an empty map built for a
+	// replace-all request would reach the API and be rejected. Drop it, since it carries
+	// no information. A non-empty map is left alone so a genuine conflict is still
+	// reported by the API instead of silently discarding the configured actions.
+	if replaceAllActions != nil && len(actionsToReplace) == 0 {
+		actionsToReplace = nil
+	}
+
 	// Build control checks config
 	controlChecksConfig := make(controlChecksFeatureConfig)
 	createPR := createRequest.AutoRemdiationOptions.CreatePR
@@ -204,7 +244,8 @@ func (c *APIClient) CreatePolicyDrivenPRPolicy(ctx context.Context, createReques
 		}
 	}
 
-	if len(createRequest.AutoRemdiationOptions.UpdatePrecommitFile) > 0 {
+	if len(createRequest.AutoRemdiationOptions.UpdatePrecommitFile) > 0 ||
+		createRequest.AutoRemdiationOptions.CustomPrecommitConfig != nil {
 		controlChecksConfig["UpdatePrecommitFile"] = issuePRConfig{
 			TriggerGithubIssue: createIssue,
 			TriggerGithubPr:    createPR,
@@ -239,6 +280,7 @@ func (c *APIClient) CreatePolicyDrivenPRPolicy(ctx context.Context, createReques
 		ReplaceAllActions:                   replaceAllActions,
 		LabelsToReplace:                     createRequest.AutoRemdiationOptions.LabelsToReplace,
 		UpdatePrecommitFile:                 updatePrecommitFileMap,
+		CustomPrecommitConfig:               createRequest.AutoRemdiationOptions.CustomPrecommitConfig,
 		PackageEcosystem:                    createRequest.AutoRemdiationOptions.PackageEcosystem,
 		Subtractive:                         createRequest.AutoRemdiationOptions.Subtractive,
 		AddWorkflows:                        createRequest.AutoRemdiationOptions.AddWorkflows,
@@ -374,8 +416,15 @@ func (c *APIClient) GetPolicyDrivenPRPolicy(ctx context.Context, owner string, r
 		}
 
 		if config != nil && isConfigEnabled(*config) {
-			selectedConfig = *config
-			configFound = true
+			if isAppliedToAllRepos(*config) {
+				selectedConfig = *config
+				configFound = true
+			} else {
+				// The [all] row outlives "apply to all repositories" being turned off: the
+				// console keeps it as the org template for individually selected repos. Its
+				// settings no longer reach every repo, so it does not back a wildcard.
+				policy.OrgConfigNotAppliedToAllRepos = true
+			}
 		}
 	} else {
 		// Query each repo individually for repo-level config
@@ -407,54 +456,10 @@ func (c *APIClient) GetPolicyDrivenPRPolicy(ctx context.Context, owner string, r
 		return policy, nil
 	}
 
-	// Extract feature flags from config
-	enabledHardenRunner := selectedConfig.ControlChecksConfig["GitHubHostedRunnerShouldBeHardened"].TriggerGithubIssue ||
-		selectedConfig.ControlChecksConfig["GitHubHostedRunnerShouldBeHardened"].TriggerGithubPr
-	enabledPinning := selectedConfig.ControlChecksConfig["ActionsShouldBePinned"].TriggerGithubIssue ||
-		selectedConfig.ControlChecksConfig["ActionsShouldBePinned"].TriggerGithubPr
-	enabledTokenPermissions := selectedConfig.ControlChecksConfig["GithubTokenShouldHaveMinPermission"].TriggerGithubIssue ||
-		selectedConfig.ControlChecksConfig["GithubTokenShouldHaveMinPermission"].TriggerGithubPr
-	enabledSecureDocker := selectedConfig.ControlChecksConfig["SecureDockerFile"].TriggerGithubIssue ||
-		selectedConfig.ControlChecksConfig["SecureDockerFile"].TriggerGithubPr
-
-	// Extract actions to replace (sorted for deterministic ordering)
-	actionsToReplace := []string{}
-	for action := range selectedConfig.ControlSettings.ActionsToReplace {
-		actionsToReplace = append(actionsToReplace, action)
-	}
-	sort.Strings(actionsToReplace)
-
-	// Convert update_precommit_file from map to array (sorted for deterministic ordering)
-	updatePrecommitFiles := []string{}
-	for file := range selectedConfig.ControlSettings.UpdatePrecommitFile {
-		updatePrecommitFiles = append(updatePrecommitFiles, file)
-	}
-	sort.Strings(updatePrecommitFiles)
-
 	// Set policy fields - repos will be set by the caller based on state
 	policy.UseRepoLevelConfig = !isOrgLevel
 	policy.UseOrgLevelConfig = isOrgLevel
-	policy.AutoRemdiationOptions = AutoRemdiationOptions{
-		CreatePR:                                selectedConfig.TriggerPRInsteadOfIssue,
-		CreateIssue:                             !selectedConfig.TriggerPRInsteadOfIssue,
-		CreateGitHubAdvancedSecurityAlert:       selectedConfig.TriggerGithubAlert,
-		HardenGitHubHostedRunner:                enabledHardenRunner,
-		PinActionsToSHA:                         enabledPinning,
-		RestrictGitHubTokenPermissions:          enabledTokenPermissions,
-		SecureDockerFile:                        enabledSecureDocker,
-		LabelsToReplace:                         selectedConfig.ControlSettings.LabelsToReplace,
-		ActionsToExemptWhilePinning:             selectedConfig.ControlSettings.ExemptedActions,
-		ImagesToExemptWhilePinning:              selectedConfig.ControlSettings.ExemptedImages,
-		ActionsToReplaceWithStepSecurityActions: actionsToReplace,
-		CustomActionsToReplace:                  selectedConfig.ControlSettings.CustomActionsToReplace,
-		ReplaceByMajorTag:                       selectedConfig.ControlSettings.ReplaceByMajorTag,
-		ExemptedFromReplacement:                 selectedConfig.ControlSettings.ExemptedFromReplacement,
-		UpdatePrecommitFile:                     updatePrecommitFiles,
-		PackageEcosystem:                        selectedConfig.ControlSettings.PackageEcosystem,
-		Subtractive:                             selectedConfig.ControlSettings.Subtractive,
-		AddWorkflows:                            selectedConfig.ControlSettings.AddWorkflows,
-		HardenRunnerConfig:                      selectedConfig.ControlSettings.HardenRunnerConfig,
-	}
+	policy.AutoRemdiationOptions = autoRemediationOptionsFromConfig(selectedConfig)
 
 	// Populate SelectedReposFilter from API response
 	if selectedConfig.ControlSettings.ApplyIssuePRConfigForAllReposFilter != nil {
@@ -590,6 +595,7 @@ func (c *APIClient) DiscoverPolicyDrivenPRConfig(ctx context.Context, owner stri
 	// Separate org-level and repo-level configs
 	var orgLevelConfig *policyDrivenPRInternal
 	var repoConfigs []string
+	selectedRepoConfigs := make(map[string]policyDrivenPRInternal)
 
 	for _, cfg := range configs {
 		// Check if this is the org-level config
@@ -598,8 +604,9 @@ func (c *APIClient) DiscoverPolicyDrivenPRConfig(ctx context.Context, owner stri
 		} else {
 			// Extract repo name from full_repo_name (owner/repo)
 			repoName := cfg.FullRepoName[len(owner)+1:]
-			if isConfigEnabled(cfg.PolicyDrivenPRConfiguration) {
+			if isRepoSelected(cfg.PolicyDrivenPRConfiguration) {
 				repoConfigs = append(repoConfigs, repoName)
+				selectedRepoConfigs[repoName] = cfg.PolicyDrivenPRConfiguration
 			}
 		}
 	}
@@ -609,13 +616,17 @@ func (c *APIClient) DiscoverPolicyDrivenPRConfig(ctx context.Context, owner stri
 	var selectedRepos []string
 	var useOrgLevel bool
 
-	if orgLevelConfig != nil && isConfigEnabled(*orgLevelConfig) {
-		// Org-level config exists
+	if orgLevelConfig != nil && isConfigEnabled(*orgLevelConfig) && isAppliedToAllRepos(*orgLevelConfig) {
+		// Org-level config applied to all repositories
 		selectedConfig = *orgLevelConfig
 		selectedRepos = []string{"*"}
 		useOrgLevel = true
 	} else if len(repoConfigs) > 0 {
-		// Repo-level configs exist
+		// Repo-level configs exist. One resource holds one set of settings, so the
+		// selected repos can only be imported together when they all share it.
+		if groups := groupReposBySettings(repoConfigs, selectedRepoConfigs); len(groups) > 1 {
+			return policy, mixedSettingsImportError(owner, groups)
+		}
 		useOrgLevel = false
 		// Use first repo config as template
 		config, _ := c.getConfigForRepoV2(ctx, owner, repoConfigs[0])
@@ -628,54 +639,10 @@ func (c *APIClient) DiscoverPolicyDrivenPRConfig(ctx context.Context, owner stri
 		return policy, nil
 	}
 
-	// Extract feature flags
-	enabledHardenRunner := selectedConfig.ControlChecksConfig["GitHubHostedRunnerShouldBeHardened"].TriggerGithubIssue ||
-		selectedConfig.ControlChecksConfig["GitHubHostedRunnerShouldBeHardened"].TriggerGithubPr
-	enabledPinning := selectedConfig.ControlChecksConfig["ActionsShouldBePinned"].TriggerGithubIssue ||
-		selectedConfig.ControlChecksConfig["ActionsShouldBePinned"].TriggerGithubPr
-	enabledTokenPermissions := selectedConfig.ControlChecksConfig["GithubTokenShouldHaveMinPermission"].TriggerGithubIssue ||
-		selectedConfig.ControlChecksConfig["GithubTokenShouldHaveMinPermission"].TriggerGithubPr
-	enabledSecureDocker := selectedConfig.ControlChecksConfig["SecureDockerFile"].TriggerGithubIssue ||
-		selectedConfig.ControlChecksConfig["SecureDockerFile"].TriggerGithubPr
-
-	// Extract actions to replace (sorted for deterministic ordering)
-	actionsToReplace := []string{}
-	for action := range selectedConfig.ControlSettings.ActionsToReplace {
-		actionsToReplace = append(actionsToReplace, action)
-	}
-	sort.Strings(actionsToReplace)
-
-	// Convert update_precommit_file from map to array (sorted for deterministic ordering)
-	updatePrecommitFiles := []string{}
-	for file := range selectedConfig.ControlSettings.UpdatePrecommitFile {
-		updatePrecommitFiles = append(updatePrecommitFiles, file)
-	}
-	sort.Strings(updatePrecommitFiles)
-
 	policy.SelectedRepos = selectedRepos
 	policy.UseRepoLevelConfig = !useOrgLevel
 	policy.UseOrgLevelConfig = useOrgLevel
-	policy.AutoRemdiationOptions = AutoRemdiationOptions{
-		CreatePR:                                selectedConfig.TriggerPRInsteadOfIssue,
-		CreateIssue:                             !selectedConfig.TriggerPRInsteadOfIssue,
-		CreateGitHubAdvancedSecurityAlert:       selectedConfig.TriggerGithubAlert,
-		HardenGitHubHostedRunner:                enabledHardenRunner,
-		PinActionsToSHA:                         enabledPinning,
-		RestrictGitHubTokenPermissions:          enabledTokenPermissions,
-		SecureDockerFile:                        enabledSecureDocker,
-		LabelsToReplace:                         selectedConfig.ControlSettings.LabelsToReplace,
-		ActionsToExemptWhilePinning:             selectedConfig.ControlSettings.ExemptedActions,
-		ImagesToExemptWhilePinning:              selectedConfig.ControlSettings.ExemptedImages,
-		ActionsToReplaceWithStepSecurityActions: actionsToReplace,
-		CustomActionsToReplace:                  selectedConfig.ControlSettings.CustomActionsToReplace,
-		ReplaceByMajorTag:                       selectedConfig.ControlSettings.ReplaceByMajorTag,
-		ExemptedFromReplacement:                 selectedConfig.ControlSettings.ExemptedFromReplacement,
-		UpdatePrecommitFile:                     updatePrecommitFiles,
-		PackageEcosystem:                        selectedConfig.ControlSettings.PackageEcosystem,
-		Subtractive:                             selectedConfig.ControlSettings.Subtractive,
-		AddWorkflows:                            selectedConfig.ControlSettings.AddWorkflows,
-		HardenRunnerConfig:                      selectedConfig.ControlSettings.HardenRunnerConfig,
-	}
+	policy.AutoRemdiationOptions = autoRemediationOptionsFromConfig(selectedConfig)
 
 	// Populate SelectedReposFilter from API response
 	if selectedConfig.ControlSettings.ApplyIssuePRConfigForAllReposFilter != nil {
@@ -685,11 +652,185 @@ func (c *APIClient) DiscoverPolicyDrivenPRConfig(ctx context.Context, owner stri
 	return policy, nil
 }
 
+// autoRemediationOptionsFromConfig converts a stored config into the resource's
+// auto_remediation_options. Lists built from maps are sorted so a config always
+// converts to the same value.
+func autoRemediationOptionsFromConfig(config policyDrivenPRInternal) AutoRemdiationOptions {
+	// Extract feature flags
+	enabledHardenRunner := config.ControlChecksConfig["GitHubHostedRunnerShouldBeHardened"].TriggerGithubIssue ||
+		config.ControlChecksConfig["GitHubHostedRunnerShouldBeHardened"].TriggerGithubPr
+	enabledPinning := config.ControlChecksConfig["ActionsShouldBePinned"].TriggerGithubIssue ||
+		config.ControlChecksConfig["ActionsShouldBePinned"].TriggerGithubPr
+	enabledTokenPermissions := config.ControlChecksConfig["GithubTokenShouldHaveMinPermission"].TriggerGithubIssue ||
+		config.ControlChecksConfig["GithubTokenShouldHaveMinPermission"].TriggerGithubPr
+	enabledSecureDocker := config.ControlChecksConfig["SecureDockerFile"].TriggerGithubIssue ||
+		config.ControlChecksConfig["SecureDockerFile"].TriggerGithubPr
+
+	// Extract actions to replace (sorted for deterministic ordering)
+	actionsToReplace := []string{}
+	for action := range config.ControlSettings.ActionsToReplace {
+		actionsToReplace = append(actionsToReplace, action)
+	}
+	sort.Strings(actionsToReplace)
+
+	// Convert update_precommit_file from map to array (sorted for deterministic ordering)
+	updatePrecommitFiles := []string{}
+	for file := range config.ControlSettings.UpdatePrecommitFile {
+		updatePrecommitFiles = append(updatePrecommitFiles, file)
+	}
+	sort.Strings(updatePrecommitFiles)
+
+	return AutoRemdiationOptions{
+		CreatePR:                                config.TriggerPRInsteadOfIssue,
+		CreateIssue:                             !config.TriggerPRInsteadOfIssue,
+		CreateGitHubAdvancedSecurityAlert:       config.TriggerGithubAlert,
+		HardenGitHubHostedRunner:                enabledHardenRunner,
+		PinActionsToSHA:                         enabledPinning,
+		RestrictGitHubTokenPermissions:          enabledTokenPermissions,
+		SecureDockerFile:                        enabledSecureDocker,
+		LabelsToReplace:                         config.ControlSettings.LabelsToReplace,
+		ActionsToExemptWhilePinning:             config.ControlSettings.ExemptedActions,
+		ImagesToExemptWhilePinning:              config.ControlSettings.ExemptedImages,
+		ActionsToReplaceWithStepSecurityActions: actionsToReplace,
+		CustomActionsToReplace:                  config.ControlSettings.CustomActionsToReplace,
+		ReplaceByMajorTag:                       config.ControlSettings.ReplaceByMajorTag,
+		ExemptedFromReplacement:                 config.ControlSettings.ExemptedFromReplacement,
+		UpdatePrecommitFile:                     updatePrecommitFiles,
+		CustomPrecommitConfig:                   config.ControlSettings.CustomPrecommitConfig,
+		PackageEcosystem:                        config.ControlSettings.PackageEcosystem,
+		Subtractive:                             config.ControlSettings.Subtractive,
+		AddWorkflows:                            config.ControlSettings.AddWorkflows,
+		HardenRunnerConfig:                      config.ControlSettings.HardenRunnerConfig,
+	}
+}
+
+// sameSettingsOptions compares auto_remediation_options by content: list order and the
+// difference between an absent and an empty list or map carry no meaning in the API.
+var sameSettingsOptions = cmp.Options{
+	cmpopts.EquateEmpty(),
+	cmpopts.SortSlices(func(a, b string) bool { return a < b }),
+	cmpopts.SortSlices(func(a, b DependabotConfig) bool {
+		if a.Package != b.Package {
+			return a.Package < b.Package
+		}
+		return a.Interval < b.Interval
+	}),
+}
+
+// repoSettingsGroup is a set of selected repos that share the same settings.
+type repoSettingsGroup struct {
+	options AutoRemdiationOptions
+	repos   []string
+}
+
+// groupReposBySettings groups the selected repos by their settings, in the order the
+// repos are listed.
+func groupReposBySettings(repos []string, configs map[string]policyDrivenPRInternal) []repoSettingsGroup {
+	var groups []repoSettingsGroup
+	for _, repo := range repos {
+		options := autoRemediationOptionsFromConfig(configs[repo])
+		matched := false
+		for i := range groups {
+			if cmp.Equal(groups[i].options, options, sameSettingsOptions) {
+				groups[i].repos = append(groups[i].repos, repo)
+				matched = true
+				break
+			}
+		}
+		if !matched {
+			groups = append(groups, repoSettingsGroup{options: options, repos: []string{repo}})
+		}
+	}
+	return groups
+}
+
+// maxReposListedPerGroup bounds how many repos the mixed-settings import error names
+// for each group, so an org with thousands of repos still gets a readable message.
+const maxReposListedPerGroup = 10
+
+// mixedSettingsImportError explains why repos with different settings cannot be
+// imported into one resource. A single resource sends one set of settings to every
+// repo it selects, so importing them together would overwrite all but one group on
+// the next apply.
+func mixedSettingsImportError(owner string, groups []repoSettingsGroup) error {
+	var b strings.Builder
+	fmt.Fprintf(&b, "the selected repositories in '%s' do not all have the same policy-driven PR settings, "+
+		"and one stepsecurity_policy_driven_pr resource applies a single set of settings to every repository it selects. "+
+		"Importing them together would overwrite the settings of some repositories on the next apply.\n\n"+
+		"Repositories grouped by settings:\n", owner)
+	for _, group := range groups {
+		listed := group.repos
+		more := 0
+		if len(listed) > maxReposListedPerGroup {
+			more = len(listed) - maxReposListedPerGroup
+			listed = listed[:maxReposListedPerGroup]
+		}
+		fmt.Fprintf(&b, "  - %s", strings.Join(listed, ", "))
+		if more > 0 {
+			fmt.Fprintf(&b, " and %d more", more)
+		}
+		fmt.Fprintf(&b, ": %s\n", describeSettings(group.options))
+	}
+	b.WriteString("\nGroups with the same enabled options differ in other settings, such as exemptions or replacements.\n\n" +
+		"To import, give these repositories the same settings in StepSecurity and import again. " +
+		"To keep different settings, do not import: declare one stepsecurity_policy_driven_pr resource per group " +
+		"with the repositories listed in selected_repos.")
+	return errors.New(b.String())
+}
+
+// describeSettings names the options a settings group turns on.
+func describeSettings(options AutoRemdiationOptions) string {
+	var enabled []string
+	for _, opt := range []struct {
+		name string
+		on   bool
+	}{
+		{"create_pr", options.CreatePR},
+		{"create_issue", options.CreateIssue},
+		{"create_github_advanced_security_alert", options.CreateGitHubAdvancedSecurityAlert},
+		{"harden_github_hosted_runner", options.HardenGitHubHostedRunner},
+		{"pin_actions_to_sha", options.PinActionsToSHA},
+		{"restrict_github_token_permissions", options.RestrictGitHubTokenPermissions},
+		{"secure_docker_file", options.SecureDockerFile},
+		{"labels_to_replace", len(options.LabelsToReplace) > 0},
+		{"actions_to_replace_with_step_security_actions", len(options.ActionsToReplaceWithStepSecurityActions) > 0},
+		{"custom_actions_to_replace", len(options.CustomActionsToReplace) > 0},
+		{"update_precommit_file", len(options.UpdatePrecommitFile) > 0},
+		{"custom_precommit_config", options.CustomPrecommitConfig != nil},
+		{"package_ecosystem", len(options.PackageEcosystem) > 0},
+		{"add_workflows", options.AddWorkflows != ""},
+		{"harden_runner_config", options.HardenRunnerConfig != nil},
+	} {
+		if opt.on {
+			enabled = append(enabled, opt.name)
+		}
+	}
+	if len(enabled) == 0 {
+		return "no options enabled"
+	}
+	return strings.Join(enabled, ", ")
+}
+
 // isConfigEnabled checks if a config has any enabled features
 func isConfigEnabled(config policyDrivenPRInternal) bool {
 	return config.TriggerGithubAlert ||
 		config.TriggerPRInsteadOfIssue ||
 		len(config.ControlChecksConfig) > 0
+}
+
+// isAppliedToAllRepos reports whether the org-level [all] config is applied to every
+// repo. The backend only fans the [all] config out to repos when this flag is set;
+// with it off, [all] is just the template for repos that opt into the org config.
+func isAppliedToAllRepos(config policyDrivenPRInternal) bool {
+	return config.ControlSettings.ApplyIssuePRConfigForAllRepos != nil &&
+		*config.ControlSettings.ApplyIssuePRConfigForAllRepos
+}
+
+// isRepoSelected reports whether a repo row is part of the policy. A repo is selected
+// when it uses either the org-level or its own repo-level config, which is how the
+// console decides it; settings left on a row with both flags off do not apply.
+func isRepoSelected(config policyDrivenPRInternal) bool {
+	return (config.UseOrgLevelConfig || config.UseRepoLevelConfig) && isConfigEnabled(config)
 }
 
 func (c *APIClient) DeletePolicyDrivenPRPolicy(ctx context.Context, owner string, repos []string) error {

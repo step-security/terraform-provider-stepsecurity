@@ -6,7 +6,13 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strings"
 )
+
+// SlackNotificationMethodWebhook is the Slack delivery method an org uses unless
+// it has opted into OAuth. The backend stores "" until OAuth is configured and
+// only ever checks for "oauth", so "" and "webhook" behave identically.
+const SlackNotificationMethodWebhook = "webhook"
 
 type GitHubNotificationSettingsRequest struct {
 	Owner string `json:"owner"`
@@ -94,6 +100,7 @@ func OrgThreatIntelSubscription(stored, priorLevel string) (enabled bool, level 
 }
 
 func (c *APIClient) CreateNotificationSettings(ctx context.Context, notificationSettingsReq GitHubNotificationSettingsRequest) error {
+	toWireChannels(&notificationSettingsReq.NotificationSettings)
 
 	body, err := json.Marshal(notificationSettingsReq)
 	if err != nil {
@@ -132,6 +139,7 @@ func (c *APIClient) GetNotificationSettings(ctx context.Context, owner string) (
 	if err := json.Unmarshal(respBody, &notificationSettings); err != nil {
 		return nil, fmt.Errorf("failed to unmarshal notification settings: %w", err)
 	}
+	fromWireChannels(&notificationSettings)
 
 	return &notificationSettings, nil
 }
@@ -145,9 +153,8 @@ func (c *APIClient) DeleteNotificationSettings(ctx context.Context, owner string
 	deleteReq := GitHubNotificationSettingsRequest{
 		Owner: owner,
 		NotificationSettings: NotificationSettings{
-			SlackWebhookURL:                    " ",
-			TeamsWebhookURL:                    " ",
-			Email:                              " ",
+			// Channels are left empty: CreateNotificationSettings turns them
+			// into the backend's clear value.
 			NotifyWhenDomainBlocked:            "false",
 			NotifyOnFileOverwrite:              "false",
 			NotifyWhenEndpointDiscovered:       "false",
@@ -169,8 +176,7 @@ func (c *APIClient) DeleteNotificationSettings(ctx context.Context, owner string
 			NotifyForPATUnusedViolation:        "false",
 			NotifyForPATInactiveOwnerViolation: "false",
 			NotifyForPATExpiryReminder:         "false",
-			SlackNotificationMethod:            " ",
-			SlackChannelID:                     " ",
+			SlackNotificationMethod:            SlackNotificationMethodWebhook,
 			// Threat intel is opt-out, so destroying has to write the explicit
 			// "off": clearing the level would leave the org notifying about every
 			// incident.
@@ -182,4 +188,47 @@ func (c *APIClient) DeleteNotificationSettings(ctx context.Context, owner string
 	}
 
 	return c.CreateNotificationSettings(ctx, deleteReq)
+}
+
+// toWireChannels encodes cleared channels for the org endpoint. It skips every
+// empty field and keeps the stored value, so "" cannot clear a channel. The
+// console sends emptySentinel instead, and every backend consumer treats that
+// as unset.
+func toWireChannels(s *NotificationSettings) {
+	for _, v := range []*string{&s.SlackWebhookURL, &s.TeamsWebhookURL, &s.Email, &s.SlackChannelID} {
+		if strings.TrimSpace(*v) == "" {
+			*v = emptySentinel
+		}
+	}
+	if s.SlackNotificationMethod == "" {
+		s.SlackNotificationMethod = SlackNotificationMethodWebhook
+	}
+}
+
+// fromWireChannels reverses toWireChannels so state never holds a backend
+// placeholder. Blank values cover the " " earlier provider versions sent, and
+// orgs that never set up OAuth have no stored method.
+func fromWireChannels(s *NotificationSettings) {
+	for _, v := range []*string{&s.SlackWebhookURL, &s.TeamsWebhookURL, &s.Email, &s.SlackChannelID} {
+		*v = NormalizeNotificationChannel(*v)
+	}
+	s.SlackNotificationMethod = NormalizeSlackNotificationMethod(s.SlackNotificationMethod)
+}
+
+// NormalizeNotificationChannel maps every spelling of a cleared channel ("",
+// " ", "empty") to "".
+func NormalizeNotificationChannel(v string) string {
+	if strings.TrimSpace(v) == "" {
+		return ""
+	}
+	return unsentinel(v)
+}
+
+// NormalizeSlackNotificationMethod maps an unset method to the webhook default
+// the backend applies.
+func NormalizeSlackNotificationMethod(v string) string {
+	if strings.TrimSpace(v) == "" {
+		return SlackNotificationMethodWebhook
+	}
+	return v
 }

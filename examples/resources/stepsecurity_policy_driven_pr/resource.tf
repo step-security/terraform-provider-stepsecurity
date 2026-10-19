@@ -55,13 +55,23 @@ resource "stepsecurity_policy_driven_pr" "repo_level_config" {
     actions_to_replace_with_step_security_actions = ["enricomi/publish-unit-test-result-action", "tj-actions/changed-files"]
     custom_actions_to_replace = {
       "third-party-actions/dynamodb-actions" = "step-security/dynamodb-actions"
-    }                                                                // replaces all third-party actions with step-security/dynamodb-actions
-    replace_action_on_major_tag_match = true                         # actions in actions_to_replace_with_step_security_actions are replaced only when the major tag matches
-    actions_exempted_from_replacement = ["fkirc/skip-*", "amannn/*"] // either actions_to_replace_with_step_security_actions or actions_exempted_from_replacement can be set at a time unless its *
-    images_to_exempt_while_pinning    = ["amazon*"]
+    }                                        // replaces all third-party actions with step-security/dynamodb-actions
+    replace_action_on_major_tag_match = true # actions in actions_to_replace_with_step_security_actions are replaced only when the major tag matches
+    // actions_exempted_from_replacement can only be used when actions_to_replace_with_step_security_actions is ["*"] (see Scenario 4)
+    images_to_exempt_while_pinning = ["amazon*"]
 
     # v2-only features (requires policy-driven PR v2 to be enabled)
     update_precommit_file = ["eslint"]
+    # Alternatively, provide a full .pre-commit-config.yaml instead of selecting
+    # hooks. custom_precommit_config and update_precommit_file are mutually
+    # exclusive, so uncomment this only after removing update_precommit_file above.
+    # The content is written as-is, no hook merging is done. When
+    # update_existing_configuration is false the config is only added to repos that
+    # do not already have one; when true, an existing config is overwritten.
+    # custom_precommit_config = {
+    #   config                        = "repos:\n  - repo: https://github.com/pre-commit/pre-commit-hooks\n    rev: v4.6.0\n    hooks:\n      - id: trailing-whitespace\n      - id: end-of-file-fixer\n"
+    #   update_existing_configuration = false
+    # }
     package_ecosystem = [
       {
         package       = "npm"
@@ -85,7 +95,8 @@ resource "stepsecurity_policy_driven_pr" "repo_level_config" {
     harden_runner_config = {
       update_existing_configuration = false
       config                        = "- name: Harden the runner (Audit all outbound calls)\n  uses: step-security/custom-agent@v2\n  with:\n    egress-policy: audit\n    allowed-endpoints: >\n      github.com:443\n"
-      target_runner_labels          = ["ubuntu-latest", "macos-latest"]
+      target_runner_labels          = ["ubuntu-latest", "macos-latest"] # only add harden-runner to jobs on these runners
+      exempt_runner_labels          = ["gpu-*", "self-hosted"]          # skip jobs on these runners (supports globs, takes precedence)
     }
   }
 }
@@ -93,8 +104,10 @@ resource "stepsecurity_policy_driven_pr" "repo_level_config" {
 # ============================================================================
 # Scenario 3: Org-level config with exclusions (opt-out specific repos)
 # ============================================================================
-# Applies org-level config to all repos EXCEPT the ones in excluded_repos
-# Excluded repos will not have any policy-driven PR config applied
+# Applies org-level config to all repos EXCEPT the ones in excluded_repos.
+# Excluded repos keep the configuration they already had (for example one set by
+# another stepsecurity_policy_driven_pr resource, see Scenario 5); repos that had
+# none are left without policy-driven PR config.
 resource "stepsecurity_policy_driven_pr" "org_level_with_exclusions" {
   owner          = "test-organization"
   selected_repos = ["*"]
@@ -114,7 +127,7 @@ resource "stepsecurity_policy_driven_pr" "org_level_with_exclusions" {
 # Scenario 4: Org-level config with filter
 # ============================================================================
 # Applies org-level config to all repos that match the filter
-resource "stepsecurity_policy_driven_pr" "org_level_with_exclusions" {
+resource "stepsecurity_policy_driven_pr" "org_level_with_filter" {
   owner          = "test-organization"
   selected_repos = ["*"]
   selected_repos_filter = {
@@ -135,10 +148,98 @@ resource "stepsecurity_policy_driven_pr" "org_level_with_exclusions" {
 
 
 # ============================================================================
+# Scenario 5: Org-level config, with a few repos on their own shared config
+# ============================================================================
+# Every repo gets the org-level settings except repo-x and repo-y, which share a
+# different set of settings. Use one resource per set of settings:
+#   - the org-level resource lists repo-x and repo-y in excluded_repos, so the org
+#     settings never overwrite them;
+#   - a second resource selects exactly those repos with their own settings.
+# depends_on makes the second resource apply after the org-level one. Without it both
+# can run at the same time, and the org-level resource can clear repo-x and repo-y
+# while the second resource is writing them.
+#
+# Keep excluded_repos and the second resource's selected_repos in sync, and select
+# each repo in only one resource: two resources that select the same repo overwrite
+# each other's settings on every apply.
+#
+# Destroying the org-level resource, or changing its selected_repos from ["*"] to
+# specific repos, resets the configuration of every repo in the organization,
+# including repo-x and repo-y; apply again to restore them.
+#
+# Because of depends_on, `terraform destroy -target` on org_default also destroys
+# org_exempted_repos. To remove only the org-level resource, delete it (and the
+# depends_on reference) from the configuration and apply.
+resource "stepsecurity_policy_driven_pr" "org_default" {
+  owner          = "test-organization"
+  selected_repos = ["*"]
+  excluded_repos = ["repo-x", "repo-y"] # managed by org_exempted_repos below
+  auto_remediation_options = {
+    create_pr                         = true
+    create_issue                      = false
+    harden_github_hosted_runner       = true
+    pin_actions_to_sha                = true
+    restrict_github_token_permissions = true
+  }
+}
+
+resource "stepsecurity_policy_driven_pr" "org_exempted_repos" {
+  owner          = "test-organization"
+  selected_repos = ["repo-x", "repo-y"]
+  auto_remediation_options = {
+    create_pr                       = true
+    create_issue                    = false
+    pin_actions_to_sha              = true
+    actions_to_exempt_while_pinning = ["actions/checkout"]
+  }
+
+  depends_on = [stepsecurity_policy_driven_pr.org_default]
+}
+
+# ============================================================================
+# Scenario 6: Different settings for different groups of repos (no org-level config)
+# ============================================================================
+# Each group of repos that shares settings is its own resource with an explicit
+# list of repos. Repos not listed in any resource have no policy-driven PR config.
+# Select each repo in only one resource.
+resource "stepsecurity_policy_driven_pr" "backend_repos" {
+  owner          = "test-organization"
+  selected_repos = ["api-service", "worker-service"]
+  auto_remediation_options = {
+    create_pr                         = true
+    create_issue                      = false
+    harden_github_hosted_runner       = true
+    restrict_github_token_permissions = true
+    secure_docker_file                = true
+  }
+}
+
+resource "stepsecurity_policy_driven_pr" "frontend_repos" {
+  owner          = "test-organization"
+  selected_repos = ["web-app", "docs-site"]
+  auto_remediation_options = {
+    create_pr          = false
+    create_issue       = true # open issues instead of PRs for these repos
+    pin_actions_to_sha = true
+  }
+}
+
+# ============================================================================
 # For importing existing policy driven pr config to terraform state
 # ============================================================================
 # This will be helpful to manage existing policy driven pr config using terraform
 # Alternative to this is to use terraform import command
+#
+# The import ID is the organization name, and import produces one resource:
+#   - When "Apply to all repositories" is on, it imports selected_repos = ["*"]
+#     with the org-level settings. Repos that are excluded or have their own
+#     repo-level settings are not imported; declare them as in Scenario 5.
+#   - Otherwise it imports the repos that are selected, when they all have the same
+#     settings.
+#   - When the selected repos have different settings, import fails and lists the
+#     repos grouped by settings, because one resource can only hold one set of
+#     settings. Give them the same settings in StepSecurity and import again, or
+#     declare one resource per group (as in Scenario 6) instead of importing.
 import {
   to = stepsecurity_policy_driven_pr.org_level_all
   id = "test-organization"
