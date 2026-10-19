@@ -57,6 +57,24 @@ resource "stepsecurity_tenant_notification_settings" "this" {
     suspicious_files   = true
     config_changes     = false
   }
+
+  # Additional destinations, each receiving only its own events, on top of
+  # notification_channels. Omit the list to leave profiles managed in the
+  # console alone; set it to [] to remove them all.
+  notification_profiles = [
+    {
+      name               = "Threat intel"
+      type               = "slack_oauth" # email | slack_webhook | slack_oauth | teams
+      target             = "C0123456789"
+      threat_intel_level = "all" # off (default) | all | name | version
+    },
+    {
+      name                 = "AI tooling"
+      type                 = "email"
+      target               = "ai-platform@example.com"
+      developer_mdm_events = ["new_ai_agents", "new_mcp_servers", "new_agent_skills"]
+    },
+  ]
 }
 
 # Dev Machine Guard only, delivered to Microsoft Teams. threat_intel is still
@@ -115,6 +133,10 @@ import {
 - `notification_channels` (Attributes) Where the tenant's notifications are delivered. Every channel is optional, but with none configured no notification is delivered, whatever is subscribed below. (see [below for nested schema](#nestedatt--notification_channels))
 - `threat_intel` (Attributes) The tenant's Threat Intel notification subscription: a single on/off plus the granularity of what warrants a notification. This covers tenant-scoped assets, such as compromised components on the device fleet. Compromised components found in a GitHub organization's pull requests and workflows notify per organization, configured on `stepsecurity_github_org_notification_settings`. (see [below for nested schema](#nestedatt--threat_intel))
 
+### Optional
+
+- `notification_profiles` (Attributes List) Additional notification destinations, each receiving only its own Threat Intel and Dev Machine Guard events, on top of `notification_channels`. At most 20. Omit to leave the tenant's current profiles alone and adopt them into state; set to `[]` to remove them all. (see [below for nested schema](#nestedatt--notification_profiles))
+
 <a id="nestedatt--developer_mdm"></a>
 ### Nested Schema for `developer_mdm`
 
@@ -151,6 +173,25 @@ Required:
 Optional:
 
 - `level` (String) Which incidents warrant a notification, ignored when `enabled` is `false`: `all` for every Threat Intel incident whether or not this tenant is affected, `name` only when this tenant is affected by a compromised package matched by name at any version, `version` only when this tenant has the exact compromised version installed. Defaults to `version`.
+
+
+<a id="nestedatt--notification_profiles"></a>
+### Nested Schema for `notification_profiles`
+
+Required:
+
+- `name` (String) Name of the profile, at most 64 characters.
+- `target` (String) The destination for `type`: comma separated email addresses (at most 49), an `https` webhook URL, or a Slack channel ID.
+- `type` (String) Where the profile delivers: `email`, `slack_webhook`, `slack_oauth` (a channel posted to by the Slack app installed for the tenant) or `teams`.
+
+Optional:
+
+- `developer_mdm_events` (Set of String) Dev Machine Guard events this profile receives, named as in `developer_mdm`.
+- `threat_intel_level` (String) Threat Intel notifications for this profile: `off` (default), `all`, `name` or `version`, with the same meaning as the resource's `threat_intel.level`.
+
+Read-Only:
+
+- `id` (String) Identifier StepSecurity assigns to the profile.
 
 ## Import
 
