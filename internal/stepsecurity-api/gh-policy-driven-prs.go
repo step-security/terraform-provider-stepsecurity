@@ -74,6 +74,11 @@ type issuePRConfig struct {
 	TriggerGithubPr    bool `json:"trigger_github_pr"`
 }
 
+// controlSettings is the control_settings object sent to the API.
+//
+// DockerfilePatterns has no omitempty: the API keeps the stored patterns when the key
+// is missing, so removing them from the config has to reach it as an explicit empty
+// list.
 type controlSettings struct {
 	ExemptedActions                     []string                             `json:"exempted_actions"`
 	ActionsToReplace                    map[string]string                    `json:"actions_to_replace"`
@@ -85,7 +90,7 @@ type controlSettings struct {
 	UpdatePrecommitFile                 map[string]bool                      `json:"update_precommit_file"`
 	CustomPrecommitConfig               *CustomPrecommitConfig               `json:"custom_precommit_config,omitempty"`
 	PackageEcosystem                    []DependabotConfig                   `json:"package_ecosystem,omitempty"`
-	DockerfilePatterns                  []string                             `json:"dockerfile_patterns,omitempty"`
+	DockerfilePatterns                  []string                             `json:"dockerfile_patterns"`
 	Subtractive                         *bool                                `json:"subtractive,omitempty"`
 	AddWorkflows                        string                               `json:"add_workflows,omitempty"`
 	ApplyIssuePRConfigForAllRepos       *bool                                `json:"apply_issue_pr_config_for_all_repos,omitempty"`

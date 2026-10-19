@@ -1081,12 +1081,12 @@ func (r *policyDrivenPRResource) Create(ctx context.Context, req resource.Create
 		}
 	}
 
-	var dockerfilePatterns []string
+	// Empty rather than nil when unset, so the request clears any patterns the
+	// repo already has instead of leaving them in place.
+	dockerfilePatterns := []string{}
 	if !options.DockerfilePatterns.IsNull() {
-		elements := options.DockerfilePatterns.Elements()
-		dockerfilePatterns = make([]string, len(elements))
-		for i, elem := range elements {
-			dockerfilePatterns[i] = elem.(types.String).ValueString()
+		for _, elem := range options.DockerfilePatterns.Elements() {
+			dockerfilePatterns = append(dockerfilePatterns, elem.(types.String).ValueString())
 		}
 	}
 
@@ -1698,12 +1698,13 @@ func (r *policyDrivenPRResource) Update(ctx context.Context, req resource.Update
 		}
 	}
 
-	var dockerfilePatternsUpdate []string
+	// Empty rather than nil when removed from the config: the API only replaces
+	// the stored patterns when the key is present, so a nil here would leave the
+	// old patterns stored and every later refresh would read them back as drift.
+	dockerfilePatternsUpdate := []string{}
 	if !planOptions.DockerfilePatterns.IsNull() {
-		elements := planOptions.DockerfilePatterns.Elements()
-		dockerfilePatternsUpdate = make([]string, len(elements))
-		for i, elem := range elements {
-			dockerfilePatternsUpdate[i] = elem.(types.String).ValueString()
+		for _, elem := range planOptions.DockerfilePatterns.Elements() {
+			dockerfilePatternsUpdate = append(dockerfilePatternsUpdate, elem.(types.String).ValueString())
 		}
 	}
 
