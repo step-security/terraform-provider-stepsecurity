@@ -214,6 +214,65 @@ func (m *MockStepSecurityClient) DeleteGitHubPRTemplate(ctx context.Context, own
 	return args.Error(0)
 }
 
+// GitHub PAT Governance Policy methods
+func (m *MockStepSecurityClient) GetPATGovernancePolicy(ctx context.Context, owner string) (*PATGovernancePolicy, error) {
+	args := m.Called(ctx, owner)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).(*PATGovernancePolicy), args.Error(1)
+}
+
+func (m *MockStepSecurityClient) UpdatePATGovernancePolicy(ctx context.Context, owner string, policy PATGovernancePolicy) error {
+	args := m.Called(ctx, owner, policy)
+	return args.Error(0)
+}
+
+func (m *MockStepSecurityClient) DeletePATGovernancePolicy(ctx context.Context, owner string) error {
+	args := m.Called(ctx, owner)
+	return args.Error(0)
+}
+
+func (m *MockStepSecurityClient) GetTenantPATGovernancePolicy(ctx context.Context) (*PATGovernancePolicy, error) {
+	args := m.Called(ctx)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).(*PATGovernancePolicy), args.Error(1)
+}
+
+func (m *MockStepSecurityClient) UpdateTenantPATGovernancePolicy(ctx context.Context, policy PATGovernancePolicy) error {
+	args := m.Called(ctx, policy)
+	return args.Error(0)
+}
+
+func (m *MockStepSecurityClient) DeleteTenantPATGovernancePolicy(ctx context.Context) error {
+	args := m.Called(ctx)
+	return args.Error(0)
+}
+
+// GitHub PAT exemption methods
+func (m *MockStepSecurityClient) ListPATExemptions(ctx context.Context, organization string) ([]PATExemption, error) {
+	args := m.Called(ctx, organization)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).([]PATExemption), args.Error(1)
+}
+
+func (m *MockStepSecurityClient) UpsertPATExemption(ctx context.Context, organization string, record PATExemption) (*PATExemption, error) {
+	args := m.Called(ctx, organization, record)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).(*PATExemption), args.Error(1)
+}
+
+func (m *MockStepSecurityClient) DeletePATExemption(ctx context.Context, organization, key string) error {
+	args := m.Called(ctx, organization, key)
+	return args.Error(0)
+}
+
 // Custom Role methods
 func (m *MockStepSecurityClient) ListRoles(ctx context.Context) ([]Role, error) {
 	args := m.Called(ctx)

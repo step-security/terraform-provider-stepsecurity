@@ -2,6 +2,7 @@ package provider
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 
 	stepsecurityapi "github.com/step-security/terraform-provider-stepsecurity/internal/stepsecurity-api"
@@ -21,13 +22,16 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/schema/validator"
 	"github.com/hashicorp/terraform-plugin-framework/types"
 	"github.com/hashicorp/terraform-plugin-framework/types/basetypes"
+	"github.com/hashicorp/terraform-plugin-go/tfprotov6"
+	"github.com/hashicorp/terraform-plugin-go/tftypes"
 )
 
 // Ensure the implementation satisfies the expected interfaces.
 var (
-	_ resource.Resource                = &GithubRepoNotificationSettingsResource{}
-	_ resource.ResourceWithConfigure   = &GithubRepoNotificationSettingsResource{}
-	_ resource.ResourceWithImportState = &GithubRepoNotificationSettingsResource{}
+	_ resource.Resource                 = &GithubRepoNotificationSettingsResource{}
+	_ resource.ResourceWithConfigure    = &GithubRepoNotificationSettingsResource{}
+	_ resource.ResourceWithImportState  = &GithubRepoNotificationSettingsResource{}
+	_ resource.ResourceWithUpgradeState = &GithubRepoNotificationSettingsResource{}
 )
 
 // NewOrderResource is a helper function to simplify the provider implementation.
@@ -48,6 +52,9 @@ func (r *GithubRepoNotificationSettingsResource) Metadata(_ context.Context, req
 // Schema defines the schema for the resource.
 func (r *GithubRepoNotificationSettingsResource) Schema(_ context.Context, _ resource.SchemaRequest, resp *resource.SchemaResponse) {
 	resp.Schema = schema.Schema{
+		// Version 1 added the PAT toggles to notification_events; UpgradeState
+		// backfills them so states written by earlier releases plan no changes.
+		Version: 1,
 		Attributes: map[string]schema.Attribute{
 			"id": schema.StringAttribute{
 				Computed: true,
@@ -192,6 +199,42 @@ func (r *GithubRepoNotificationSettingsResource) Schema(_ context.Context, _ res
 						Description: "Notify when optional PR checks fail",
 						Default:     booldefault.StaticBool(false),
 					},
+					"pat_max_age_violation": schema.BoolAttribute{
+						Optional:    true,
+						Computed:    true,
+						Description: "Notify when a personal access token violates the PAT governance max-age control",
+						Default:     booldefault.StaticBool(false),
+					},
+					"pat_no_expiry_violation": schema.BoolAttribute{
+						Optional:    true,
+						Computed:    true,
+						Description: "Notify when a personal access token violates the PAT governance no-expiration control",
+						Default:     booldefault.StaticBool(false),
+					},
+					"pat_over_scoped_violation": schema.BoolAttribute{
+						Optional:    true,
+						Computed:    true,
+						Description: "Notify when a personal access token violates the PAT governance over-scoped control",
+						Default:     booldefault.StaticBool(false),
+					},
+					"pat_unused_violation": schema.BoolAttribute{
+						Optional:    true,
+						Computed:    true,
+						Description: "Notify when a personal access token violates the PAT governance unused-token control",
+						Default:     booldefault.StaticBool(false),
+					},
+					"pat_inactive_owner_violation": schema.BoolAttribute{
+						Optional:    true,
+						Computed:    true,
+						Description: "Notify when a personal access token belongs to an owner who is no longer an active organization member",
+						Default:     booldefault.StaticBool(false),
+					},
+					"pat_expiry_reminder": schema.BoolAttribute{
+						Optional:    true,
+						Computed:    true,
+						Description: "Notify with pre-expiry reminders for personal access tokens that are about to expire",
+						Default:     booldefault.StaticBool(false),
+					},
 				},
 				Required: true,
 			},
@@ -328,6 +371,12 @@ type githubNotificationEventsModel struct {
 	BaselineCheckFailures             types.Bool `tfsdk:"baseline_check_failures"`
 	RequiredCheckFailures             types.Bool `tfsdk:"required_check_failures"`
 	OptionalCheckFailures             types.Bool `tfsdk:"optional_check_failures"`
+	PATMaxAgeViolation                types.Bool `tfsdk:"pat_max_age_violation"`
+	PATNoExpiryViolation              types.Bool `tfsdk:"pat_no_expiry_violation"`
+	PATOverScopedViolation            types.Bool `tfsdk:"pat_over_scoped_violation"`
+	PATUnusedViolation                types.Bool `tfsdk:"pat_unused_violation"`
+	PATInactiveOwnerViolation         types.Bool `tfsdk:"pat_inactive_owner_violation"`
+	PATExpiryReminder                 types.Bool `tfsdk:"pat_expiry_reminder"`
 }
 
 // Create creates the resource and sets the initial Terraform state.
@@ -358,26 +407,32 @@ func (r *GithubRepoNotificationSettingsResource) Create(ctx context.Context, req
 	request := stepsecurityapi.GitHubNotificationSettingsRequest{
 		Owner: plan.Owner.ValueString(),
 		NotificationSettings: stepsecurityapi.NotificationSettings{
-			SlackWebhookURL:                   channels.SlackWebhookURL.ValueString(),
-			TeamsWebhookURL:                   channels.TeamsWebhookURL.ValueString(),
-			Email:                             channels.Email.ValueString(),
-			SlackChannelID:                    channels.SlackChannelID.ValueString(),
-			SlackNotificationMethod:           channels.SlackNotificationMethod.ValueString(),
-			NotifyWhenDomainBlocked:           utilities.ConvertBoolToString(events.DomainBlocked.ValueBool()),
-			NotifyOnFileOverwrite:             utilities.ConvertBoolToString(events.FileOverwrite.ValueBool()),
-			NotifyWhenEndpointDiscovered:      utilities.ConvertBoolToString(events.NewEndpointDiscovered.ValueBool()),
-			NotifyForHttpsDetections:          utilities.ConvertBoolToString(events.HttpsDetections.ValueBool()),
-			NotifyForSecretsDetection:         utilities.ConvertBoolToString(events.SecretsDetected.ValueBool()),
-			NotifyForArtifactSecretsDetection: utilities.ConvertBoolToString(events.ArtifactsSecretsDetected.ValueBool()),
-			NotifyForImposterCommitsDetection: utilities.ConvertBoolToString(events.ImposterCommitsDetected.ValueBool()),
-			NotifyForSuspiciousNetworkCall:    utilities.ConvertBoolToString(events.SuspiciousNetworkCallDetected.ValueBool()),
-			NotifyForSuspiciousProcessEvents:  utilities.ConvertBoolToString(events.SuspiciousProcessEventsDetected.ValueBool()),
-			NotifyForHardenRunnerConfigChange: utilities.ConvertBoolToString(events.HardenRunnerConfigChangesDetected.ValueBool()),
-			NotifyForNonCompliantArtifacts:    utilities.ConvertBoolToString(events.NonCompliantArtifactDetected.ValueBool()),
-			NotifyForBlockedRunPolicy:         utilities.ConvertBoolToString(events.RunBlockedByPolicy.ValueBool()),
-			NotifyForBaselineCheckFailures:    utilities.ConvertBoolToString(events.BaselineCheckFailures.ValueBool()),
-			NotifyForRequiredCheckFailures:    utilities.ConvertBoolToString(events.RequiredCheckFailures.ValueBool()),
-			NotifyForOptionalCheckFailures:    utilities.ConvertBoolToString(events.OptionalCheckFailures.ValueBool()),
+			SlackWebhookURL:                    channels.SlackWebhookURL.ValueString(),
+			TeamsWebhookURL:                    channels.TeamsWebhookURL.ValueString(),
+			Email:                              channels.Email.ValueString(),
+			SlackChannelID:                     channels.SlackChannelID.ValueString(),
+			SlackNotificationMethod:            channels.SlackNotificationMethod.ValueString(),
+			NotifyWhenDomainBlocked:            utilities.ConvertBoolToString(events.DomainBlocked.ValueBool()),
+			NotifyOnFileOverwrite:              utilities.ConvertBoolToString(events.FileOverwrite.ValueBool()),
+			NotifyWhenEndpointDiscovered:       utilities.ConvertBoolToString(events.NewEndpointDiscovered.ValueBool()),
+			NotifyForHttpsDetections:           utilities.ConvertBoolToString(events.HttpsDetections.ValueBool()),
+			NotifyForSecretsDetection:          utilities.ConvertBoolToString(events.SecretsDetected.ValueBool()),
+			NotifyForArtifactSecretsDetection:  utilities.ConvertBoolToString(events.ArtifactsSecretsDetected.ValueBool()),
+			NotifyForImposterCommitsDetection:  utilities.ConvertBoolToString(events.ImposterCommitsDetected.ValueBool()),
+			NotifyForSuspiciousNetworkCall:     utilities.ConvertBoolToString(events.SuspiciousNetworkCallDetected.ValueBool()),
+			NotifyForSuspiciousProcessEvents:   utilities.ConvertBoolToString(events.SuspiciousProcessEventsDetected.ValueBool()),
+			NotifyForHardenRunnerConfigChange:  utilities.ConvertBoolToString(events.HardenRunnerConfigChangesDetected.ValueBool()),
+			NotifyForNonCompliantArtifacts:     utilities.ConvertBoolToString(events.NonCompliantArtifactDetected.ValueBool()),
+			NotifyForBlockedRunPolicy:          utilities.ConvertBoolToString(events.RunBlockedByPolicy.ValueBool()),
+			NotifyForBaselineCheckFailures:     utilities.ConvertBoolToString(events.BaselineCheckFailures.ValueBool()),
+			NotifyForRequiredCheckFailures:     utilities.ConvertBoolToString(events.RequiredCheckFailures.ValueBool()),
+			NotifyForOptionalCheckFailures:     utilities.ConvertBoolToString(events.OptionalCheckFailures.ValueBool()),
+			NotifyForPATMaxAgeViolation:        utilities.ConvertBoolToString(events.PATMaxAgeViolation.ValueBool()),
+			NotifyForPATNoExpiryViolation:      utilities.ConvertBoolToString(events.PATNoExpiryViolation.ValueBool()),
+			NotifyForPATOverScopedViolation:    utilities.ConvertBoolToString(events.PATOverScopedViolation.ValueBool()),
+			NotifyForPATUnusedViolation:        utilities.ConvertBoolToString(events.PATUnusedViolation.ValueBool()),
+			NotifyForPATInactiveOwnerViolation: utilities.ConvertBoolToString(events.PATInactiveOwnerViolation.ValueBool()),
+			NotifyForPATExpiryReminder:         utilities.ConvertBoolToString(events.PATExpiryReminder.ValueBool()),
 		},
 	}
 
@@ -483,6 +538,12 @@ func (r *GithubRepoNotificationSettingsResource) Read(ctx context.Context, req r
 			"baseline_check_failures":               types.BoolType,
 			"required_check_failures":               types.BoolType,
 			"optional_check_failures":               types.BoolType,
+			"pat_max_age_violation":                 types.BoolType,
+			"pat_no_expiry_violation":               types.BoolType,
+			"pat_over_scoped_violation":             types.BoolType,
+			"pat_unused_violation":                  types.BoolType,
+			"pat_inactive_owner_violation":          types.BoolType,
+			"pat_expiry_reminder":                   types.BoolType,
 		},
 		map[string]attr.Value{
 			"domain_blocked":                        types.BoolValue(utilities.ConvertStringToBool(settings.NotifyWhenDomainBlocked)),
@@ -500,6 +561,12 @@ func (r *GithubRepoNotificationSettingsResource) Read(ctx context.Context, req r
 			"baseline_check_failures":               types.BoolValue(utilities.ConvertStringToBool(settings.NotifyForBaselineCheckFailures)),
 			"required_check_failures":               types.BoolValue(utilities.ConvertStringToBool(settings.NotifyForRequiredCheckFailures)),
 			"optional_check_failures":               types.BoolValue(utilities.ConvertStringToBool(settings.NotifyForOptionalCheckFailures)),
+			"pat_max_age_violation":                 types.BoolValue(utilities.ConvertStringToBool(settings.NotifyForPATMaxAgeViolation)),
+			"pat_no_expiry_violation":               types.BoolValue(utilities.ConvertStringToBool(settings.NotifyForPATNoExpiryViolation)),
+			"pat_over_scoped_violation":             types.BoolValue(utilities.ConvertStringToBool(settings.NotifyForPATOverScopedViolation)),
+			"pat_unused_violation":                  types.BoolValue(utilities.ConvertStringToBool(settings.NotifyForPATUnusedViolation)),
+			"pat_inactive_owner_violation":          types.BoolValue(utilities.ConvertStringToBool(settings.NotifyForPATInactiveOwnerViolation)),
+			"pat_expiry_reminder":                   types.BoolValue(utilities.ConvertStringToBool(settings.NotifyForPATExpiryReminder)),
 		},
 	)
 	state.NotificationEvents = eventsObj
@@ -546,26 +613,32 @@ func (r *GithubRepoNotificationSettingsResource) Update(ctx context.Context, req
 	request := stepsecurityapi.GitHubNotificationSettingsRequest{
 		Owner: plan.Owner.ValueString(),
 		NotificationSettings: stepsecurityapi.NotificationSettings{
-			SlackWebhookURL:                   channels.SlackWebhookURL.ValueString(),
-			TeamsWebhookURL:                   channels.TeamsWebhookURL.ValueString(),
-			Email:                             channels.Email.ValueString(),
-			SlackChannelID:                    channels.SlackChannelID.ValueString(),
-			SlackNotificationMethod:           channels.SlackNotificationMethod.ValueString(),
-			NotifyWhenDomainBlocked:           utilities.ConvertBoolToString(events.DomainBlocked.ValueBool()),
-			NotifyOnFileOverwrite:             utilities.ConvertBoolToString(events.FileOverwrite.ValueBool()),
-			NotifyWhenEndpointDiscovered:      utilities.ConvertBoolToString(events.NewEndpointDiscovered.ValueBool()),
-			NotifyForHttpsDetections:          utilities.ConvertBoolToString(events.HttpsDetections.ValueBool()),
-			NotifyForSecretsDetection:         utilities.ConvertBoolToString(events.SecretsDetected.ValueBool()),
-			NotifyForArtifactSecretsDetection: utilities.ConvertBoolToString(events.ArtifactsSecretsDetected.ValueBool()),
-			NotifyForImposterCommitsDetection: utilities.ConvertBoolToString(events.ImposterCommitsDetected.ValueBool()),
-			NotifyForSuspiciousNetworkCall:    utilities.ConvertBoolToString(events.SuspiciousNetworkCallDetected.ValueBool()),
-			NotifyForSuspiciousProcessEvents:  utilities.ConvertBoolToString(events.SuspiciousProcessEventsDetected.ValueBool()),
-			NotifyForHardenRunnerConfigChange: utilities.ConvertBoolToString(events.HardenRunnerConfigChangesDetected.ValueBool()),
-			NotifyForNonCompliantArtifacts:    utilities.ConvertBoolToString(events.NonCompliantArtifactDetected.ValueBool()),
-			NotifyForBlockedRunPolicy:         utilities.ConvertBoolToString(events.RunBlockedByPolicy.ValueBool()),
-			NotifyForBaselineCheckFailures:    utilities.ConvertBoolToString(events.BaselineCheckFailures.ValueBool()),
-			NotifyForRequiredCheckFailures:    utilities.ConvertBoolToString(events.RequiredCheckFailures.ValueBool()),
-			NotifyForOptionalCheckFailures:    utilities.ConvertBoolToString(events.OptionalCheckFailures.ValueBool()),
+			SlackWebhookURL:                    channels.SlackWebhookURL.ValueString(),
+			TeamsWebhookURL:                    channels.TeamsWebhookURL.ValueString(),
+			Email:                              channels.Email.ValueString(),
+			SlackChannelID:                     channels.SlackChannelID.ValueString(),
+			SlackNotificationMethod:            channels.SlackNotificationMethod.ValueString(),
+			NotifyWhenDomainBlocked:            utilities.ConvertBoolToString(events.DomainBlocked.ValueBool()),
+			NotifyOnFileOverwrite:              utilities.ConvertBoolToString(events.FileOverwrite.ValueBool()),
+			NotifyWhenEndpointDiscovered:       utilities.ConvertBoolToString(events.NewEndpointDiscovered.ValueBool()),
+			NotifyForHttpsDetections:           utilities.ConvertBoolToString(events.HttpsDetections.ValueBool()),
+			NotifyForSecretsDetection:          utilities.ConvertBoolToString(events.SecretsDetected.ValueBool()),
+			NotifyForArtifactSecretsDetection:  utilities.ConvertBoolToString(events.ArtifactsSecretsDetected.ValueBool()),
+			NotifyForImposterCommitsDetection:  utilities.ConvertBoolToString(events.ImposterCommitsDetected.ValueBool()),
+			NotifyForSuspiciousNetworkCall:     utilities.ConvertBoolToString(events.SuspiciousNetworkCallDetected.ValueBool()),
+			NotifyForSuspiciousProcessEvents:   utilities.ConvertBoolToString(events.SuspiciousProcessEventsDetected.ValueBool()),
+			NotifyForHardenRunnerConfigChange:  utilities.ConvertBoolToString(events.HardenRunnerConfigChangesDetected.ValueBool()),
+			NotifyForNonCompliantArtifacts:     utilities.ConvertBoolToString(events.NonCompliantArtifactDetected.ValueBool()),
+			NotifyForBlockedRunPolicy:          utilities.ConvertBoolToString(events.RunBlockedByPolicy.ValueBool()),
+			NotifyForBaselineCheckFailures:     utilities.ConvertBoolToString(events.BaselineCheckFailures.ValueBool()),
+			NotifyForRequiredCheckFailures:     utilities.ConvertBoolToString(events.RequiredCheckFailures.ValueBool()),
+			NotifyForOptionalCheckFailures:     utilities.ConvertBoolToString(events.OptionalCheckFailures.ValueBool()),
+			NotifyForPATMaxAgeViolation:        utilities.ConvertBoolToString(events.PATMaxAgeViolation.ValueBool()),
+			NotifyForPATNoExpiryViolation:      utilities.ConvertBoolToString(events.PATNoExpiryViolation.ValueBool()),
+			NotifyForPATOverScopedViolation:    utilities.ConvertBoolToString(events.PATOverScopedViolation.ValueBool()),
+			NotifyForPATUnusedViolation:        utilities.ConvertBoolToString(events.PATUnusedViolation.ValueBool()),
+			NotifyForPATInactiveOwnerViolation: utilities.ConvertBoolToString(events.PATInactiveOwnerViolation.ValueBool()),
+			NotifyForPATExpiryReminder:         utilities.ConvertBoolToString(events.PATExpiryReminder.ValueBool()),
 		},
 	}
 
@@ -752,4 +825,69 @@ func (m githubEquivalentStateForDefaultModifier) PlanModifyString(_ context.Cont
 	if m.normalize(req.StateValue.ValueString()) == m.normalize(req.PlanValue.ValueString()) {
 		resp.PlanValue = req.StateValue
 	}
+}
+
+// notificationEventsPATToggles are the notification_events attributes added
+// in schema version 1. States written by earlier releases lack them, and a
+// plan would otherwise add each one as false; the backend treats an absent
+// toggle as off, so false is the faithful value.
+var notificationEventsPATToggles = []string{
+	"pat_max_age_violation",
+	"pat_no_expiry_violation",
+	"pat_over_scoped_violation",
+	"pat_unused_violation",
+	"pat_inactive_owner_violation",
+	"pat_expiry_reminder",
+}
+
+// UpgradeState upgrades states written with schema version 0.
+func (r *GithubRepoNotificationSettingsResource) UpgradeState(context.Context) map[int64]resource.StateUpgrader {
+	return map[int64]resource.StateUpgrader{
+		0: {StateUpgrader: upgradeGithubOrgNotificationSettingsStateV0},
+	}
+}
+
+// upgradeGithubOrgNotificationSettingsStateV0 adds the PAT toggles to a
+// version 0 state and leaves every other value untouched.
+func upgradeGithubOrgNotificationSettingsStateV0(ctx context.Context, req resource.UpgradeStateRequest, resp *resource.UpgradeStateResponse) {
+	if req.RawState == nil || len(req.RawState.JSON) == 0 {
+		return
+	}
+	upgraded, err := backfillNotificationEventsPATToggles(req.RawState.JSON)
+	if err != nil {
+		resp.Diagnostics.AddError("Unable to Upgrade Notification Settings State", err.Error())
+		return
+	}
+	schemaType := resp.State.Schema.Type().TerraformType(ctx)
+	value, err := tftypes.ValueFromJSON(upgraded, schemaType)
+	if err != nil {
+		resp.Diagnostics.AddError("Unable to Upgrade Notification Settings State", err.Error())
+		return
+	}
+	dynamic, err := tfprotov6.NewDynamicValue(schemaType, value)
+	if err != nil {
+		resp.Diagnostics.AddError("Unable to Upgrade Notification Settings State", err.Error())
+		return
+	}
+	resp.DynamicValue = &dynamic
+}
+
+// backfillNotificationEventsPATToggles returns the state JSON with every
+// missing or null PAT toggle set to false inside notification_events. A state
+// without notification_events is returned unchanged.
+func backfillNotificationEventsPATToggles(raw []byte) ([]byte, error) {
+	var state map[string]any
+	if err := json.Unmarshal(raw, &state); err != nil {
+		return nil, fmt.Errorf("failed to decode the prior state: %w", err)
+	}
+	events, ok := state["notification_events"].(map[string]any)
+	if !ok {
+		return raw, nil
+	}
+	for _, name := range notificationEventsPATToggles {
+		if value, present := events[name]; !present || value == nil {
+			events[name] = false
+		}
+	}
+	return json.Marshal(state)
 }

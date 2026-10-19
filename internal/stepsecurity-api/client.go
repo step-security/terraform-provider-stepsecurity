@@ -66,6 +66,19 @@ type Client interface {
 	UpdateGitHubPRTemplate(ctx context.Context, owner string, template GitHubPRTemplate) error
 	DeleteGitHubPRTemplate(ctx context.Context, owner string) error
 
+	// GitHub PAT Governance Policy
+	GetPATGovernancePolicy(ctx context.Context, owner string) (*PATGovernancePolicy, error)
+	UpdatePATGovernancePolicy(ctx context.Context, owner string, policy PATGovernancePolicy) error
+	DeletePATGovernancePolicy(ctx context.Context, owner string) error
+	GetTenantPATGovernancePolicy(ctx context.Context) (*PATGovernancePolicy, error)
+	UpdateTenantPATGovernancePolicy(ctx context.Context, policy PATGovernancePolicy) error
+	DeleteTenantPATGovernancePolicy(ctx context.Context) error
+
+	// GitHub PAT exemptions (organization registry, or tenant-wide when organization is empty)
+	ListPATExemptions(ctx context.Context, organization string) ([]PATExemption, error)
+	UpsertPATExemption(ctx context.Context, organization string, record PATExemption) (*PATExemption, error)
+	DeletePATExemption(ctx context.Context, organization, key string) error
+
 	// Custom Roles
 	ListRoles(ctx context.Context) ([]Role, error)
 	CreateRole(ctx context.Context, req CreateRoleRequest) (*Role, error)
