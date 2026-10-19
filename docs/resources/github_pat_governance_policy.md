@@ -3,12 +3,12 @@
 page_title: "stepsecurity_github_pat_governance_policy Resource - stepsecurity"
 subcategory: ""
 description: |-
-  Manages the PAT governance policy for a GitHub organization. The policy drives the personal-access-token controls on the StepSecurity dashboard (max age, no expiration, over-scoped, unused, inactive owner) and the resulting violation alerts and pre-expiry reminders. An enabled policy needs at least one active control. Deleting the resource disables the policy.
+  Manages the PAT governance policy for a GitHub organization. The policy drives the personal-access-token controls on the StepSecurity dashboard (max age, no expiration, over-scoped, unused, inactive owner) and the resulting violation alerts and pre-expiry reminders. An enabled policy needs at least one active control. The resource is the organization's own policy; an organization without one follows the customer's tenant-wide policy, which this resource does not manage. Destroying the resource removes the organization's own policy, so it follows the tenant-wide policy (or the built-in default) again.
 ---
 
 # stepsecurity_github_pat_governance_policy (Resource)
 
-Manages the PAT governance policy for a GitHub organization. The policy drives the personal-access-token controls on the StepSecurity dashboard (max age, no expiration, over-scoped, unused, inactive owner) and the resulting violation alerts and pre-expiry reminders. An enabled policy needs at least one active control. Deleting the resource disables the policy.
+Manages the PAT governance policy for a GitHub organization. The policy drives the personal-access-token controls on the StepSecurity dashboard (max age, no expiration, over-scoped, unused, inactive owner) and the resulting violation alerts and pre-expiry reminders. An enabled policy needs at least one active control. The resource is the organization's own policy; an organization without one follows the customer's tenant-wide policy, which this resource does not manage. Destroying the resource removes the organization's own policy, so it follows the tenant-wide policy (or the built-in default) again.
 
 ## Example Usage
 
@@ -28,11 +28,15 @@ provider "stepsecurity" {
 
 # PAT governance policy for a GitHub organization. The policy drives the
 # personal-access-token controls (max age, no expiration, over-scoped, unused,
-# inactive owner) and the resulting violation alerts and pre-expiry reminders.
-# An enabled policy needs at least one active control.
+# inactive owner), the resulting violation alerts, the pre-expiry reminder
+# emails and the automatic revocations. An enabled policy needs at least one
+# active control. An organization without a policy of its own follows the
+# customer's tenant-wide policy; destroying this resource returns it to that.
 resource "stepsecurity_github_pat_governance_policy" "example-org" {
   owner   = "example-org"
   enabled = true
+
+  # Controls -----------------------------------------------------------------
 
   # Max-age control, per token class (days; 0 disables the class check).
   fine_grained_max_age_days = 90
@@ -46,16 +50,72 @@ resource "stepsecurity_github_pat_governance_policy" "example-org" {
   flag_over_scoped   = true
   over_scoped_scopes = ["repo", "admin:org", "workflow"]
 
-  # Flag tokens with no sign of use for more than N days (0 disables).
-  unused_days = 180
+  # Flag tokens with no sign of use for more than N days (0 disables). The
+  # per-class limits win over the shared one; omit them to share it.
+  unused_days         = 180
+  classic_unused_days = 90
 
   # Optional: file and keep up to date a violations issue in this repository
   # of the organization on each alert.
   github_issue_repo = "security-alerts"
 
-  # Pre-expiry reminder bands (days before expiry). Omit to use the server
-  # default (30, 7, 1).
-  expiry_reminder_days = [30, 7, 1]
+  # Pre-expiry reminders ----------------------------------------------------
+
+  # Reminder bands (days before expiry). Omit to use the server default
+  # (30, 7, 1). A class with its own list ignores the shared one; [0] sends
+  # no reminders for that class.
+  expiry_reminder_days         = [30, 7, 1]
+  classic_expiry_reminder_days = [14, 1]
+
+  # Address reminders to the token's user (their linked SSO email) and copy
+  # these mailboxes on every reminder and revocation notice.
+  expiry_reminder_to_owner = true
+  expiry_reminder_cc       = ["security-team@example.com"]
+
+  # Derive an email for enterprise managed users the SSO directory does not
+  # list (First-last_shortcode becomes First.last@example.com).
+  owner_email_fallback_domain = "example.com"
+
+  # Custom reminder email per token class and band. Bands without a template
+  # use the built-in email.
+  expiry_reminder_templates = {
+    classic = {
+      "14" = {
+        subject = "Your classic token {{token_name}} expires in {{days_left}} days"
+        body    = "<p>Hi {{owner}}, rotate {{token_name}} in {{organization}} before {{expires_at}}: {{manage_url}}</p>"
+      }
+    }
+  }
+
+  # Automatic revocation -----------------------------------------------------
+
+  # Revoke tokens that have stayed non-compliant for this many days without
+  # an approved exception (0 disables).
+  classic_noncompliant_revoke_after_days      = 8
+  fine_grained_noncompliant_revoke_after_days = 8
+
+  # Revoke a token 24 hours after its last reminder band was sent, here for
+  # classic tokens only.
+  auto_revoke_after_reminders         = false
+  classic_auto_revoke_after_reminders = true
+
+  # Email the token's user when StepSecurity revokes a token, optionally with
+  # a custom notice (per class, else shared, else the built-in email).
+  notify_on_revocation = true
+  revocation_notification_template = {
+    subject = "{{token_name}} was revoked in {{organization}}"
+    body    = "<p>Hi {{owner}}, your {{token_type}} token was revoked on {{revoked_at}}. Reason: {{reason}}. Create a compliant token: {{manage_url}}</p>"
+  }
+}
+
+# An organization can keep its own settings stored but follow the customer's
+# tenant-wide policy instead; set use_tenant_policy back to false (or omit it)
+# to enforce the organization's own settings again.
+resource "stepsecurity_github_pat_governance_policy" "follows-tenant" {
+  owner             = "another-org"
+  enabled           = true
+  flag_no_expiry    = true
+  use_tenant_policy = true
 }
 
 # For importing an existing PAT governance policy to terraform state, use the
@@ -76,15 +136,61 @@ import {
 
 ### Optional
 
+- `auto_revoke_after_reminders` (Boolean) Revoke a token 24 hours after the last configured reminder band for its class was sent, while it is still active, whether or not it violates a control. Tokens with an approved exception are skipped; a class with no reminder bands never revokes here.
+- `classic_auto_revoke_after_reminders` (Boolean) Revoke after the final reminder for classic PATs. Omit to follow auto_revoke_after_reminders.
+- `classic_expiry_reminder_days` (List of Number) Reminder bands for classic PATs. A class with its own list ignores expiry_reminder_days entirely; omit to share it, set [0] to send no reminders for this class.
 - `classic_max_age_days` (Number) Maximum allowed age in days for classic PATs, measured from the SSO authorization time. 0 disables the check.
-- `expiry_reminder_days` (List of Number) Pre-expiry reminder bands in days before expiry, each reminded once per token. Omit to use the server default (30, 7, 1).
+- `classic_noncompliant_revoke_after_days` (Number) Revoke classic PATs that have remained non-compliant for this many days without an approved exception. 0 disables the control.
+- `classic_notify_on_revocation` (Boolean) Revocation notices for classic PATs. Omit to follow notify_on_revocation.
+- `classic_revocation_notification_template` (Attributes) Custom revocation notice for classic PATs. Omit to use revocation_notification_template, then the built-in email. (see [below for nested schema](#nestedatt--classic_revocation_notification_template))
+- `classic_unused_days` (Number) Unused limit in days for classic PATs. Omit to use unused_days; 0 disables the staleness check for this class.
+- `expiry_reminder_cc` (List of String) Email addresses copied on every reminder email and revocation notice, at most 10.
+- `expiry_reminder_days` (List of Number) Pre-expiry reminder bands in days before expiry, each reminded once per token, shared by both token classes unless a per-class list is set. Omit to use the server default (30, 7, 1); a 0 entry disables that band.
+- `expiry_reminder_templates` (Map of Map of Object) Custom reminder emails keyed by token class ("classic" or "fine_grained") and then by reminder band in whole days before expiry (as a string, e.g. "7"), each with a subject (at most 200 characters) and body (HTML, at most 20000 characters). Bands without a template use the built-in email. Subject and body may use {{owner}}, {{token_name}}, {{organization}}, {{days_left}}, {{expires_at}} and {{manage_url}}.
+- `expiry_reminder_to_owner` (Boolean) Address each reminder email to the token's user at their linked SSO identity when it is an email address, falling back to the organization's notification address when unknown.
+- `fine_grained_auto_revoke_after_reminders` (Boolean) Revoke after the final reminder for fine-grained PATs. Omit to follow auto_revoke_after_reminders.
+- `fine_grained_expiry_reminder_days` (List of Number) Reminder bands for fine-grained PATs. A class with its own list ignores expiry_reminder_days entirely; omit to share it, set [0] to send no reminders for this class.
 - `fine_grained_max_age_days` (Number) Maximum allowed age in days for fine-grained PATs, measured from the org-access grant time. 0 disables the check.
+- `fine_grained_noncompliant_revoke_after_days` (Number) Revoke fine-grained PATs that have remained non-compliant for this many days without an approved exception. 0 disables the control.
+- `fine_grained_notify_on_revocation` (Boolean) Revocation notices for fine-grained PATs. Omit to follow notify_on_revocation.
+- `fine_grained_revocation_notification_template` (Attributes) Custom revocation notice for fine-grained PATs. Omit to use revocation_notification_template, then the built-in email. (see [below for nested schema](#nestedatt--fine_grained_revocation_notification_template))
+- `fine_grained_unused_days` (Number) Unused limit in days for fine-grained PATs. Omit to use unused_days; 0 disables the staleness check for this class.
 - `flag_no_expiry` (Boolean) Flag tokens without an expiration date, or whose expiration is set further out than the class max age allows.
 - `flag_over_scoped` (Boolean) Flag over-scoped tokens: classic PATs carrying coarse scopes, and fine-grained PATs granting write access across all repositories.
 - `github_issue_repo` (String) Bare repository name in this organization where a violations issue is filed and kept up to date on each alert. Empty disables the GitHub-issue alert channel.
+- `notify_on_revocation` (Boolean) Email the token's user when StepSecurity itself revokes the token (after the final reminder, or at the end of the non-compliance window), copying expiry_reminder_cc. Revocations a person performs from the dashboard are not notified.
 - `over_scoped_scopes` (List of String) Classic PAT scopes treated as over-scoped. Omit to use the server default (repo, admin:org, workflow). Only used when flag_over_scoped is true.
+- `owner_email_fallback_domain` (String) Bare email domain (for example example.com) used to derive an address for a token's user when the SSO directory returns nothing, from the enterprise managed user login convention: the trailing _shortcode is dropped, the first hyphen becomes a dot and the domain is appended. The derived address counts as a linked identity. Empty disables the fallback.
+- `revocation_notification_template` (Attributes) Custom revocation notice sent to the token's user, for every token class without a class template. Omit to use the built-in email. Subject and body may use {{owner}}, {{token_name}}, {{token_type}}, {{organization}}, {{revoked_at}}, {{reason}} and {{manage_url}}. (see [below for nested schema](#nestedatt--revocation_notification_template))
 - `unused_days` (Number) Flag tokens with no sign of use for more than this many days (never-used tokens count from their grant/authorization time). 0 disables the check.
+- `use_tenant_policy` (Boolean) Follow the customer's tenant-wide PAT policy instead of this organization's own settings, which stay stored but dormant. Omit or set false to enforce the settings in this resource.
 
 ### Read-Only
 
 - `id` (String) The ID of the PAT governance policy. This is same as the owner/organization name.
+
+<a id="nestedatt--classic_revocation_notification_template"></a>
+### Nested Schema for `classic_revocation_notification_template`
+
+Optional:
+
+- `body` (String) Email body as HTML, at most 20000 characters.
+- `subject` (String) Email subject, at most 200 characters.
+
+
+<a id="nestedatt--fine_grained_revocation_notification_template"></a>
+### Nested Schema for `fine_grained_revocation_notification_template`
+
+Optional:
+
+- `body` (String) Email body as HTML, at most 20000 characters.
+- `subject` (String) Email subject, at most 200 characters.
+
+
+<a id="nestedatt--revocation_notification_template"></a>
+### Nested Schema for `revocation_notification_template`
+
+Optional:
+
+- `body` (String) Email body as HTML, at most 20000 characters.
+- `subject` (String) Email subject, at most 200 characters.
