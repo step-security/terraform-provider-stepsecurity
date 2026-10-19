@@ -73,6 +73,40 @@ resource "stepsecurity_github_org_notification_settings" "test-organization" {
     enabled = true
     level   = "version" # all | name | version
   }
+
+  # Additional destinations, each receiving only its own events, on top of the
+  # channels above. Omit the list to leave profiles managed in the console
+  # alone; set it to [] to remove them all.
+  notification_profiles = [
+    {
+      name   = "Network detections"
+      type   = "slack_webhook" # email | slack_webhook | slack_oauth | teams
+      target = "https://hooks.slack.com/services/T00000000/B00000000/XXXXXXXXXXXXXXXXXXXXXXXX"
+      events = [
+        "domain_blocked",
+        "suspicious_network_call_detected",
+        "https_detections",
+      ]
+    },
+    {
+      name   = "Policy and checks"
+      type   = "teams"
+      target = "https://outlook.office.com/webhook/00000000-0000-0000-0000-000000000000@00000000-0000-0000-0000-000000000000/IncomingWebhook/11111111111111111111111111111111"
+      events = [
+        "run_blocked_by_policy",
+        "baseline_check_failures",
+        "required_check_failures",
+        "optional_check_failures",
+      ]
+    },
+    {
+      name               = "Secrets and supply chain"
+      type               = "email"
+      target             = "supply-chain@step-security.com"
+      events             = ["secrets_detected", "artifacts_secrets_detected"]
+      threat_intel_level = "version" # off (default) | all | name | version
+    },
+  ]
 }
 
 
@@ -96,6 +130,7 @@ import {
 
 ### Optional
 
+- `notification_profiles` (Attributes List) Additional notification destinations, each receiving only the events listed on it, on top of `notification_channels`. At most 20. Omit to leave the organization's current profiles alone and adopt them into state; set to `[]` to remove them all. (see [below for nested schema](#nestedatt--notification_profiles))
 - `threat_intel` (Attributes) The organization's Threat Intel notification subscription, covering compromised components found in this organization's pull requests and workflows. Tenant-wide Threat Intel notifications are configured separately, on `stepsecurity_tenant_notification_settings`.
 
 Threat Intel notifications are opt-out: an organization that has never configured them is notified about every incident. Omit this block to leave the organization's current setting alone and adopt it into state. (see [below for nested schema](#nestedatt--threat_intel))
@@ -142,6 +177,25 @@ Optional:
 - `secrets_detected` (Boolean) Notify when secrets are detected in the build log
 - `suspicious_network_call_detected` (Boolean) Notify when suspicious network calls are detected
 - `suspicious_process_events_detected` (Boolean) Notify when suspicious process events are detected
+
+
+<a id="nestedatt--notification_profiles"></a>
+### Nested Schema for `notification_profiles`
+
+Required:
+
+- `name` (String) Name of the profile, at most 64 characters.
+- `target` (String) The destination for `type`: comma separated email addresses (at most 49), an `https` webhook URL, or a Slack channel ID.
+- `type` (String) Where the profile delivers: `email`, `slack_webhook`, `slack_oauth` (a channel posted to by the Slack app installed for the tenant) or `teams`.
+
+Optional:
+
+- `events` (Set of String) Events this profile receives: `domain_blocked`, `new_endpoint_discovered`, `https_detections`, `suspicious_network_call_detected`, `suspicious_process_events_detected`, `secret_exfiltration_detected`, `secrets_detected`, `artifacts_secrets_detected`, `run_blocked_by_policy`, `baseline_check_failures`, `required_check_failures`, `optional_check_failures`, `non_compliant_artifact_detected`, and the PAT governance events `pat_max_age_violation`, `pat_no_expiry_violation`, `pat_over_scoped_violation`, `pat_unused_violation`, `pat_inactive_owner_violation`, `pat_expiry_reminder`, `pat_revocation` and `pat_abuse_detected`. Names match `notification_events` where an event is in both. `file_overwrite` and `imposter_commits_detected` are not available on profiles.
+- `threat_intel_level` (String) Threat Intel notifications for this profile: `off` (default), `all`, `name` or `version`, with the same meaning as the resource's `threat_intel.level`.
+
+Read-Only:
+
+- `id` (String) Identifier StepSecurity assigns to the profile.
 
 
 <a id="nestedatt--threat_intel"></a>

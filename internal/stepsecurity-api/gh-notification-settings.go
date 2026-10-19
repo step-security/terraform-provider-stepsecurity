@@ -60,6 +60,25 @@ type NotificationSettings struct {
 	NotifyForCompromisedNPMInPR          string `json:"notifyForCompromisedNPMInPR"`
 	NotifyForCompromisedPyPIInPR         string `json:"notifyForCompromisedPyPIInPR"`
 	NotifyForCompromisedActionInWorkflow string `json:"notifyForCompromisedActionInWorkflow"`
+	// NotificationProfiles are extra destinations on top of the channels above,
+	// each receiving only its own events. Nil on a request leaves the stored
+	// profiles alone; a list, empty included, replaces them.
+	NotificationProfiles *[]NotificationProfile `json:"notificationChannels,omitempty"`
+}
+
+// NotificationProfile is one additional notification destination of an org,
+// called a notification profile in the console and stored as a notification
+// channel by the API.
+type NotificationProfile struct {
+	ID     string `json:"id,omitempty"`
+	Name   string `json:"name"`
+	Type   string `json:"type"`
+	Target string `json:"target"`
+	// Events holds org notification settings field names, such as
+	// "notifyWhenDomainBlocked".
+	Events []string `json:"events"`
+	// OrgThreatIntelLevel is "off", "all", "name" or "version".
+	OrgThreatIntelLevel string `json:"orgThreatIntelLevel,omitempty"`
 }
 
 // OrgThreatIntelLevelOff is the stored level of an org that has explicitly opted
@@ -184,6 +203,7 @@ func (c *APIClient) DeleteNotificationSettings(ctx context.Context, owner string
 			NotifyForCompromisedNPMInPR:          "false",
 			NotifyForCompromisedPyPIInPR:         "false",
 			NotifyForCompromisedActionInWorkflow: "false",
+			NotificationProfiles:                 &[]NotificationProfile{},
 		},
 	}
 

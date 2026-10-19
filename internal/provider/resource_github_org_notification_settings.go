@@ -238,6 +238,7 @@ func (r *GithubRepoNotificationSettingsResource) Schema(_ context.Context, _ res
 				},
 				Required: true,
 			},
+			"notification_profiles": orgProfilesSchemaAttribute(),
 			"threat_intel": schema.SingleNestedAttribute{
 				Optional: true,
 				Computed: true,
@@ -337,6 +338,7 @@ type githubNotificationSettingsModel struct {
 	Owner                types.String `tfsdk:"owner"`
 	NotificationChannels types.Object `tfsdk:"notification_channels"`
 	NotificationEvents   types.Object `tfsdk:"notification_events"`
+	NotificationProfiles types.List   `tfsdk:"notification_profiles"`
 	ThreatIntel          types.Object `tfsdk:"threat_intel"`
 }
 
@@ -435,6 +437,7 @@ func (r *GithubRepoNotificationSettingsResource) Create(ctx context.Context, req
 	}
 
 	r.applyThreatIntelToRequest(ctx, plan.ThreatIntel, &request.NotificationSettings, &resp.Diagnostics)
+	request.NotificationProfiles = orgProfilesToAPI(ctx, plan.NotificationProfiles, &resp.Diagnostics)
 	if resp.Diagnostics.HasError() {
 		return
 	}
@@ -449,7 +452,7 @@ func (r *GithubRepoNotificationSettingsResource) Create(ctx context.Context, req
 		return
 	}
 
-	r.resolveThreatIntelState(ctx, &plan, &resp.Diagnostics)
+	r.resolveComputedState(ctx, &plan, &resp.Diagnostics)
 	if resp.Diagnostics.HasError() {
 		return
 	}
@@ -569,6 +572,7 @@ func (r *GithubRepoNotificationSettingsResource) Read(ctx context.Context, req r
 	state.NotificationEvents = eventsObj
 
 	state.ThreatIntel = githubThreatIntelObject(settings.OrgThreatIntelLevel, githubPriorThreatIntelLevel(ctx, state.ThreatIntel), &resp.Diagnostics)
+	state.NotificationProfiles = orgProfilesFromAPI(settings.NotificationProfiles, &resp.Diagnostics)
 	if resp.Diagnostics.HasError() {
 		return
 	}
@@ -639,6 +643,7 @@ func (r *GithubRepoNotificationSettingsResource) Update(ctx context.Context, req
 	}
 
 	r.applyThreatIntelToRequest(ctx, plan.ThreatIntel, &request.NotificationSettings, &resp.Diagnostics)
+	request.NotificationProfiles = orgProfilesToAPI(ctx, plan.NotificationProfiles, &resp.Diagnostics)
 	if resp.Diagnostics.HasError() {
 		return
 	}
@@ -653,7 +658,7 @@ func (r *GithubRepoNotificationSettingsResource) Update(ctx context.Context, req
 		return
 	}
 
-	r.resolveThreatIntelState(ctx, &plan, &resp.Diagnostics)
+	r.resolveComputedState(ctx, &plan, &resp.Diagnostics)
 	if resp.Diagnostics.HasError() {
 		return
 	}
@@ -721,16 +726,18 @@ func (r *GithubRepoNotificationSettingsResource) applyThreatIntelToRequest(
 	settings.NotifyForCompromisedActionInWorkflow = utilities.ConvertBoolToString(enabled)
 }
 
-// resolveThreatIntelState fills in threat_intel after a write when the
-// configuration omitted it. The attribute is optional-and-computed, so its
-// planned value is unknown on create and only the API can say what the
-// organization's setting actually is.
-func (r *GithubRepoNotificationSettingsResource) resolveThreatIntelState(
+// resolveComputedState fills in, after a write, the values only the API can
+// say: threat_intel and notification_profiles when the configuration omitted
+// them (optional-and-computed, so unknown on create), and the ids of new
+// profiles.
+func (r *GithubRepoNotificationSettingsResource) resolveComputedState(
 	ctx context.Context,
 	plan *githubNotificationSettingsModel,
 	diags *diag.Diagnostics,
 ) {
-	if !plan.ThreatIntel.IsUnknown() {
+	needThreatIntel := plan.ThreatIntel.IsUnknown()
+	needProfiles := profilesNeedReadBack(ctx, plan.NotificationProfiles, orgProfileAttrTypes)
+	if !needThreatIntel && !needProfiles {
 		return
 	}
 
@@ -740,7 +747,12 @@ func (r *GithubRepoNotificationSettingsResource) resolveThreatIntelState(
 		return
 	}
 
-	plan.ThreatIntel = githubThreatIntelObject(settings.OrgThreatIntelLevel, stepsecurityapi.ThreatIntelLevelAll, diags)
+	if needThreatIntel {
+		plan.ThreatIntel = githubThreatIntelObject(settings.OrgThreatIntelLevel, stepsecurityapi.ThreatIntelLevelAll, diags)
+	}
+	if needProfiles {
+		plan.NotificationProfiles = orgProfilesFromAPI(settings.NotificationProfiles, diags)
+	}
 }
 
 // githubThreatIntelObject builds the threat_intel object from a stored level.
