@@ -54,6 +54,23 @@ type TenantNotificationSettings struct {
 	SlackChannelID          string                          `json:"slack_channel_id,omitempty"`
 	ThreatIntel             ThreatIntelNotificationOptions  `json:"threat_intel_notification_options"`
 	DeveloperMDM            DeveloperMDMNotificationOptions `json:"developer_mdm_notification_options"`
+	// NotificationProfiles are extra destinations on top of the channels above,
+	// each receiving only its own Threat Intel and Dev Machine Guard events. Nil
+	// on a request leaves the stored profiles alone; a list, empty included,
+	// replaces them.
+	NotificationProfiles *[]TenantNotificationProfile `json:"notification_channels,omitempty"`
+}
+
+// TenantNotificationProfile is one additional notification destination of the
+// tenant, called a notification profile in the console and stored as a
+// notification channel by the API.
+type TenantNotificationProfile struct {
+	ID           string                          `json:"id,omitempty"`
+	Name         string                          `json:"name"`
+	Type         string                          `json:"type"`
+	Target       string                          `json:"target"`
+	ThreatIntel  ThreatIntelNotificationOptions  `json:"threat_intel_notification_options"`
+	DeveloperMDM DeveloperMDMNotificationOptions `json:"developer_mdm_notification_options"`
 }
 
 // ThreatIntelNotificationOptions is the tenant's threat intel subscription. The
@@ -160,14 +177,17 @@ func (c *APIClient) UpdateTenantNotificationSettings(ctx context.Context, req Te
 }
 
 // DeleteTenantNotificationSettings unsubscribes the tenant from every
-// tenant-scoped event and clears the shared channels.
+// tenant-scoped event, clears the shared channels and removes the tenant's
+// notification profiles.
 //
 // The endpoint has no DELETE, and because a write always overwrites the channels
 // there is no way to drop the subscriptions while preserving them — an omitted
 // channel is an empty channel. Clearing them is therefore the only faithful
 // meaning of destroying a resource that owns them.
 func (c *APIClient) DeleteTenantNotificationSettings(ctx context.Context) error {
-	return c.UpdateTenantNotificationSettings(ctx, TenantNotificationSettings{})
+	return c.UpdateTenantNotificationSettings(ctx, TenantNotificationSettings{
+		NotificationProfiles: &[]TenantNotificationProfile{},
+	})
 }
 
 func unsentinel(v string) string {
