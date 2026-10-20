@@ -111,6 +111,10 @@ func (r *githubChecksResource) Schema(_ context.Context, _ resource.SchemaReques
 									ElementType: types.StringType,
 									Description: "Package names to exempt from cooldown checks. Only applicable to npm/PyPI/Maven/NuGet cooldown checks.",
 								},
+								"pass_on_private_repos": schema.BoolAttribute{
+									Optional:    true,
+									Description: "When true, Pwn Request findings in non-public (private and internal) repositories pass the check and are reported as low priority instead of failing it. Findings in public repositories still fail. Only applicable to the PWN Request control. Defaults to false.",
+								},
 							},
 						},
 					},
@@ -273,6 +277,7 @@ func controlSettingsAttrTypes() map[string]attr.Type {
 	return map[string]attr.Type{
 		"cool_down_period":                     types.Int64Type,
 		"packages_to_exempt_in_cooldown_check": types.ListType{ElemType: types.StringType},
+		"pass_on_private_repos":                types.BoolType,
 	}
 }
 
@@ -300,6 +305,22 @@ func isCooldownControl(name string) bool {
 		return true
 	}
 	return false
+}
+
+// pwnRequestControl is the control that takes the pass_on_private_repos setting.
+const pwnRequestControl = "PWN Request"
+
+// passOnPrivateReposSetting is the key the API stores the PWN Request setting under.
+const passOnPrivateReposSetting = "pass_on_private_repos"
+
+// isPwnRequestControl reports whether a control takes the pass_on_private_repos setting.
+func isPwnRequestControl(name string) bool {
+	return name == pwnRequestControl
+}
+
+// isSet reports whether a settings attribute was given a value.
+func isSet(v attr.Value) bool {
+	return v != nil && !v.IsNull() && !v.IsUnknown()
 }
 
 // diagsToError flattens error diagnostics into a single error.
@@ -403,14 +424,34 @@ func (r *githubChecksResource) ValidateConfig(ctx context.Context, req resource.
 			}
 
 			isCooldown := isCooldownControl(control.Control.ValueString())
-			if !isCooldown && !control.Settings.IsNull() && !control.Settings.IsUnknown() {
+			isPwnRequest := isPwnRequestControl(control.Control.ValueString())
+			hasSettings := !control.Settings.IsNull() && !control.Settings.IsUnknown()
+			if !isCooldown && !isPwnRequest && hasSettings {
 				resp.Diagnostics.AddError(
 					"can't provide settings",
 					"can't provide settings for control "+control.Control.ValueString(),
 				)
 			}
 
-			if isCooldown && !control.Settings.IsNull() && !control.Settings.IsUnknown() {
+			// Each control that takes settings only reads its own fields; the API would
+			// store the others and ignore them, so a misplaced field would look applied.
+			if isPwnRequest && hasSettings {
+				attrs := control.Settings.Attributes()
+				if isSet(attrs["cool_down_period"]) || isSet(attrs["packages_to_exempt_in_cooldown_check"]) {
+					resp.Diagnostics.AddError(
+						"can't provide cooldown settings",
+						"cool_down_period and packages_to_exempt_in_cooldown_check are only applicable to cooldown controls, not "+control.Control.ValueString(),
+					)
+				}
+			}
+			if isCooldown && hasSettings && isSet(control.Settings.Attributes()["pass_on_private_repos"]) {
+				resp.Diagnostics.AddError(
+					"can't provide pass_on_private_repos",
+					"pass_on_private_repos is only applicable to the "+pwnRequestControl+" control, not "+control.Control.ValueString(),
+				)
+			}
+
+			if isCooldown && hasSettings {
 				// Extract cooldown period from the object
 				if cooldownAttr := control.Settings.Attributes()["cool_down_period"]; cooldownAttr != nil {
 					if cooldownValue, ok := cooldownAttr.(types.Int64); ok {
@@ -568,7 +609,25 @@ func (r *githubChecksResource) ModifyPlan(ctx context.Context, req resource.Modi
 	modified := false
 
 	for ind, control := range controls {
-		if !configControls[ind].Settings.IsNull() || control.Control.IsUnknown() {
+		if control.Control.IsUnknown() {
+			continue
+		}
+
+		// cool_down_period has a schema default, so a PWN Request settings block gets
+		// cool_down_period = 2 planned even though the control has no cooldown and apply
+		// never sends one. Plan null instead, which is what apply stores in state.
+		if !configControls[ind].Settings.IsNull() {
+			if isPwnRequestControl(control.Control.ValueString()) && !control.Settings.IsNull() && !control.Settings.IsUnknown() {
+				attrs := control.Settings.Attributes()
+				if !attrs["cool_down_period"].IsNull() {
+					attrs["cool_down_period"] = types.Int64Null()
+					if planned, d := types.ObjectValue(controlSettingsAttrTypes(), attrs); !d.HasError() {
+						control.Settings = planned
+						controls[ind] = control
+						modified = true
+					}
+				}
+			}
 			continue
 		}
 
@@ -577,6 +636,7 @@ func (r *githubChecksResource) ModifyPlan(ctx context.Context, req resource.Modi
 			planned, _ = types.ObjectValue(controlSettingsAttrTypes(), map[string]attr.Value{
 				"cool_down_period":                     types.Int64Value(2),
 				"packages_to_exempt_in_cooldown_check": types.ListNull(types.StringType),
+				"pass_on_private_repos":                types.BoolNull(),
 			})
 		} else {
 			planned = types.ObjectNull(controlSettingsAttrTypes())
@@ -773,10 +833,7 @@ func (r *githubChecksResource) convertToCreateRequest(ctx context.Context, plan 
 		}
 		if isCooldownControl(controlName) {
 			if control.Settings.IsNull() {
-				control.Settings = types.ObjectNull(map[string]attr.Type{
-					"cool_down_period":                     types.Int64Type,
-					"packages_to_exempt_in_cooldown_check": types.ListType{ElemType: types.StringType},
-				})
+				control.Settings = types.ObjectNull(controlSettingsAttrTypes())
 			}
 			cooldownPeriod := int64(2) // default
 			var exemptPackages []string
@@ -804,6 +861,13 @@ func (r *githubChecksResource) convertToCreateRequest(ctx context.Context, plan 
 			}
 			if len(exemptPackages) > 0 {
 				checkConfig.Settings["exempted_packages"] = exemptPackages
+			}
+		}
+		// The API replaces a check's config whole, so leaving settings out clears a
+		// stored pass_on_private_repos, and an explicit false is sent as false.
+		if isPwnRequestControl(controlName) && !control.Settings.IsNull() && !control.Settings.IsUnknown() {
+			if pass, ok := control.Settings.Attributes()["pass_on_private_repos"].(types.Bool); ok && isSet(pass) {
+				checkConfig.Settings = map[string]any{passOnPrivateReposSetting: pass.ValueBool()}
 			}
 		}
 		prChecksConfig.Checks[stepsecurityapi.AvailableControls[controlName]] = checkConfig
@@ -1026,8 +1090,15 @@ func (r *githubChecksResource) convertToState(ctx context.Context, owner string,
 			settingsMap := map[string]attr.Value{
 				"cool_down_period":                     cooldownPeriod,
 				"packages_to_exempt_in_cooldown_check": packagesList,
+				"pass_on_private_repos":                types.BoolNull(),
 			}
 			c.Settings, _ = types.ObjectValue(controlSettingsAttrTypes(), settingsMap)
+		} else if pass, ok := passOnPrivateReposFromAPI(checkConfig.Settings); isPwnRequestControl(controlName) && ok {
+			c.Settings, _ = types.ObjectValue(controlSettingsAttrTypes(), map[string]attr.Value{
+				"cool_down_period":                     types.Int64Null(),
+				"packages_to_exempt_in_cooldown_check": types.ListNull(types.StringType),
+				"pass_on_private_repos":                types.BoolValue(pass),
+			})
 		} else {
 			// For non-NPM controls or controls without settings, set to null
 			c.Settings = types.ObjectNull(controlSettingsAttrTypes())
@@ -1289,11 +1360,22 @@ func (r *githubChecksResource) alignStringList(planList, stateList types.List) t
 	return stateList
 }
 
-// alignSettings keeps an empty packages_to_exempt_in_cooldown_check from plan. Empty lists
-// aren't sent to the API, so state built from it has null there instead.
+// alignSettings keeps from plan what the API can't store:
+//   - an empty packages_to_exempt_in_cooldown_check. Empty lists aren't sent to the API, so
+//     state built from it has null there instead.
+//   - a settings block with every field null, e.g. settings = {} on PWN Request. Nothing is
+//     sent for it, so state built from the API has no settings block at all.
 func alignSettings(planSettings, stateSettings types.Object) types.Object {
-	if planSettings.IsNull() || planSettings.IsUnknown() || stateSettings.IsNull() || stateSettings.IsUnknown() {
+	if planSettings.IsNull() || planSettings.IsUnknown() || stateSettings.IsUnknown() {
 		return stateSettings
+	}
+	if stateSettings.IsNull() {
+		for _, v := range planSettings.Attributes() {
+			if !v.IsNull() {
+				return stateSettings
+			}
+		}
+		return planSettings
 	}
 	planPackages, ok := planSettings.Attributes()["packages_to_exempt_in_cooldown_check"].(types.List)
 	if !ok || planPackages.IsNull() || planPackages.IsUnknown() || len(planPackages.Elements()) != 0 {
@@ -1310,6 +1392,20 @@ func alignSettings(planSettings, stateSettings types.Object) types.Object {
 		return stateSettings
 	}
 	return aligned
+}
+
+// passOnPrivateReposFromAPI reads the stored PWN Request setting. ok is false when the
+// setting is not stored. A string is accepted as well as a bool, the same as the check
+// itself reads it, so a value saved by another client still shows up as configured.
+func passOnPrivateReposFromAPI(settings map[string]any) (value bool, ok bool) {
+	switch v := settings[passOnPrivateReposSetting].(type) {
+	case bool:
+		return v, true
+	case string:
+		return strings.EqualFold(v, "true"), true
+	default:
+		return false, false
+	}
 }
 
 // listToStringSlice converts types.List to []string
