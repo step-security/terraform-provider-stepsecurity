@@ -27,6 +27,9 @@ type fakePolicyDrivenPRBackend struct {
 	mu      sync.Mutex
 	configs map[string]json.RawMessage // repo -> stored config
 	v2      bool
+	// onStore, when set, edits each written config before it is stored, so a test can
+	// model data the real backend holds but the provider never writes.
+	onStore func(config map[string]any)
 }
 
 func newFakePolicyDrivenPRBackend(v2Enabled bool) *fakePolicyDrivenPRBackend {
@@ -58,6 +61,18 @@ func (b *fakePolicyDrivenPRBackend) ServeHTTP(w http.ResponseWriter, req *http.R
 		if err != nil {
 			http.Error(w, "unreadable body", http.StatusBadRequest)
 			return
+		}
+		if b.onStore != nil {
+			var config map[string]any
+			if err := json.Unmarshal(body, &config); err != nil {
+				http.Error(w, "invalid body", http.StatusBadRequest)
+				return
+			}
+			b.onStore(config)
+			if body, err = json.Marshal(config); err != nil {
+				http.Error(w, "unencodable body", http.StatusInternalServerError)
+				return
+			}
 		}
 		b.mu.Lock()
 		b.configs[repo] = json.RawMessage(body)
@@ -222,4 +237,68 @@ resource "stepsecurity_policy_driven_pr" "test" {
 // to it rather than merely being self-consistent.
 func TestAccPolicyDrivenPRUnsortedListsPlanIsEmptyAfterApply(t *testing.T) {
 	testAccPolicyDrivenPRAgainstFake(t, newFakePolicyDrivenPRBackend(true), unsortedListsFixture)
+}
+
+// withConsolePrecommitHooks makes the fake store update_precommit_file the way the
+// console does once its pre-commit settings have been opened: every known hook is
+// present, and only the ones the provider asked for are true.
+func withConsolePrecommitHooks(backend *fakePolicyDrivenPRBackend) *fakePolicyDrivenPRBackend {
+	known := []string{"end-of-file-fixer", "eslint", "gitleaks", "php-lint-all", "shellcheck", "trailing-whitespace"}
+	backend.onStore = func(config map[string]any) {
+		settings, _ := config["control_settings"].(map[string]any)
+		if settings == nil {
+			settings = map[string]any{}
+			config["control_settings"] = settings
+		}
+		hooks, _ := settings["update_precommit_file"].(map[string]any)
+		if hooks == nil {
+			hooks = map[string]any{}
+		}
+		for _, hook := range known {
+			if _, ok := hooks[hook]; !ok {
+				hooks[hook] = false
+			}
+		}
+		settings["update_precommit_file"] = hooks
+	}
+	return backend
+}
+
+const noPrecommitHooksFixture = `
+resource "stepsecurity_policy_driven_pr" "test" {
+  owner          = "step-terraform-tests"
+  selected_repos = ["test-repo-one"]
+
+  auto_remediation_options = {
+    create_pr             = true
+    pin_actions_to_sha    = true
+    update_precommit_file = []
+  }
+}
+`
+
+const somePrecommitHooksFixture = `
+resource "stepsecurity_policy_driven_pr" "test" {
+  owner          = "step-terraform-tests"
+  selected_repos = ["test-repo-one"]
+
+  auto_remediation_options = {
+    create_pr             = true
+    pin_actions_to_sha    = true
+    update_precommit_file = ["shellcheck", "gitleaks"]
+  }
+}
+`
+
+// TestAccPolicyDrivenPRDisabledPrecommitHooksPlanIsEmpty: hooks stored as false were read
+// back as enabled, so a configuration with no hooks drifted on every plan once the
+// console had saved its hook list.
+func TestAccPolicyDrivenPRDisabledPrecommitHooksPlanIsEmpty(t *testing.T) {
+	testAccPolicyDrivenPRAgainstFake(t, withConsolePrecommitHooks(newFakePolicyDrivenPRBackend(true)), noPrecommitHooksFixture)
+}
+
+// TestAccPolicyDrivenPRMixedPrecommitHooksPlanIsEmpty: with some hooks enabled and the rest
+// stored as false, only the enabled ones are read back.
+func TestAccPolicyDrivenPRMixedPrecommitHooksPlanIsEmpty(t *testing.T) {
+	testAccPolicyDrivenPRAgainstFake(t, withConsolePrecommitHooks(newFakePolicyDrivenPRBackend(true)), somePrecommitHooksFixture)
 }
