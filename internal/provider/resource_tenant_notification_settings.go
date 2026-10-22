@@ -11,7 +11,9 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/booldefault"
+	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringdefault"
+	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/schema/validator"
 	"github.com/hashicorp/terraform-plugin-framework/types"
 	"github.com/hashicorp/terraform-plugin-framework/types/basetypes"
@@ -137,6 +139,7 @@ type tenantNotificationSettingsModel struct {
 	NotificationChannels types.Object `tfsdk:"notification_channels"`
 	ThreatIntel          types.Object `tfsdk:"threat_intel"`
 	DeveloperMDM         types.Object `tfsdk:"developer_mdm"`
+	NotificationProfiles types.List   `tfsdk:"notification_profiles"`
 }
 
 type tenantNotificationChannelsModel struct {
@@ -213,10 +216,12 @@ func (r *tenantNotificationSettingsResource) Schema(_ context.Context, _ resourc
 						Validators: []validator.String{
 							stringvalidator.OneOf("webhook", "oauth"),
 						},
+						PlanModifiers: []planmodifier.String{stringplanmodifier.UseStateForUnknown()},
 					},
 					"slack_channel_id": schema.StringAttribute{
-						Optional: true,
-						Computed: true,
+						Optional:      true,
+						Computed:      true,
+						PlanModifiers: []planmodifier.String{stringplanmodifier.UseStateForUnknown()},
 						MarkdownDescription: "Slack channel ID to post to when `slack_notification_method` is `oauth`. " +
 							"Omit to leave the tenant's current channel unchanged. The StepSecurity API cannot clear " +
 							"this field, so it cannot be set to `\"\"`.",
@@ -253,6 +258,7 @@ func (r *tenantNotificationSettingsResource) Schema(_ context.Context, _ resourc
 					},
 				},
 			},
+			"notification_profiles": tenantProfilesSchemaAttribute(),
 			"developer_mdm": schema.SingleNestedAttribute{
 				Required: true,
 				MarkdownDescription: "The tenant's Dev Machine Guard notification subscription. The events are " +
@@ -414,7 +420,11 @@ func (r *tenantNotificationSettingsResource) ImportState(ctx context.Context, re
 // slack_notification_method and slack_channel_id are optional-and-computed with
 // no default: omitting them means "leave the tenant's current value alone", so
 // their planned value is unknown on create and only the API can say what they
-// ended up as. Reading the record back is the only way to fill those in.
+// ended up as. Reading the record back is the only way to fill those in. On
+// update they keep their state value, which is what gets sent: the framework
+// would otherwise plan them unknown whenever anything else changes, including
+// an omitted notification_profiles, which Terraform proposes as null even
+// though it plans as the profiles in state.
 func (r *tenantNotificationSettingsResource) write(ctx context.Context, plan *tenantNotificationSettingsModel, diags *diag.Diagnostics) {
 	request := requestFromModel(ctx, plan, diags)
 	if diags.HasError() {
@@ -446,6 +456,11 @@ func (r *tenantNotificationSettingsResource) write(ctx context.Context, plan *te
 		return
 	}
 	plan.NotificationChannels = channelsObj
+
+	// Omitted profiles are adopted from the API, and new profiles get their ids.
+	if profilesNeedReadBack(ctx, plan.NotificationProfiles, tenantProfileAttrTypes) {
+		plan.NotificationProfiles = tenantProfilesFromAPI(settings.NotificationProfiles, diags)
+	}
 }
 
 // requestFromModel builds the API request from a plan or state model.
@@ -478,6 +493,8 @@ func requestFromModel(ctx context.Context, model *tenantNotificationSettingsMode
 	for _, event := range tenantDeveloperMDMEvents {
 		event.set(&request.DeveloperMDM, boolAttribute(developerMDMAttrs, event.name))
 	}
+
+	request.NotificationProfiles = tenantProfilesToAPI(ctx, model.NotificationProfiles, diags)
 
 	return request
 }
@@ -517,6 +534,7 @@ func modelFromAPI(settings *stepsecurityapi.TenantNotificationSettings, priorLev
 		NotificationChannels: channelsObj,
 		ThreatIntel:          threatIntelObj,
 		DeveloperMDM:         developerMDMObj,
+		NotificationProfiles: tenantProfilesFromAPI(settings.NotificationProfiles, diags),
 	}
 }
 

@@ -36,6 +36,24 @@ resource "stepsecurity_tenant_notification_settings" "this" {
     suspicious_files   = true
     config_changes     = false
   }
+
+  # Additional destinations, each receiving only its own events, on top of
+  # notification_channels. Omit the list to leave profiles managed in the
+  # console alone; set it to [] to remove them all.
+  notification_profiles = [
+    {
+      name               = "Threat intel"
+      type               = "slack_oauth" # email | slack_webhook | slack_oauth | teams
+      target             = "C0123456789"
+      threat_intel_level = "all" # off (default) | all | name | version
+    },
+    {
+      name                 = "AI tooling"
+      type                 = "email"
+      target               = "ai-platform@example.com"
+      developer_mdm_events = ["new_ai_agents", "new_mcp_servers", "new_agent_skills"]
+    },
+  ]
 }
 
 # Dev Machine Guard only, delivered to Microsoft Teams. threat_intel is still
