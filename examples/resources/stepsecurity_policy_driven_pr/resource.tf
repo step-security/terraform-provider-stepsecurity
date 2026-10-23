@@ -76,8 +76,9 @@ resource "stepsecurity_policy_driven_pr" "repo_level_config" {
       {
         package       = "npm"
         interval      = "daily"
-        cooldown_yaml = "default-days: 7\npackage-rules:\n  - match-package-patterns:\n      - \"*\"\n    days: 3\n"
-        groups_yaml   = "production-dependencies:\n  patterns:\n    - \"*\"\n  exclude-patterns:\n    - \"@types/*\"\n"
+        cooldown_yaml = "default-days: 5\nsemver-major-days: 30\nsemver-minor-days: 7\nsemver-patch-days: 3\ninclude:\n  - \"*\"\nexclude:\n  - \"@example-org/*\"\n"
+        groups_yaml   = "production-dependencies:\n  dependency-type: production\n  update-types:\n    - minor\n    - patch\ndevelopment-dependencies:\n  dependency-type: development\n  patterns:\n    - \"*\"\n"
+        options_yaml  = "time: \"09:00\"\ntimezone: America/New_York\nopen-pull-requests-limit: 10\nversioning-strategy: increase\nlabels:\n  - dependencies\n  - javascript\ncommit-message:\n  prefix: chore\n  prefix-development: build\n  include: scope\nignore:\n  - dependency-name: aws-sdk\n    versions:\n      - \"2.x\"\n"
       },
       {
         package  = "pip"
