@@ -8,6 +8,7 @@ import (
 
 	stepsecurityapi "github.com/step-security/terraform-provider-stepsecurity/internal/stepsecurity-api"
 
+	"github.com/hashicorp/terraform-plugin-framework-validators/setvalidator"
 	"github.com/hashicorp/terraform-plugin-framework/attr"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
@@ -16,6 +17,7 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/setdefault"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringplanmodifier"
+	"github.com/hashicorp/terraform-plugin-framework/schema/validator"
 	"github.com/hashicorp/terraform-plugin-framework/types"
 	"github.com/hashicorp/terraform-plugin-framework/types/basetypes"
 	"github.com/hashicorp/terraform-plugin-log/tflog"
@@ -269,6 +271,10 @@ func (r *policyDrivenPRResource) Schema(_ context.Context, _ resource.SchemaRequ
 						ElementType: types.StringType,
 						Optional:    true,
 						Description: "Extra shell-glob patterns, matched case-insensitively against a file's name only (not its path), naming files that the Docker base image pinning control (secure_docker_file) should pin in addition to files named exactly 'Dockerfile'. The built-in rule always applies, so these can only ever pin more files, never fewer. Use this for repositories naming files 'Dockerfile.dev' or 'Containerfile'. Example: [\"Dockerfile.*\", \"Containerfile\"].",
+						// The API does not return an empty list, so [] would read back as
+						// null and show a diff on every plan. Omitting the attribute
+						// already means "no extra patterns".
+						Validators: []validator.Set{setvalidator.SizeAtLeast(1)},
 					},
 					"update_existing_configuration": schema.BoolAttribute{
 						Optional:    true,
@@ -862,7 +868,9 @@ func (r *policyDrivenPRResource) ValidateConfig(ctx context.Context, req resourc
 		// rather than unused, so fail at plan time instead.
 		hasDockerfilePatterns := !options.DockerfilePatterns.IsNull() && !options.DockerfilePatterns.IsUnknown() && len(options.DockerfilePatterns.Elements()) > 0
 		if hasDockerfilePatterns {
-			if options.SecureDockerFile.IsNull() || !options.SecureDockerFile.ValueBool() {
+			// Skip while secure_docker_file is unknown: ValueBool() is false then,
+			// which would reject a config that is valid once the value is known.
+			if !options.SecureDockerFile.IsUnknown() && (options.SecureDockerFile.IsNull() || !options.SecureDockerFile.ValueBool()) {
 				resp.Diagnostics.AddError(
 					"Invalid Configuration",
 					"dockerfile_patterns can only be set when secure_docker_file is true",
