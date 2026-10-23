@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"os/exec"
+	"regexp"
 	"strings"
 	"sync"
 	"testing"
@@ -131,6 +132,15 @@ resource "stepsecurity_policy_driven_pr" "test" {
 
 func testAccPolicyDrivenPRAgainstFake(t *testing.T, backend *fakePolicyDrivenPRBackend, config string) {
 	t.Helper()
+	// The harness plans again after applying and fails the step when that plan is
+	// non-empty, which is the same assertion the integration test's idempotency check
+	// makes.
+	testAccPolicyDrivenPRStepsAgainstFake(t, backend, resource.TestStep{Config: config})
+}
+
+// testAccPolicyDrivenPRStepsAgainstFake runs the given steps against backend.
+func testAccPolicyDrivenPRStepsAgainstFake(t *testing.T, backend *fakePolicyDrivenPRBackend, steps ...resource.TestStep) {
+	t.Helper()
 
 	// Resolve a Terraform CLI before enabling acceptance mode, and pin it via
 	// TF_ACC_TERRAFORM_PATH so the harness uses it directly.
@@ -162,14 +172,7 @@ func testAccPolicyDrivenPRAgainstFake(t *testing.T, backend *fakePolicyDrivenPRB
 
 	resource.Test(t, resource.TestCase{
 		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
-		Steps: []resource.TestStep{
-			{
-				Config: config,
-				// The harness plans again after applying and fails the step when that
-				// plan is non-empty, which is the same assertion the integration test's
-				// idempotency check makes.
-			},
-		},
+		Steps:                    steps,
 	})
 }
 
@@ -222,4 +225,31 @@ resource "stepsecurity_policy_driven_pr" "test" {
 // to it rather than merely being self-consistent.
 func TestAccPolicyDrivenPRUnsortedListsPlanIsEmptyAfterApply(t *testing.T) {
 	testAccPolicyDrivenPRAgainstFake(t, newFakePolicyDrivenPRBackend(true), unsortedListsFixture)
+}
+
+// TestAccPolicyDrivenPREmptyDependabotYAMLIsRejected: an empty cooldown_yaml, groups_yaml
+// or options_yaml is never sent to the API and reads back as null, so accepting it left a
+// diff on every plan. It is rejected at plan time instead.
+func TestAccPolicyDrivenPREmptyDependabotYAMLIsRejected(t *testing.T) {
+	for _, attr := range []string{"cooldown_yaml", "groups_yaml", "options_yaml"} {
+		t.Run(attr, func(t *testing.T) {
+			config := fmt.Sprintf(`
+resource "stepsecurity_policy_driven_pr" "test" {
+  owner          = "step-terraform-tests"
+  selected_repos = ["test-repo-one"]
+
+  auto_remediation_options = {
+    create_pr = true
+    package_ecosystem = [
+      { package = "npm", interval = "daily", %s = "" }
+    ]
+  }
+}
+`, attr)
+			testAccPolicyDrivenPRStepsAgainstFake(t, newFakePolicyDrivenPRBackend(true), resource.TestStep{
+				Config:      config,
+				ExpectError: regexp.MustCompile(`Invalid Attribute Value Length`),
+			})
+		})
+	}
 }
