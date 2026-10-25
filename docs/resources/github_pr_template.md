@@ -53,6 +53,12 @@ resource "stepsecurity_github_pr_template" "example" {
   # which is replaced with a DDHHMM timestamp so each PR gets a unique branch.
   # Omit to use the default branch name.
   branch_name = "chore-GHA-{time}-stepsecurity-remediation"
+
+  # Optional. Close a StepSecurity PR that has had no activity for
+  # stale_after_days, delete its branch, and open a new PR in its place.
+  # stale_after_days is required when replace_stale_prs is true (minimum 7).
+  replace_stale_prs = true
+  stale_after_days  = 14
 }
 
 # For importing existing PR template config to terraform state
@@ -78,6 +84,8 @@ import {
 
 - `branch_name` (String) Template for the remediation PR branch name, for example "chore-GHA-{time}-stepsecurity-remediation". Must contain the {time} placeholder, which is replaced with a DDHHMM timestamp so each PR gets a unique branch. Omit to use the default branch name. Applies to the policy-driven PR flow only.
 - `labels` (List of String) List of labels to apply to policy-driven PRs.
+- `replace_stale_prs` (Boolean) When true, a policy-driven PR run closes an open StepSecurity pull request that has had no activity for stale_after_days, deletes its branch, and opens a new pull request in its place. Only pull requests opened by StepSecurity on its own remediation branches are closed. Requires stale_after_days. Defaults to false.
+- `stale_after_days` (Number) Number of days without activity (comments, reviews, labels or pushes) after which a StepSecurity pull request counts as stale. Required when replace_stale_prs is true. Minimum 7.
 
 ### Read-Only
 
