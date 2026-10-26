@@ -277,6 +277,7 @@ func TestTenantNotificationSettingsResource_ValidateConfig(t *testing.T) {
 				NotificationChannels: testTenantChannels(t, tc.channels),
 				ThreatIntel:          tc.threatIntel,
 				DeveloperMDM:         tc.developerMDM,
+				NotificationProfiles: types.ListNull(types.ObjectType{AttrTypes: tenantProfileAttrTypes}),
 			}
 
 			resp := &fwresource.ValidateConfigResponse{}

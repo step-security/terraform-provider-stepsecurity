@@ -9,6 +9,7 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/attr"
 	"github.com/hashicorp/terraform-plugin-framework/datasource"
 	"github.com/hashicorp/terraform-plugin-framework/datasource/schema"
+	"github.com/hashicorp/terraform-plugin-framework/diag"
 	"github.com/hashicorp/terraform-plugin-framework/schema/validator"
 	"github.com/hashicorp/terraform-plugin-framework/types"
 
@@ -212,6 +213,42 @@ func (d *githubRunPoliciesDataSource) Schema(_ context.Context, _ datasource.Sch
 									Computed:            true,
 									MarkdownDescription: "When true, the secrets policy also evaluates runs on the repository default branch.",
 								},
+								"enforce_method": schema.StringAttribute{
+									Computed:            true,
+									MarkdownDescription: "How a blocked run is stopped: `api` (default; empty string treated the same) cancels via the GitHub API, `prejob` defers cancellation to the StepSecurity prejob hook for eligible runs.",
+								},
+								"prejob_allowed_runner_labels": schema.SetAttribute{
+									ElementType:         types.StringType,
+									Computed:            true,
+									MarkdownDescription: "With prejob enforcement: only runs whose jobs all use these resolved runner labels defer cancellation to the prejob hook.",
+								},
+								"prejob_disallowed_runner_labels": schema.SetAttribute{
+									ElementType:         types.StringType,
+									Computed:            true,
+									MarkdownDescription: "With prejob enforcement: runs with any job on these resolved runner labels are cancelled via the API instead of deferring to the prejob hook.",
+								},
+								"runner_label_requirements": schema.ListNestedAttribute{
+									Computed:            true,
+									MarkdownDescription: "Conditional label rules evaluated per job: when a job label matches the pattern, the rule's required labels must be present on that job (or its forbidden labels absent) or the run is blocked.",
+									NestedObject: schema.NestedAttributeObject{
+										Attributes: map[string]schema.Attribute{
+											"if_label_matches": schema.StringAttribute{
+												Computed:            true,
+												MarkdownDescription: "Anchored glob tested against each of the job's runner labels; `*` matches any text.",
+											},
+											"require_labels": schema.SetAttribute{
+												ElementType:         types.StringType,
+												Computed:            true,
+												MarkdownDescription: "Labels that must all be present on a matching job.",
+											},
+											"forbid_labels": schema.SetAttribute{
+												ElementType:         types.StringType,
+												Computed:            true,
+												MarkdownDescription: "Labels that must not be present on a matching job.",
+											},
+										},
+									},
+								},
 							},
 						},
 					},
@@ -292,7 +329,15 @@ func (d *githubRunPoliciesDataSource) Read(ctx context.Context, req datasource.R
 			"require_policy_store":              types.BoolValue(policy.PolicyConfig.RequirePolicyStore),
 			"block_job_container":               types.BoolValue(policy.PolicyConfig.BlockJobContainer),
 			"secrets_analyze_default_branch":    types.BoolValue(policy.PolicyConfig.SecretsAnalyzeDefaultBranch),
+			"enforce_method":                    types.StringValue(policy.PolicyConfig.EnforceMethod),
 		}
+
+		// Prejob hook scoping lists and conditional label requirements.
+		var labelDiags diag.Diagnostics
+		policyConfigAttrs["prejob_allowed_runner_labels"] = stringSetValueOrNull(policy.PolicyConfig.PrejobAllowedRunnerLabels, &labelDiags)
+		policyConfigAttrs["prejob_disallowed_runner_labels"] = stringSetValueOrNull(policy.PolicyConfig.PrejobDisallowedRunnerLabels, &labelDiags)
+		policyConfigAttrs["runner_label_requirements"] = flattenRunnerLabelRequirements(ctx, policy.PolicyConfig.RunnerLabelRequirements, nil, &labelDiags)
+		resp.Diagnostics.Append(labelDiags...)
 
 		// Handle allowed actions map
 		if policy.PolicyConfig.AllowedActions != nil {
@@ -428,6 +473,10 @@ func (d *githubRunPoliciesDataSource) Read(ctx context.Context, req datasource.R
 			"require_policy_store":              types.BoolType,
 			"block_job_container":               types.BoolType,
 			"secrets_analyze_default_branch":    types.BoolType,
+			"enforce_method":                    types.StringType,
+			"prejob_allowed_runner_labels":      types.SetType{ElemType: types.StringType},
+			"prejob_disallowed_runner_labels":   types.SetType{ElemType: types.StringType},
+			"runner_label_requirements":         types.ListType{ElemType: runnerLabelRequirementObjectType},
 		}
 
 		policyConfigObj, _ := types.ObjectValue(policyConfigAttrTypes, policyConfigAttrs)
@@ -505,6 +554,10 @@ func (d *githubRunPoliciesDataSource) Read(ctx context.Context, req datasource.R
 			"require_policy_store":              types.BoolType,
 			"block_job_container":               types.BoolType,
 			"secrets_analyze_default_branch":    types.BoolType,
+			"enforce_method":                    types.StringType,
+			"prejob_allowed_runner_labels":      types.SetType{ElemType: types.StringType},
+			"prejob_disallowed_runner_labels":   types.SetType{ElemType: types.StringType},
+			"runner_label_requirements":         types.ListType{ElemType: runnerLabelRequirementObjectType},
 		}},
 	}
 

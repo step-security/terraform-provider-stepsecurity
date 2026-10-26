@@ -681,10 +681,14 @@ func autoRemediationOptionsFromConfig(config policyDrivenPRInternal) AutoRemdiat
 	}
 	sort.Strings(actionsToReplace)
 
-	// Convert update_precommit_file from map to array (sorted for deterministic ordering)
+	// Convert update_precommit_file from map to array (sorted for deterministic ordering).
+	// The map holds every hook the console knows about, with false for the disabled
+	// ones, so only the enabled hooks belong in the list.
 	updatePrecommitFiles := []string{}
-	for file := range config.ControlSettings.UpdatePrecommitFile {
-		updatePrecommitFiles = append(updatePrecommitFiles, file)
+	for file, enabled := range config.ControlSettings.UpdatePrecommitFile {
+		if enabled {
+			updatePrecommitFiles = append(updatePrecommitFiles, file)
+		}
 	}
 	sort.Strings(updatePrecommitFiles)
 
