@@ -2,14 +2,25 @@ package provider
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"io"
+	"net/http"
+	"net/http/httptest"
+	"os"
+	"os/exec"
+	"regexp"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/hashicorp/terraform-plugin-framework/resource"
+	"github.com/hashicorp/terraform-plugin-framework/schema/validator"
+	"github.com/hashicorp/terraform-plugin-framework/tfsdk"
 	"github.com/hashicorp/terraform-plugin-framework/types"
 	res "github.com/hashicorp/terraform-plugin-testing/helper/resource"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	stepsecurityapi "github.com/step-security/terraform-provider-stepsecurity/internal/stepsecurity-api"
 )
@@ -103,7 +114,7 @@ func TestGitHubPRTemplateResource_Schema(t *testing.T) {
 	}
 
 	// Test required attributes
-	expectedAttrs := []string{"id", "owner", "title", "summary", "commit_message", "labels", "branch_name"}
+	expectedAttrs := []string{"id", "owner", "title", "summary", "commit_message", "labels", "branch_name", "replace_stale_prs", "stale_after_days"}
 	for _, attr := range expectedAttrs {
 		if _, exists := resp.Schema.Attributes[attr]; !exists {
 			t.Errorf("Expected attribute %s not found in schema", attr)
@@ -435,4 +446,218 @@ resource "stepsecurity_github_pr_template" "test" {
   labels         = ["security"]
 }
 `, owner)
+}
+
+// runGitHubPRTemplateValidateConfig drives the real ValidateConfig with the given stale
+// PR settings and every other attribute set to a valid value.
+func runGitHubPRTemplateValidateConfig(t *testing.T, replaceStalePRs types.Bool, staleAfterDays types.Int64) *resource.ValidateConfigResponse {
+	t.Helper()
+
+	ctx := context.Background()
+	r := &githubPRTemplateResource{}
+
+	schemaResp := &resource.SchemaResponse{}
+	r.Schema(ctx, resource.SchemaRequest{}, schemaResp)
+	require.False(t, schemaResp.Diagnostics.HasError(), "schema errors: %v", schemaResp.Diagnostics)
+
+	model := githubPRTemplateModel{
+		ID:              types.StringNull(),
+		Owner:           types.StringValue("test-org"),
+		Title:           types.StringValue("[StepSecurity] Apply security best practices"),
+		Summary:         types.StringValue("summary"),
+		CommitMessage:   types.StringValue("commit message"),
+		Labels:          types.ListNull(types.StringType),
+		BranchName:      types.StringNull(),
+		ReplaceStalePRs: replaceStalePRs,
+		StaleAfterDays:  staleAfterDays,
+	}
+	plan := tfsdk.Plan{Schema: schemaResp.Schema}
+	require.False(t, plan.Set(ctx, model).HasError())
+
+	resp := &resource.ValidateConfigResponse{}
+	r.ValidateConfig(ctx, resource.ValidateConfigRequest{
+		Config: tfsdk.Config{Raw: plan.Raw, Schema: schemaResp.Schema},
+	}, resp)
+	return resp
+}
+
+// TestGitHubPRTemplateResource_ValidateConfig_StaleAfterDaysRequired: turning on
+// replace_stale_prs without a threshold fails at plan time, not as an API error.
+func TestGitHubPRTemplateResource_ValidateConfig_StaleAfterDaysRequired(t *testing.T) {
+	t.Parallel()
+
+	testCases := []struct {
+		name            string
+		replaceStalePRs types.Bool
+		staleAfterDays  types.Int64
+		wantError       bool
+	}{
+		{"on with threshold", types.BoolValue(true), types.Int64Value(14), false},
+		{"on without threshold", types.BoolValue(true), types.Int64Null(), true},
+		{"off without threshold", types.BoolValue(false), types.Int64Null(), false},
+		{"unset without threshold", types.BoolNull(), types.Int64Null(), false},
+		{"on with unknown threshold", types.BoolValue(true), types.Int64Unknown(), false},
+		{"unknown with no threshold", types.BoolUnknown(), types.Int64Null(), false},
+	}
+	for _, tc := range testCases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			resp := runGitHubPRTemplateValidateConfig(t, tc.replaceStalePRs, tc.staleAfterDays)
+			assert.Equal(t, tc.wantError, resp.Diagnostics.HasError(), "diagnostics: %v", resp.Diagnostics)
+		})
+	}
+}
+
+// TestGitHubPRTemplateResource_StaleAfterDaysMinimum drives the schema validator: the
+// API rejects a threshold under 7 days, so it is rejected at plan time too.
+func TestGitHubPRTemplateResource_StaleAfterDaysMinimum(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	r := &githubPRTemplateResource{}
+	schemaResp := &resource.SchemaResponse{}
+	r.Schema(ctx, resource.SchemaRequest{}, schemaResp)
+
+	attr, ok := schemaResp.Schema.Attributes["stale_after_days"].(interface {
+		Int64Validators() []validator.Int64
+	})
+	require.True(t, ok, "stale_after_days should expose int64 validators")
+
+	for days, wantError := range map[int64]bool{6: true, 7: false, 30: false} {
+		resp := &validator.Int64Response{}
+		for _, v := range attr.Int64Validators() {
+			v.ValidateInt64(ctx, validator.Int64Request{ConfigValue: types.Int64Value(days)}, resp)
+		}
+		assert.Equal(t, wantError, resp.Diagnostics.HasError(), "stale_after_days = %d: %v", days, resp.Diagnostics)
+	}
+}
+
+// fakePRTemplateBackend stores the PR template the provider writes and returns it the
+// way agent-api does: replace_stale_prs, stale_after_days and branch_name are omitted
+// when empty, so a read cannot tell "false" or "0" from "never set".
+type fakePRTemplateBackend struct {
+	mu       sync.Mutex
+	template map[string]any
+}
+
+// storeConsoleDefaultThreshold sets stale_after_days to 7 on the stored template,
+// which is what the console saves even when replacement is off.
+func (b *fakePRTemplateBackend) storeConsoleDefaultThreshold() {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.template["stale_after_days"] = float64(7)
+}
+
+func (b *fakePRTemplateBackend) ServeHTTP(w http.ResponseWriter, req *http.Request) {
+	if !strings.HasSuffix(req.URL.Path, "/pr-template") {
+		http.Error(w, "unexpected path "+req.URL.Path, http.StatusNotFound)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	b.mu.Lock()
+	defer b.mu.Unlock()
+
+	switch req.Method {
+	case http.MethodPost:
+		body, err := io.ReadAll(req.Body)
+		if err != nil {
+			http.Error(w, "unreadable body", http.StatusBadRequest)
+			return
+		}
+		var template map[string]any
+		if err := json.Unmarshal(body, &template); err != nil {
+			http.Error(w, "invalid body", http.StatusBadRequest)
+			return
+		}
+		for _, key := range []string{"replace_stale_prs", "stale_after_days", "branch_name"} {
+			switch v := template[key].(type) {
+			case bool:
+				if !v {
+					delete(template, key)
+				}
+			case float64:
+				if v == 0 {
+					delete(template, key)
+				}
+			case string:
+				if v == "" {
+					delete(template, key)
+				}
+			}
+		}
+		b.template = template
+		_, _ = w.Write([]byte(`{"message":"PR template updated successfully"}`))
+	case http.MethodGet:
+		_ = json.NewEncoder(w).Encode(b.template)
+	default:
+		http.Error(w, "unexpected method", http.StatusMethodNotAllowed)
+	}
+}
+
+func githubPRTemplateStaleFixture(staleSettings string) string {
+	return fmt.Sprintf(`
+resource "stepsecurity_github_pr_template" "test" {
+  owner          = "test-org"
+  title          = "[StepSecurity] Apply security best practices"
+  summary        = "summary"
+  commit_message = "commit message"
+  %s
+}
+`, staleSettings)
+}
+
+// TestAccGitHubPRTemplateStalePRSettingsPlanIsStable applies each stale PR configuration
+// against a backend that drops empty fields, and checks the plan is empty afterwards:
+// omitted settings, on with a threshold, then switched off again.
+func TestAccGitHubPRTemplateStalePRSettingsPlanIsStable(t *testing.T) {
+	tfPath := os.Getenv("TF_ACC_TERRAFORM_PATH")
+	if tfPath == "" {
+		found, err := exec.LookPath("terraform")
+		if err != nil {
+			t.Skip("terraform CLI not found in PATH; set TF_ACC_TERRAFORM_PATH to run this test")
+		}
+		tfPath = found
+	}
+
+	backend := &fakePRTemplateBackend{}
+	server := httptest.NewServer(backend)
+	t.Cleanup(server.Close)
+
+	t.Setenv("TF_ACC", "1")
+	t.Setenv("TF_ACC_TERRAFORM_PATH", tfPath)
+	t.Setenv("STEP_SECURITY_API_BASE_URL", server.URL)
+	t.Setenv("STEP_SECURITY_API_KEY", "test-key")
+	t.Setenv("STEP_SECURITY_CUSTOMER", "test-customer")
+
+	res.Test(t, res.TestCase{
+		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+		// The invalid configs come first: the harness destroys using the last step's
+		// config, so the run has to end on a valid one.
+		Steps: []res.TestStep{
+			{
+				Config:      githubPRTemplateStaleFixture("replace_stale_prs = true"),
+				ExpectError: regexp.MustCompile(`stale_after_days is required`),
+			},
+			{
+				Config:      githubPRTemplateStaleFixture("replace_stale_prs = true\n  stale_after_days  = 3"),
+				ExpectError: regexp.MustCompile(`Invalid Attribute Value`),
+			},
+			{Config: githubPRTemplateStaleFixture("")},
+			// The template is then saved in the console, which stores 7 with replacement
+			// off. A config that omits stale_after_days must still plan clean.
+			{
+				PreConfig: backend.storeConsoleDefaultThreshold,
+				Config:    githubPRTemplateStaleFixture(""),
+				PlanOnly:  true,
+			},
+			{Config: githubPRTemplateStaleFixture("replace_stale_prs = true\n  stale_after_days  = 14")},
+			{Config: githubPRTemplateStaleFixture("replace_stale_prs = false")},
+			{
+				PreConfig: backend.storeConsoleDefaultThreshold,
+				Config:    githubPRTemplateStaleFixture("replace_stale_prs = false"),
+				PlanOnly:  true,
+			},
+		},
+	})
 }

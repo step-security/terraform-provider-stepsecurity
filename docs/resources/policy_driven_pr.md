@@ -75,6 +75,7 @@ resource "stepsecurity_policy_driven_pr" "repo_level_config" {
     pin_actions_to_sha                    = true
     restrict_github_token_permissions     = true
     secure_docker_file                    = true
+    dockerfile_patterns                   = ["Dockerfile.*", "*.Dockerfile"] # also pin files with these names, not only "Dockerfile"; requires secure_docker_file = true
     labels_to_replace = {
       "ubuntu-latest-8-cores" = "ubuntu-latest"
       "windows-latest-large"  = "windows-latest"
@@ -104,8 +105,9 @@ resource "stepsecurity_policy_driven_pr" "repo_level_config" {
       {
         package       = "npm"
         interval      = "daily"
-        cooldown_yaml = "default-days: 7\npackage-rules:\n  - match-package-patterns:\n      - \"*\"\n    days: 3\n"
-        groups_yaml   = "production-dependencies:\n  patterns:\n    - \"*\"\n  exclude-patterns:\n    - \"@types/*\"\n"
+        cooldown_yaml = "default-days: 5\nsemver-major-days: 30\nsemver-minor-days: 7\nsemver-patch-days: 3\ninclude:\n  - \"*\"\nexclude:\n  - \"@example-org/*\"\n"
+        groups_yaml   = "production-dependencies:\n  dependency-type: production\n  update-types:\n    - minor\n    - patch\ndevelopment-dependencies:\n  dependency-type: development\n  patterns:\n    - \"*\"\n"
+        options_yaml  = "time: \"09:00\"\ntimezone: America/New_York\nopen-pull-requests-limit: 10\nversioning-strategy: increase\nlabels:\n  - dependencies\n  - javascript\ncommit-message:\n  prefix: chore\n  prefix-development: build\n  include: scope\nignore:\n  - dependency-name: aws-sdk\n    versions:\n      - \"2.x\"\n"
       },
       {
         package  = "pip"
@@ -307,6 +309,7 @@ Optional:
 - `create_pr` (Boolean) Create a PR when a finding is detected.
 - `custom_actions_to_replace` (Map of String) Map of actions to replace with custom replacements. Keys are the original action names, values are the replacement action names chosen by the customer.
 - `custom_precommit_config` (Attributes) Provide a full .pre-commit-config.yaml verbatim instead of assembling it from update_precommit_file hooks. Mutually exclusive with update_precommit_file. (see [below for nested schema](#nestedatt--auto_remediation_options--custom_precommit_config))
+- `dockerfile_patterns` (Set of String) Extra shell-glob patterns, matched case-insensitively against a file's name only (not its path), naming files that the Docker base image pinning control (secure_docker_file) should pin in addition to files named exactly 'Dockerfile'. The built-in rule always applies, so these can only ever pin more files, never fewer. Use this for repositories naming files 'Dockerfile.dev' or 'Containerfile'. Example: ["Dockerfile.*", "Containerfile"].
 - `harden_github_hosted_runner` (Boolean) When enabled, this creates a PR/issue to install security agent on the GitHub-hosted runner to prevent exfiltration of credentials, monitor the build process, and detect compromised dependencies.
 - `harden_runner_config` (Attributes) Configuration for harden runner. When not provided, the default harden runner config will be applied. (see [below for nested schema](#nestedatt--auto_remediation_options--harden_runner_config))
 - `images_to_exempt_while_pinning` (List of String) List of Docker images to exempt while pinning images to SHA. When exempted, the image will not be pinned to SHA.
@@ -354,6 +357,7 @@ Optional:
 
 - `cooldown_yaml` (String) YAML string configuring cooldown periods for dependency updates.
 - `groups_yaml` (String) YAML string configuring dependency update groups.
+- `options_yaml` (String) YAML string configuring additional dependabot options (e.g. day, time, timezone, allow, assignees, labels, ignore, reviewers, target-branch, versioning-strategy, etc.).
 
 
 

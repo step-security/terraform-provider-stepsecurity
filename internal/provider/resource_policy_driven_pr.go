@@ -8,6 +8,8 @@ import (
 
 	stepsecurityapi "github.com/step-security/terraform-provider-stepsecurity/internal/stepsecurity-api"
 
+	"github.com/hashicorp/terraform-plugin-framework-validators/setvalidator"
+	"github.com/hashicorp/terraform-plugin-framework-validators/stringvalidator"
 	"github.com/hashicorp/terraform-plugin-framework/attr"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
@@ -16,6 +18,7 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/setdefault"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringplanmodifier"
+	"github.com/hashicorp/terraform-plugin-framework/schema/validator"
 	"github.com/hashicorp/terraform-plugin-framework/types"
 	"github.com/hashicorp/terraform-plugin-framework/types/basetypes"
 	"github.com/hashicorp/terraform-plugin-log/tflog"
@@ -251,13 +254,41 @@ func (r *policyDrivenPRResource) Schema(_ context.Context, _ resource.SchemaRequ
 								"cooldown_yaml": schema.StringAttribute{
 									Optional:    true,
 									Description: "YAML string configuring cooldown periods for dependency updates.",
+									// An empty string is never sent and reads back as null, so it
+									// would show a diff on every plan. Omit the attribute instead.
+									Validators: []validator.String{stringvalidator.LengthAtLeast(1)},
 								},
 								"groups_yaml": schema.StringAttribute{
 									Optional:    true,
 									Description: "YAML string configuring dependency update groups.",
+									// An empty string is never sent and reads back as null, so it
+									// would show a diff on every plan. Omit the attribute instead.
+									Validators: []validator.String{stringvalidator.LengthAtLeast(1)},
+								},
+								"options_yaml": schema.StringAttribute{
+									Optional:    true,
+									Description: "YAML string configuring additional dependabot options (e.g. day, time, timezone, allow, assignees, labels, ignore, reviewers, target-branch, versioning-strategy, etc.).",
+									// An empty string is never sent and reads back as null, so it
+									// would show a diff on every plan. Omit the attribute instead.
+									Validators: []validator.String{stringvalidator.LengthAtLeast(1)},
 								},
 							},
 						},
+					},
+					// A set rather than a list: the patterns are an unordered
+					// collection, so ordering carries no meaning and duplicates are
+					// never intended. Declaring that in the schema makes Terraform
+					// dedupe the config and ignore element order when diffing, instead
+					// of the provider realigning the API ordering against state to
+					// avoid a spurious diff.
+					"dockerfile_patterns": schema.SetAttribute{
+						ElementType: types.StringType,
+						Optional:    true,
+						Description: "Extra shell-glob patterns, matched case-insensitively against a file's name only (not its path), naming files that the Docker base image pinning control (secure_docker_file) should pin in addition to files named exactly 'Dockerfile'. The built-in rule always applies, so these can only ever pin more files, never fewer. Use this for repositories naming files 'Dockerfile.dev' or 'Containerfile'. Example: [\"Dockerfile.*\", \"Containerfile\"].",
+						// The API does not return an empty list, so [] would read back as
+						// null and show a diff on every plan. Omitting the attribute
+						// already means "no extra patterns".
+						Validators: []validator.Set{setvalidator.SizeAtLeast(1)},
 					},
 					"update_existing_configuration": schema.BoolAttribute{
 						Optional:    true,
@@ -429,6 +460,18 @@ func (r *policyDrivenPRResource) ImportState(ctx context.Context, req resource.I
 	}
 	exemptedFromReplacementList, _ := types.ListValueFrom(ctx, types.StringType, exemptedFromReplacementElements)
 
+	// Null rather than an empty set when unset: dockerfile_patterns is Optional
+	// and not Computed, so returning [] for a config that omits it would read as
+	// a permanent diff.
+	dockerfilePatternsSet := types.SetNull(types.StringType)
+	if len(policy.AutoRemdiationOptions.DockerfilePatterns) > 0 {
+		elements := make([]types.String, len(policy.AutoRemdiationOptions.DockerfilePatterns))
+		for i, pattern := range policy.AutoRemdiationOptions.DockerfilePatterns {
+			elements[i] = types.StringValue(pattern)
+		}
+		dockerfilePatternsSet, _ = types.SetValueFrom(ctx, types.StringType, elements)
+	}
+
 	var packageEcosystemList types.List
 	if len(policy.AutoRemdiationOptions.PackageEcosystem) > 0 {
 		var ecosystemObjects []attr.Value
@@ -439,12 +482,14 @@ func (r *policyDrivenPRResource) ImportState(ctx context.Context, req resource.I
 					"interval":      types.StringType,
 					"cooldown_yaml": types.StringType,
 					"groups_yaml":   types.StringType,
+					"options_yaml":  types.StringType,
 				},
 				map[string]attr.Value{
 					"package":       types.StringValue(ecosystem.Package),
 					"interval":      types.StringValue(ecosystem.Interval),
 					"cooldown_yaml": stringOrNull(ecosystem.CoolDownYAML),
 					"groups_yaml":   stringOrNull(ecosystem.GroupsYAML),
+					"options_yaml":  stringOrNull(ecosystem.OptionsYAML),
 				},
 			)
 			ecosystemObjects = append(ecosystemObjects, obj)
@@ -456,6 +501,7 @@ func (r *policyDrivenPRResource) ImportState(ctx context.Context, req resource.I
 					"interval":      types.StringType,
 					"cooldown_yaml": types.StringType,
 					"groups_yaml":   types.StringType,
+					"options_yaml":  types.StringType,
 				},
 			},
 			ecosystemObjects,
@@ -467,6 +513,7 @@ func (r *policyDrivenPRResource) ImportState(ctx context.Context, req resource.I
 				"interval":      types.StringType,
 				"cooldown_yaml": types.StringType,
 				"groups_yaml":   types.StringType,
+				"options_yaml":  types.StringType,
 			},
 		})
 	}
@@ -551,9 +598,11 @@ func (r *policyDrivenPRResource) ImportState(ctx context.Context, req resource.I
 						"interval":      types.StringType,
 						"cooldown_yaml": types.StringType,
 						"groups_yaml":   types.StringType,
+						"options_yaml":  types.StringType,
 					},
 				},
 			},
+			"dockerfile_patterns":           types.SetType{ElemType: types.StringType},
 			"update_existing_configuration": types.BoolType,
 			"add_workflows":                 types.StringType,
 			"action_commit_map":             types.MapType{ElemType: types.StringType},
@@ -585,6 +634,7 @@ func (r *policyDrivenPRResource) ImportState(ctx context.Context, req resource.I
 			}()),
 			"update_precommit_file":             updatePrecommitFileList,
 			"package_ecosystem":                 packageEcosystemList,
+			"dockerfile_patterns":               dockerfilePatternsSet,
 			"actions_exempted_from_replacement": exemptedFromReplacementList,
 			"update_existing_configuration": types.BoolValue(func() bool {
 				if policy.AutoRemdiationOptions.Subtractive != nil {
@@ -685,6 +735,7 @@ type autoRemdiationOptionsModel struct {
 	UpdatePrecommitFile                     types.List   `tfsdk:"update_precommit_file"`
 	CustomPrecommitConfig                   types.Object `tfsdk:"custom_precommit_config"`
 	PackageEcosystem                        types.List   `tfsdk:"package_ecosystem"`
+	DockerfilePatterns                      types.Set    `tfsdk:"dockerfile_patterns"`
 	UpdateExistingConfiguration             types.Bool   `tfsdk:"update_existing_configuration"`
 	AddWorkflows                            types.String `tfsdk:"add_workflows"`
 	ActionCommitMap                         types.Map    `tfsdk:"action_commit_map"`
@@ -696,6 +747,7 @@ type packageEcosystemModel struct {
 	Interval     types.String `tfsdk:"interval"`
 	CoolDownYAML types.String `tfsdk:"cooldown_yaml"`
 	GroupsYAML   types.String `tfsdk:"groups_yaml"`
+	OptionsYAML  types.String `tfsdk:"options_yaml"`
 }
 
 type hardenRunnerConfigModel struct {
@@ -831,6 +883,22 @@ func (r *policyDrivenPRResource) ValidateConfig(ctx context.Context, req resourc
 				resp.Diagnostics.AddError(
 					"Invalid Configuration",
 					"harden_runner_config can only be set when harden_github_hosted_runner is true",
+				)
+			}
+		}
+
+		// The API reads dockerfile_patterns only when the base image pinning
+		// control is on, and drops it silently otherwise. Configuring patterns
+		// against a disabled control then looks like the patterns are broken
+		// rather than unused, so fail at plan time instead.
+		hasDockerfilePatterns := !options.DockerfilePatterns.IsNull() && !options.DockerfilePatterns.IsUnknown() && len(options.DockerfilePatterns.Elements()) > 0
+		if hasDockerfilePatterns {
+			// Skip while secure_docker_file is unknown: ValueBool() is false then,
+			// which would reject a config that is valid once the value is known.
+			if !options.SecureDockerFile.IsUnknown() && (options.SecureDockerFile.IsNull() || !options.SecureDockerFile.ValueBool()) {
+				resp.Diagnostics.AddError(
+					"Invalid Configuration",
+					"dockerfile_patterns can only be set when secure_docker_file is true",
 				)
 			}
 		}
@@ -1046,6 +1114,15 @@ func (r *policyDrivenPRResource) Create(ctx context.Context, req resource.Create
 		}
 	}
 
+	// Empty rather than nil when unset, so the request clears any patterns the
+	// repo already has instead of leaving them in place.
+	dockerfilePatterns := []string{}
+	if !options.DockerfilePatterns.IsNull() {
+		for _, elem := range options.DockerfilePatterns.Elements() {
+			dockerfilePatterns = append(dockerfilePatterns, elem.(types.String).ValueString())
+		}
+	}
+
 	// Extract new optional fields
 	var packageEcosystem []stepsecurityapi.DependabotConfig
 	if !options.PackageEcosystem.IsNull() {
@@ -1059,6 +1136,7 @@ func (r *policyDrivenPRResource) Create(ctx context.Context, req resource.Create
 					Interval:     model.Interval.ValueString(),
 					CoolDownYAML: model.CoolDownYAML.ValueString(),
 					GroupsYAML:   model.GroupsYAML.ValueString(),
+					OptionsYAML:  model.OptionsYAML.ValueString(),
 				})
 			}
 		}
@@ -1182,6 +1260,7 @@ func (r *policyDrivenPRResource) Create(ctx context.Context, req resource.Create
 			ExemptedFromReplacement:                 exemptedFromReplacement,
 			UpdatePrecommitFile:                     updatePrecommitFile,
 			PackageEcosystem:                        packageEcosystem,
+			DockerfilePatterns:                      dockerfilePatterns,
 			Subtractive:                             subtractive,
 			AddWorkflows:                            options.AddWorkflows.ValueString(),
 			ActionCommitMap:                         actionCommitMap,
@@ -1399,6 +1478,7 @@ func (r *policyDrivenPRResource) Read(ctx context.Context, req resource.ReadRequ
 						Interval:     model.Interval.ValueString(),
 						CoolDownYAML: model.CoolDownYAML.ValueString(),
 						GroupsYAML:   model.GroupsYAML.ValueString(),
+						OptionsYAML:  model.OptionsYAML.ValueString(),
 					},
 				)
 			}
@@ -1672,6 +1752,16 @@ func (r *policyDrivenPRResource) Update(ctx context.Context, req resource.Update
 		}
 	}
 
+	// Empty rather than nil when removed from the config: the API only replaces
+	// the stored patterns when the key is present, so a nil here would leave the
+	// old patterns stored and every later refresh would read them back as drift.
+	dockerfilePatternsUpdate := []string{}
+	if !planOptions.DockerfilePatterns.IsNull() {
+		for _, elem := range planOptions.DockerfilePatterns.Elements() {
+			dockerfilePatternsUpdate = append(dockerfilePatternsUpdate, elem.(types.String).ValueString())
+		}
+	}
+
 	// Extract new optional fields for update
 	var packageEcosystemPlan []stepsecurityapi.DependabotConfig
 	if !planOptions.PackageEcosystem.IsNull() {
@@ -1685,6 +1775,7 @@ func (r *policyDrivenPRResource) Update(ctx context.Context, req resource.Update
 					Interval:     model.Interval.ValueString(),
 					CoolDownYAML: model.CoolDownYAML.ValueString(),
 					GroupsYAML:   model.GroupsYAML.ValueString(),
+					OptionsYAML:  model.OptionsYAML.ValueString(),
 				})
 			}
 		}
@@ -1809,6 +1900,7 @@ func (r *policyDrivenPRResource) Update(ctx context.Context, req resource.Update
 			ExemptedFromReplacement:                 exemptedFromReplacementUpdate,
 			UpdatePrecommitFile:                     updatePrecommitFilePlan,
 			PackageEcosystem:                        packageEcosystemPlan,
+			DockerfilePatterns:                      dockerfilePatternsUpdate,
 			Subtractive:                             subtractiveUpdate,
 			AddWorkflows:                            planOptions.AddWorkflows.ValueString(),
 			ActionCommitMap:                         actionCommitMapPlan,
@@ -1960,6 +2052,18 @@ func (r *policyDrivenPRResource) updatePolicyDrivenPRState(ctx context.Context, 
 	}
 	exemptedFromReplacementList, _ := types.ListValueFrom(ctx, types.StringType, exemptedFromReplacementElements)
 
+	// Null rather than an empty set when unset: dockerfile_patterns is Optional
+	// and not Computed, so returning [] for a config that omits it would read as
+	// a permanent diff.
+	dockerfilePatternsSet := types.SetNull(types.StringType)
+	if len(stepSecurityPolicy.AutoRemdiationOptions.DockerfilePatterns) > 0 {
+		elements := make([]types.String, len(stepSecurityPolicy.AutoRemdiationOptions.DockerfilePatterns))
+		for i, pattern := range stepSecurityPolicy.AutoRemdiationOptions.DockerfilePatterns {
+			elements[i] = types.StringValue(pattern)
+		}
+		dockerfilePatternsSet, _ = types.SetValueFrom(ctx, types.StringType, elements)
+	}
+
 	// Handle new optional fields
 	var packageEcosystemList types.List
 	if len(stepSecurityPolicy.AutoRemdiationOptions.PackageEcosystem) > 0 {
@@ -1971,12 +2075,14 @@ func (r *policyDrivenPRResource) updatePolicyDrivenPRState(ctx context.Context, 
 					"interval":      types.StringType,
 					"cooldown_yaml": types.StringType,
 					"groups_yaml":   types.StringType,
+					"options_yaml":  types.StringType,
 				},
 				map[string]attr.Value{
 					"package":       types.StringValue(ecosystem.Package),
 					"interval":      types.StringValue(ecosystem.Interval),
 					"cooldown_yaml": stringOrNull(ecosystem.CoolDownYAML),
 					"groups_yaml":   stringOrNull(ecosystem.GroupsYAML),
+					"options_yaml":  stringOrNull(ecosystem.OptionsYAML),
 				},
 			)
 			ecosystemObjects = append(ecosystemObjects, obj)
@@ -1988,6 +2094,7 @@ func (r *policyDrivenPRResource) updatePolicyDrivenPRState(ctx context.Context, 
 					"interval":      types.StringType,
 					"cooldown_yaml": types.StringType,
 					"groups_yaml":   types.StringType,
+					"options_yaml":  types.StringType,
 				},
 			},
 			ecosystemObjects,
@@ -1999,6 +2106,7 @@ func (r *policyDrivenPRResource) updatePolicyDrivenPRState(ctx context.Context, 
 				"interval":      types.StringType,
 				"cooldown_yaml": types.StringType,
 				"groups_yaml":   types.StringType,
+				"options_yaml":  types.StringType,
 			},
 		})
 	}
@@ -2083,9 +2191,11 @@ func (r *policyDrivenPRResource) updatePolicyDrivenPRState(ctx context.Context, 
 						"interval":      types.StringType,
 						"cooldown_yaml": types.StringType,
 						"groups_yaml":   types.StringType,
+						"options_yaml":  types.StringType,
 					},
 				},
 			},
+			"dockerfile_patterns":           types.SetType{ElemType: types.StringType},
 			"update_existing_configuration": types.BoolType,
 			"add_workflows":                 types.StringType,
 			"action_commit_map":             types.MapType{ElemType: types.StringType},
@@ -2117,6 +2227,7 @@ func (r *policyDrivenPRResource) updatePolicyDrivenPRState(ctx context.Context, 
 			}()),
 			"update_precommit_file":             updatePrecommitFileList,
 			"package_ecosystem":                 packageEcosystemList,
+			"dockerfile_patterns":               dockerfilePatternsSet,
 			"actions_exempted_from_replacement": exemptedFromReplacementList,
 			"update_existing_configuration": types.BoolValue(func() bool {
 				if stepSecurityPolicy.AutoRemdiationOptions.Subtractive != nil {
