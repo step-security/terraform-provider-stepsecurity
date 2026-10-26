@@ -153,3 +153,41 @@ func TestCreatePolicyDrivenPRPolicy_CustomPrecommitConfigAbsentWhenNil(t *testin
 	assert.False(t, present && raw != nil,
 		"custom_precommit_config must be absent when no custom config is set; got %v", cs)
 }
+
+// The console saves every hook it knows about once the pre-commit settings are opened,
+// with false for the disabled ones. Reading the map's keys alone turned those disabled
+// hooks into enabled ones on refresh and import.
+func TestAutoRemediationOptionsFromConfig_UpdatePrecommitFileKeepsOnlyEnabledHooks(t *testing.T) {
+	tests := []struct {
+		name  string
+		hooks map[string]bool
+		want  []string
+	}{
+		{
+			name:  "mixed map keeps only the enabled hooks, sorted",
+			hooks: map[string]bool{"shellcheck": true, "eslint": false, "gitleaks": true, "trailing-whitespace": false},
+			want:  []string{"gitleaks", "shellcheck"},
+		},
+		{
+			name: "all disabled reads as an empty list",
+			hooks: map[string]bool{
+				"end-of-file-fixer": false, "eslint": false, "gitleaks": false,
+				"php-lint-all": false, "shellcheck": false, "trailing-whitespace": false,
+			},
+			want: []string{},
+		},
+		{
+			name:  "no hooks stored reads as an empty list",
+			hooks: nil,
+			want:  []string{},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			config := policyDrivenPRInternal{}
+			config.ControlSettings.UpdatePrecommitFile = tt.hooks
+			got := autoRemediationOptionsFromConfig(config).UpdatePrecommitFile
+			assert.Equal(t, tt.want, got)
+		})
+	}
+}
