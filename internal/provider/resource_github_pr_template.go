@@ -7,10 +7,12 @@ import (
 
 	stepsecurityapi "github.com/step-security/terraform-provider-stepsecurity/internal/stepsecurity-api"
 
+	"github.com/hashicorp/terraform-plugin-framework-validators/int64validator"
 	"github.com/hashicorp/terraform-plugin-framework-validators/stringvalidator"
 	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
+	"github.com/hashicorp/terraform-plugin-framework/resource/schema/booldefault"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/schema/validator"
@@ -19,10 +21,15 @@ import (
 
 // Ensure the implementation satisfies the expected interfaces.
 var (
-	_ resource.Resource                = &githubPRTemplateResource{}
-	_ resource.ResourceWithConfigure   = &githubPRTemplateResource{}
-	_ resource.ResourceWithImportState = &githubPRTemplateResource{}
+	_ resource.Resource                   = &githubPRTemplateResource{}
+	_ resource.ResourceWithConfigure      = &githubPRTemplateResource{}
+	_ resource.ResourceWithImportState    = &githubPRTemplateResource{}
+	_ resource.ResourceWithValidateConfig = &githubPRTemplateResource{}
 )
+
+// minStaleAfterDays is the shortest stale_after_days the API accepts. It matches
+// MinStaleAfterDays in agent-api, which enforces it on every write.
+const minStaleAfterDays = 7
 
 // NewGitHubPRTemplateResource is a helper function to simplify the provider implementation.
 func NewGitHubPRTemplateResource() resource.Resource {
@@ -107,7 +114,42 @@ func (r *githubPRTemplateResource) Schema(_ context.Context, _ resource.SchemaRe
 				},
 				Description: "Template for the remediation PR branch name, for example \"chore-GHA-{time}-stepsecurity-remediation\". Must contain the {time} placeholder, which is replaced with a DDHHMM timestamp so each PR gets a unique branch. Omit to use the default branch name. Applies to the policy-driven PR flow only.",
 			},
+			"replace_stale_prs": schema.BoolAttribute{
+				Optional:    true,
+				Computed:    true,
+				Default:     booldefault.StaticBool(false),
+				Description: "When true, a policy-driven PR run closes an open StepSecurity pull request that has had no activity for stale_after_days, deletes its branch, and opens a new pull request in its place. Only pull requests opened by StepSecurity on its own remediation branches are closed. Requires stale_after_days. Defaults to false.",
+			},
+			"stale_after_days": schema.Int64Attribute{
+				Optional: true,
+				Validators: []validator.Int64{
+					int64validator.AtLeast(minStaleAfterDays),
+				},
+				Description: "Number of days without activity (comments, reviews, labels or pushes) after which a StepSecurity pull request counts as stale. Required when replace_stale_prs is true. Minimum 7.",
+			},
 		},
+	}
+}
+
+// ValidateConfig requires stale_after_days when replace_stale_prs is on, so the
+// mistake fails at plan time instead of as an API error during apply.
+func (r *githubPRTemplateResource) ValidateConfig(ctx context.Context, req resource.ValidateConfigRequest, resp *resource.ValidateConfigResponse) {
+	var config githubPRTemplateModel
+	resp.Diagnostics.Append(req.Config.Get(ctx, &config)...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+
+	// Skip while either value is unknown; it may be valid once known.
+	if config.ReplaceStalePRs.IsUnknown() || config.StaleAfterDays.IsUnknown() {
+		return
+	}
+	if config.ReplaceStalePRs.ValueBool() && config.StaleAfterDays.IsNull() {
+		resp.Diagnostics.AddAttributeError(
+			path.Root("stale_after_days"),
+			"Missing stale_after_days",
+			fmt.Sprintf("stale_after_days is required when replace_stale_prs is true. It must be at least %d.", minStaleAfterDays),
+		)
 	}
 }
 
@@ -135,13 +177,15 @@ func (r *githubPRTemplateResource) ImportState(ctx context.Context, req resource
 }
 
 type githubPRTemplateModel struct {
-	ID            types.String `tfsdk:"id"`
-	Owner         types.String `tfsdk:"owner"`
-	Title         types.String `tfsdk:"title"`
-	Summary       types.String `tfsdk:"summary"`
-	CommitMessage types.String `tfsdk:"commit_message"`
-	Labels        types.List   `tfsdk:"labels"`
-	BranchName    types.String `tfsdk:"branch_name"`
+	ID              types.String `tfsdk:"id"`
+	Owner           types.String `tfsdk:"owner"`
+	Title           types.String `tfsdk:"title"`
+	Summary         types.String `tfsdk:"summary"`
+	CommitMessage   types.String `tfsdk:"commit_message"`
+	Labels          types.List   `tfsdk:"labels"`
+	BranchName      types.String `tfsdk:"branch_name"`
+	ReplaceStalePRs types.Bool   `tfsdk:"replace_stale_prs"`
+	StaleAfterDays  types.Int64  `tfsdk:"stale_after_days"`
 }
 
 // Create creates the resource and sets the initial Terraform state.
@@ -165,11 +209,13 @@ func (r *githubPRTemplateResource) Create(ctx context.Context, req resource.Crea
 
 	// Create PR template in StepSecurity
 	template := stepsecurityapi.GitHubPRTemplate{
-		Title:         plan.Title.ValueString(),
-		Summary:       plan.Summary.ValueString(),
-		CommitMessage: plan.CommitMessage.ValueString(),
-		Labels:        labels,
-		BranchName:    plan.BranchName.ValueString(),
+		Title:           plan.Title.ValueString(),
+		Summary:         plan.Summary.ValueString(),
+		CommitMessage:   plan.CommitMessage.ValueString(),
+		Labels:          labels,
+		BranchName:      plan.BranchName.ValueString(),
+		ReplaceStalePRs: plan.ReplaceStalePRs.ValueBool(),
+		StaleAfterDays:  plan.StaleAfterDays.ValueInt64(),
 	}
 
 	err := r.client.UpdateGitHubPRTemplate(ctx, plan.Owner.ValueString(), template)
@@ -226,6 +272,22 @@ func (r *githubPRTemplateResource) Read(ctx context.Context, req resource.ReadRe
 		state.BranchName = types.StringNull()
 	}
 
+	// The API omits replace_stale_prs when it is off, which reads as false, matching
+	// its default.
+	state.ReplaceStalePRs = types.BoolValue(template.ReplaceStalePRs)
+
+	// stale_after_days only matters while replacement is on. The console saves 7 even
+	// with replacement off, so taking the stored value then would show a diff for
+	// every config that omits stale_after_days. While off, keep the value already in
+	// state (null on import), so the stored default never surfaces.
+	if template.ReplaceStalePRs {
+		if template.StaleAfterDays > 0 {
+			state.StaleAfterDays = types.Int64Value(template.StaleAfterDays)
+		} else {
+			state.StaleAfterDays = types.Int64Null()
+		}
+	}
+
 	// Convert labels to Terraform list
 	if len(template.Labels) > 0 {
 		labelElements := make([]types.String, len(template.Labels))
@@ -271,11 +333,13 @@ func (r *githubPRTemplateResource) Update(ctx context.Context, req resource.Upda
 
 	// Update PR template in StepSecurity
 	template := stepsecurityapi.GitHubPRTemplate{
-		Title:         plan.Title.ValueString(),
-		Summary:       plan.Summary.ValueString(),
-		CommitMessage: plan.CommitMessage.ValueString(),
-		Labels:        labels,
-		BranchName:    plan.BranchName.ValueString(),
+		Title:           plan.Title.ValueString(),
+		Summary:         plan.Summary.ValueString(),
+		CommitMessage:   plan.CommitMessage.ValueString(),
+		Labels:          labels,
+		BranchName:      plan.BranchName.ValueString(),
+		ReplaceStalePRs: plan.ReplaceStalePRs.ValueBool(),
+		StaleAfterDays:  plan.StaleAfterDays.ValueInt64(),
 	}
 
 	err := r.client.UpdateGitHubPRTemplate(ctx, plan.Owner.ValueString(), template)

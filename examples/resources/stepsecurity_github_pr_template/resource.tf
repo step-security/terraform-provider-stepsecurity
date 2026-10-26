@@ -39,6 +39,12 @@ resource "stepsecurity_github_pr_template" "example" {
   # which is replaced with a DDHHMM timestamp so each PR gets a unique branch.
   # Omit to use the default branch name.
   branch_name = "chore-GHA-{time}-stepsecurity-remediation"
+
+  # Optional. Close a StepSecurity PR that has had no activity for
+  # stale_after_days, delete its branch, and open a new PR in its place.
+  # stale_after_days is required when replace_stale_prs is true (minimum 7).
+  replace_stale_prs = true
+  stale_after_days  = 14
 }
 
 # For importing existing PR template config to terraform state
