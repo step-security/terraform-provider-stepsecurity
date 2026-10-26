@@ -41,6 +41,14 @@ resource "stepsecurity_github_checks" "test-organization" {
       type    = "required"
     },
     {
+      control = "PWN Request"
+      enable  = true
+      type    = "required"
+      settings = {
+        ignore_for_non_public_repos = true # findings in non-public (private and internal) repositories pass with a low-priority note instead of failing
+      }
+    },
+    {
       control = "Script Injection"
       enable  = true
       type    = "optional"
