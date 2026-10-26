@@ -111,7 +111,7 @@ func (r *githubChecksResource) Schema(_ context.Context, _ resource.SchemaReques
 									ElementType: types.StringType,
 									Description: "Package names to exempt from cooldown checks. Only applicable to npm/PyPI/Maven/NuGet cooldown checks.",
 								},
-								"pass_on_private_repos": schema.BoolAttribute{
+								"ignore_for_non_public_repos": schema.BoolAttribute{
 									Optional:    true,
 									Description: "When true, Pwn Request findings in non-public (private and internal) repositories pass the check and are reported as low priority instead of failing it. Findings in public repositories still fail. Only applicable to the PWN Request control. Defaults to false.",
 								},
@@ -277,7 +277,7 @@ func controlSettingsAttrTypes() map[string]attr.Type {
 	return map[string]attr.Type{
 		"cool_down_period":                     types.Int64Type,
 		"packages_to_exempt_in_cooldown_check": types.ListType{ElemType: types.StringType},
-		"pass_on_private_repos":                types.BoolType,
+		"ignore_for_non_public_repos":          types.BoolType,
 	}
 }
 
@@ -307,13 +307,15 @@ func isCooldownControl(name string) bool {
 	return false
 }
 
-// pwnRequestControl is the control that takes the pass_on_private_repos setting.
+// pwnRequestControl is the control that takes the ignore_for_non_public_repos setting.
 const pwnRequestControl = "PWN Request"
 
 // passOnPrivateReposSetting is the key the API stores the PWN Request setting under.
+// The Terraform attribute is ignore_for_non_public_repos, but agent-api and the
+// console already store and read this key, so it keeps its original name.
 const passOnPrivateReposSetting = "pass_on_private_repos"
 
-// isPwnRequestControl reports whether a control takes the pass_on_private_repos setting.
+// isPwnRequestControl reports whether a control takes the ignore_for_non_public_repos setting.
 func isPwnRequestControl(name string) bool {
 	return name == pwnRequestControl
 }
@@ -444,10 +446,10 @@ func (r *githubChecksResource) ValidateConfig(ctx context.Context, req resource.
 					)
 				}
 			}
-			if isCooldown && hasSettings && isSet(control.Settings.Attributes()["pass_on_private_repos"]) {
+			if isCooldown && hasSettings && isSet(control.Settings.Attributes()["ignore_for_non_public_repos"]) {
 				resp.Diagnostics.AddError(
-					"can't provide pass_on_private_repos",
-					"pass_on_private_repos is only applicable to the "+pwnRequestControl+" control, not "+control.Control.ValueString(),
+					"can't provide ignore_for_non_public_repos",
+					"ignore_for_non_public_repos is only applicable to the "+pwnRequestControl+" control, not "+control.Control.ValueString(),
 				)
 			}
 
@@ -636,7 +638,7 @@ func (r *githubChecksResource) ModifyPlan(ctx context.Context, req resource.Modi
 			planned, _ = types.ObjectValue(controlSettingsAttrTypes(), map[string]attr.Value{
 				"cool_down_period":                     types.Int64Value(2),
 				"packages_to_exempt_in_cooldown_check": types.ListNull(types.StringType),
-				"pass_on_private_repos":                types.BoolNull(),
+				"ignore_for_non_public_repos":          types.BoolNull(),
 			})
 		} else {
 			planned = types.ObjectNull(controlSettingsAttrTypes())
@@ -864,9 +866,9 @@ func (r *githubChecksResource) convertToCreateRequest(ctx context.Context, plan 
 			}
 		}
 		// The API replaces a check's config whole, so leaving settings out clears a
-		// stored pass_on_private_repos, and an explicit false is sent as false.
+		// stored setting, and an explicit false is sent as false.
 		if isPwnRequestControl(controlName) && !control.Settings.IsNull() && !control.Settings.IsUnknown() {
-			if pass, ok := control.Settings.Attributes()["pass_on_private_repos"].(types.Bool); ok && isSet(pass) {
+			if pass, ok := control.Settings.Attributes()["ignore_for_non_public_repos"].(types.Bool); ok && isSet(pass) {
 				checkConfig.Settings = map[string]any{passOnPrivateReposSetting: pass.ValueBool()}
 			}
 		}
@@ -1090,14 +1092,14 @@ func (r *githubChecksResource) convertToState(ctx context.Context, owner string,
 			settingsMap := map[string]attr.Value{
 				"cool_down_period":                     cooldownPeriod,
 				"packages_to_exempt_in_cooldown_check": packagesList,
-				"pass_on_private_repos":                types.BoolNull(),
+				"ignore_for_non_public_repos":          types.BoolNull(),
 			}
 			c.Settings, _ = types.ObjectValue(controlSettingsAttrTypes(), settingsMap)
 		} else if pass, ok := passOnPrivateReposFromAPI(checkConfig.Settings); isPwnRequestControl(controlName) && ok {
 			c.Settings, _ = types.ObjectValue(controlSettingsAttrTypes(), map[string]attr.Value{
 				"cool_down_period":                     types.Int64Null(),
 				"packages_to_exempt_in_cooldown_check": types.ListNull(types.StringType),
-				"pass_on_private_repos":                types.BoolValue(pass),
+				"ignore_for_non_public_repos":          types.BoolValue(pass),
 			})
 		} else {
 			// For non-NPM controls or controls without settings, set to null

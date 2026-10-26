@@ -15,9 +15,10 @@ import (
 	stepsecurityapi "github.com/step-security/terraform-provider-stepsecurity/internal/stepsecurity-api"
 )
 
-// pass_on_private_repos is the PWN Request control's only setting. The API stores it under
-// the check's settings, and the check reads it to pass findings in non-public (private and
-// internal) repositories with a low-priority note instead of failing.
+// ignore_for_non_public_repos is the PWN Request control's only setting. The API stores it in
+// the check's settings under its original key, pass_on_private_repos, and the check reads it
+// to pass findings in non-public (private and internal) repositories with a low-priority note
+// instead of failing.
 
 const pwnRequestCheck = "pwn_request_check"
 
@@ -67,10 +68,10 @@ func expectNoStoredSettings(backend *fakeGithubChecksBackend) func(*terraform.St
 	}
 }
 
-// TestAccGithubChecksPwnRequestPassOnPrivateRepos walks the setting through on, off,
+// TestAccGithubChecksPwnRequestIgnoreForNonPublicRepos walks the setting through on, off,
 // removed and an empty settings block, checking what reaches the backend and that every
 // step plans clean afterwards.
-func TestAccGithubChecksPwnRequestPassOnPrivateRepos(t *testing.T) {
+func TestAccGithubChecksPwnRequestIgnoreForNonPublicRepos(t *testing.T) {
 	backend := newFakeGithubChecksBackend()
 	empty := tfresource.ConfigPlanChecks{PreApply: []plancheck.PlanCheck{plancheck.ExpectEmptyPlan()}}
 
@@ -79,11 +80,11 @@ func TestAccGithubChecksPwnRequestPassOnPrivateRepos(t *testing.T) {
 		settings string
 		check    func(*terraform.State) error
 	}{
-		{`{ pass_on_private_repos = true }`, expectStoredPassOnPrivateRepos(backend, true)},
-		{`{ pass_on_private_repos = false }`, expectStoredPassOnPrivateRepos(backend, false)},
+		{`{ ignore_for_non_public_repos = true }`, expectStoredPassOnPrivateRepos(backend, true)},
+		{`{ ignore_for_non_public_repos = false }`, expectStoredPassOnPrivateRepos(backend, false)},
 		// Removing the block clears the stored value: the API replaces a check's config whole.
 		{``, expectNoStoredSettings(backend)},
-		{`{ pass_on_private_repos = true }`, expectStoredPassOnPrivateRepos(backend, true)},
+		{`{ ignore_for_non_public_repos = true }`, expectStoredPassOnPrivateRepos(backend, true)},
 		// An empty block means "not set", the same as leaving it out.
 		{`{}`, expectNoStoredSettings(backend)},
 	} {
@@ -107,7 +108,7 @@ func TestAccGithubChecksPwnRequestImport(t *testing.T) {
 	enabled := true
 	backend.stored.EnableRequiredChecksForAllNewRepos = &enabled
 
-	config := pwnRequestFixture(`{ pass_on_private_repos = true }`)
+	config := pwnRequestFixture(`{ ignore_for_non_public_repos = true }`)
 	testAccGithubChecks(t, backend, false,
 		tfresource.TestStep{
 			Config:             config,
@@ -157,29 +158,29 @@ func TestAccGithubChecksPwnRequestSettingsValidation(t *testing.T) {
     control  = "PWN Request"
     enable   = true
     type     = "required"
-    settings = { pass_on_private_repos = true, cool_down_period = 3 }
+    settings = { ignore_for_non_public_repos = true, cool_down_period = 3 }
   }]
 `,
 			want: `can't provide cooldown settings`,
 		},
-		"pass_on_private_repos_on_cooldown_control": {
+		"ignore_for_non_public_repos_on_cooldown_control": {
 			body: `
   controls = [{
     control  = "NPM Package Cooldown"
     enable   = true
     type     = "required"
-    settings = { pass_on_private_repos = true }
+    settings = { ignore_for_non_public_repos = true }
   }]
 `,
-			want: `can't provide pass_on_private_repos`,
+			want: `can't provide ignore_for_non_public_repos`,
 		},
-		"pass_on_private_repos_on_other_control": {
+		"ignore_for_non_public_repos_on_other_control": {
 			body: `
   controls = [{
     control  = "Script Injection"
     enable   = true
     type     = "required"
-    settings = { pass_on_private_repos = true }
+    settings = { ignore_for_non_public_repos = true }
   }]
 `,
 			want: `can't provide settings`,

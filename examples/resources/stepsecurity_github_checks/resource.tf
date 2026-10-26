@@ -45,7 +45,7 @@ resource "stepsecurity_github_checks" "test-organization" {
       enable  = true
       type    = "required"
       settings = {
-        pass_on_private_repos = true # findings in non-public (private and internal) repositories pass with a low-priority note instead of failing
+        ignore_for_non_public_repos = true # findings in non-public (private and internal) repositories pass with a low-priority note instead of failing
       }
     },
     {

@@ -39,14 +39,14 @@ func createSettingsObject(cooldownPeriod *int64, packages []string) types.Object
 	} else {
 		settingsMap["packages_to_exempt_in_cooldown_check"] = types.ListNull(types.StringType)
 	}
-	settingsMap["pass_on_private_repos"] = types.BoolNull()
+	settingsMap["ignore_for_non_public_repos"] = types.BoolNull()
 
 	obj, _ := types.ObjectValue(controlSettingsAttrTypes(), settingsMap)
 	return obj
 }
 
 // createPwnSettingsObject builds a PWN Request settings object. A nil pass leaves
-// pass_on_private_repos null, as in settings = {}.
+// ignore_for_non_public_repos null, as in settings = {}.
 func createPwnSettingsObject(pass *bool) types.Object {
 	passValue := types.BoolNull()
 	if pass != nil {
@@ -55,7 +55,7 @@ func createPwnSettingsObject(pass *bool) types.Object {
 	obj, _ := types.ObjectValue(controlSettingsAttrTypes(), map[string]attr.Value{
 		"cool_down_period":                     types.Int64Null(),
 		"packages_to_exempt_in_cooldown_check": types.ListNull(types.StringType),
-		"pass_on_private_repos":                passValue,
+		"ignore_for_non_public_repos":          passValue,
 	})
 	return obj
 }
