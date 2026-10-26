@@ -52,6 +52,9 @@ resource "stepsecurity_github_checks" "test-organization" {
       control = "Script Injection"
       enable  = true
       type    = "optional"
+      settings = {
+        ignore_for_non_public_repos = true # set separately on each control
+      }
     }
   ]
   required_checks = {
