@@ -306,6 +306,38 @@ func TestAccPolicyDrivenPRMixedPrecommitHooksPlanIsEmpty(t *testing.T) {
 	testAccPolicyDrivenPRAgainstFake(t, withConsolePrecommitHooks(newFakePolicyDrivenPRBackend(true)), somePrecommitHooksFixture)
 }
 
+func dockerfilePatternsFixture(patterns string) string {
+	return fmt.Sprintf(`
+resource "stepsecurity_policy_driven_pr" "test" {
+  owner          = "step-terraform-tests"
+  selected_repos = ["test-repo-one"]
+
+  auto_remediation_options = {
+    create_pr           = true
+    secure_docker_file  = true
+    dockerfile_patterns = %s
+  }
+}
+`, patterns)
+}
+
+// TestAccPolicyDrivenPRDockerfilePatternsPlanIsEmptyAfterApply: real patterns round-trip,
+// and a reordered or duplicated list is the same set, so the plan stays clean.
+func TestAccPolicyDrivenPRDockerfilePatternsPlanIsEmptyAfterApply(t *testing.T) {
+	testAccPolicyDrivenPRAgainstFake(t, newFakePolicyDrivenPRBackend(true),
+		dockerfilePatternsFixture(`["Dockerfile.*", "Containerfile", "Dockerfile.*"]`))
+}
+
+// TestAccPolicyDrivenPREmptyDockerfilePatternsIsRejected: the API does not return an
+// empty list, so dockerfile_patterns = [] read back as null and never settled. It is
+// rejected at plan time instead; leaving the attribute out means no extra patterns.
+func TestAccPolicyDrivenPREmptyDockerfilePatternsIsRejected(t *testing.T) {
+	testAccPolicyDrivenPRStepsAgainstFake(t, newFakePolicyDrivenPRBackend(true), resource.TestStep{
+		Config:      dockerfilePatternsFixture(`[]`),
+		ExpectError: regexp.MustCompile(`Invalid Attribute Value`),
+	})
+}
+
 // TestAccPolicyDrivenPREmptyDependabotYAMLIsRejected: an empty cooldown_yaml, groups_yaml
 // or options_yaml is never sent to the API and reads back as null, so accepting it left a
 // diff on every plan. It is rejected at plan time instead.

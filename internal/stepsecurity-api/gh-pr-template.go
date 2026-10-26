@@ -14,12 +14,21 @@ import (
 // remediation gets a unique branch. Empty means the default branch name is used, and it
 // is serialized without omitempty so that clearing the template sends an explicit empty
 // string instead of dropping the key, matching the other scalar fields here.
+//
+// ReplaceStalePRs lets a policy-driven PR run close a StepSecurity PR that has had no
+// activity for StaleAfterDays and open a new one in its place. Because the API replaces
+// the whole template, these are sent on every write: leaving them out would switch
+// replacement off for an org that turned it on in the console. ReplaceStalePRs is sent
+// without omitempty so that turning it off is explicit. StaleAfterDays of zero means
+// unset, and the API requires at least 7 when ReplaceStalePRs is true.
 type GitHubPRTemplate struct {
-	Title         string   `json:"title"`
-	Summary       string   `json:"summary"`
-	CommitMessage string   `json:"commit_message"`
-	Labels        []string `json:"labels,omitempty"`
-	BranchName    string   `json:"branch_name"`
+	Title           string   `json:"title"`
+	Summary         string   `json:"summary"`
+	CommitMessage   string   `json:"commit_message"`
+	Labels          []string `json:"labels,omitempty"`
+	BranchName      string   `json:"branch_name"`
+	ReplaceStalePRs bool     `json:"replace_stale_prs"`
+	StaleAfterDays  int64    `json:"stale_after_days,omitempty"`
 }
 
 func (c *APIClient) GetGitHubPRTemplate(ctx context.Context, owner string) (*GitHubPRTemplate, error) {

@@ -131,3 +131,42 @@ func TestDeleteGitHubPRTemplate_ClearsBranchName(t *testing.T) {
 	assert.True(t, present, "reset must send branch_name so the stored template is cleared; got %v", payload)
 	assert.Equal(t, "", got)
 }
+
+// The API replaces the stored template on every write, so replace_stale_prs has to be in
+// every request: without it, an apply would switch replacement off for an org that turned
+// it on elsewhere. stale_after_days is only sent when set, since zero means unset.
+func TestUpdateGitHubPRTemplate_StalePRSettings(t *testing.T) {
+	testCases := []struct {
+		name            string
+		replaceStalePRs bool
+		staleAfterDays  int64
+		wantDays        any
+	}{
+		{name: "off_is_sent_as_false", replaceStalePRs: false, staleAfterDays: 0, wantDays: nil},
+		{name: "on_with_threshold", replaceStalePRs: true, staleAfterDays: 14, wantDays: float64(14)},
+	}
+
+	for _, tc := range testCases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			payload := capturePRTemplateRequest(t, GitHubPRTemplate{
+				Title:           "[StepSecurity] Apply security best practices",
+				Summary:         "Test summary",
+				CommitMessage:   "[StepSecurity] Apply security best practices",
+				ReplaceStalePRs: tc.replaceStalePRs,
+				StaleAfterDays:  tc.staleAfterDays,
+			})
+
+			replace, ok := payload["replace_stale_prs"]
+			require.True(t, ok, "replace_stale_prs must always be sent")
+			assert.Equal(t, tc.replaceStalePRs, replace)
+
+			days, ok := payload["stale_after_days"]
+			if tc.wantDays == nil {
+				assert.False(t, ok, "stale_after_days should be omitted when unset, got %v", days)
+			} else {
+				assert.Equal(t, tc.wantDays, days)
+			}
+		})
+	}
+}
