@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"os/exec"
+	"regexp"
 	"strings"
 	"sync"
 	"testing"
@@ -27,6 +28,9 @@ type fakePolicyDrivenPRBackend struct {
 	mu      sync.Mutex
 	configs map[string]json.RawMessage // repo -> stored config
 	v2      bool
+	// onStore, when set, edits each written config before it is stored, so a test can
+	// model data the real backend holds but the provider never writes.
+	onStore func(config map[string]any)
 }
 
 func newFakePolicyDrivenPRBackend(v2Enabled bool) *fakePolicyDrivenPRBackend {
@@ -58,6 +62,18 @@ func (b *fakePolicyDrivenPRBackend) ServeHTTP(w http.ResponseWriter, req *http.R
 		if err != nil {
 			http.Error(w, "unreadable body", http.StatusBadRequest)
 			return
+		}
+		if b.onStore != nil {
+			var config map[string]any
+			if err := json.Unmarshal(body, &config); err != nil {
+				http.Error(w, "invalid body", http.StatusBadRequest)
+				return
+			}
+			b.onStore(config)
+			if body, err = json.Marshal(config); err != nil {
+				http.Error(w, "unencodable body", http.StatusInternalServerError)
+				return
+			}
 		}
 		b.mu.Lock()
 		b.configs[repo] = json.RawMessage(body)
@@ -131,6 +147,15 @@ resource "stepsecurity_policy_driven_pr" "test" {
 
 func testAccPolicyDrivenPRAgainstFake(t *testing.T, backend *fakePolicyDrivenPRBackend, config string) {
 	t.Helper()
+	// The harness plans again after applying and fails the step when that plan is
+	// non-empty, which is the same assertion the integration test's idempotency check
+	// makes.
+	testAccPolicyDrivenPRStepsAgainstFake(t, backend, resource.TestStep{Config: config})
+}
+
+// testAccPolicyDrivenPRStepsAgainstFake runs the given steps against backend.
+func testAccPolicyDrivenPRStepsAgainstFake(t *testing.T, backend *fakePolicyDrivenPRBackend, steps ...resource.TestStep) {
+	t.Helper()
 
 	// Resolve a Terraform CLI before enabling acceptance mode, and pin it via
 	// TF_ACC_TERRAFORM_PATH so the harness uses it directly.
@@ -162,14 +187,7 @@ func testAccPolicyDrivenPRAgainstFake(t *testing.T, backend *fakePolicyDrivenPRB
 
 	resource.Test(t, resource.TestCase{
 		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
-		Steps: []resource.TestStep{
-			{
-				Config: config,
-				// The harness plans again after applying and fails the step when that
-				// plan is non-empty, which is the same assertion the integration test's
-				// idempotency check makes.
-			},
-		},
+		Steps:                    steps,
 	})
 }
 
@@ -222,4 +240,100 @@ resource "stepsecurity_policy_driven_pr" "test" {
 // to it rather than merely being self-consistent.
 func TestAccPolicyDrivenPRUnsortedListsPlanIsEmptyAfterApply(t *testing.T) {
 	testAccPolicyDrivenPRAgainstFake(t, newFakePolicyDrivenPRBackend(true), unsortedListsFixture)
+}
+
+// withConsolePrecommitHooks makes the fake store update_precommit_file the way the
+// console does once its pre-commit settings have been opened: every known hook is
+// present, and only the ones the provider asked for are true.
+func withConsolePrecommitHooks(backend *fakePolicyDrivenPRBackend) *fakePolicyDrivenPRBackend {
+	known := []string{"end-of-file-fixer", "eslint", "gitleaks", "php-lint-all", "shellcheck", "trailing-whitespace"}
+	backend.onStore = func(config map[string]any) {
+		settings, _ := config["control_settings"].(map[string]any)
+		if settings == nil {
+			settings = map[string]any{}
+			config["control_settings"] = settings
+		}
+		hooks, _ := settings["update_precommit_file"].(map[string]any)
+		if hooks == nil {
+			hooks = map[string]any{}
+		}
+		for _, hook := range known {
+			if _, ok := hooks[hook]; !ok {
+				hooks[hook] = false
+			}
+		}
+		settings["update_precommit_file"] = hooks
+	}
+	return backend
+}
+
+const noPrecommitHooksFixture = `
+resource "stepsecurity_policy_driven_pr" "test" {
+  owner          = "step-terraform-tests"
+  selected_repos = ["test-repo-one"]
+
+  auto_remediation_options = {
+    create_pr             = true
+    pin_actions_to_sha    = true
+    update_precommit_file = []
+  }
+}
+`
+
+const somePrecommitHooksFixture = `
+resource "stepsecurity_policy_driven_pr" "test" {
+  owner          = "step-terraform-tests"
+  selected_repos = ["test-repo-one"]
+
+  auto_remediation_options = {
+    create_pr             = true
+    pin_actions_to_sha    = true
+    update_precommit_file = ["shellcheck", "gitleaks"]
+  }
+}
+`
+
+// TestAccPolicyDrivenPRDisabledPrecommitHooksPlanIsEmpty: hooks stored as false were read
+// back as enabled, so a configuration with no hooks drifted on every plan once the
+// console had saved its hook list.
+func TestAccPolicyDrivenPRDisabledPrecommitHooksPlanIsEmpty(t *testing.T) {
+	testAccPolicyDrivenPRAgainstFake(t, withConsolePrecommitHooks(newFakePolicyDrivenPRBackend(true)), noPrecommitHooksFixture)
+}
+
+// TestAccPolicyDrivenPRMixedPrecommitHooksPlanIsEmpty: with some hooks enabled and the rest
+// stored as false, only the enabled ones are read back.
+func TestAccPolicyDrivenPRMixedPrecommitHooksPlanIsEmpty(t *testing.T) {
+	testAccPolicyDrivenPRAgainstFake(t, withConsolePrecommitHooks(newFakePolicyDrivenPRBackend(true)), somePrecommitHooksFixture)
+}
+
+func dockerfilePatternsFixture(patterns string) string {
+	return fmt.Sprintf(`
+resource "stepsecurity_policy_driven_pr" "test" {
+  owner          = "step-terraform-tests"
+  selected_repos = ["test-repo-one"]
+
+  auto_remediation_options = {
+    create_pr           = true
+    secure_docker_file  = true
+    dockerfile_patterns = %s
+  }
+}
+`, patterns)
+}
+
+// TestAccPolicyDrivenPRDockerfilePatternsPlanIsEmptyAfterApply: real patterns round-trip,
+// and a reordered or duplicated list is the same set, so the plan stays clean.
+func TestAccPolicyDrivenPRDockerfilePatternsPlanIsEmptyAfterApply(t *testing.T) {
+	testAccPolicyDrivenPRAgainstFake(t, newFakePolicyDrivenPRBackend(true),
+		dockerfilePatternsFixture(`["Dockerfile.*", "Containerfile", "Dockerfile.*"]`))
+}
+
+// TestAccPolicyDrivenPREmptyDockerfilePatternsIsRejected: the API does not return an
+// empty list, so dockerfile_patterns = [] read back as null and never settled. It is
+// rejected at plan time instead; leaving the attribute out means no extra patterns.
+func TestAccPolicyDrivenPREmptyDockerfilePatternsIsRejected(t *testing.T) {
+	testAccPolicyDrivenPRStepsAgainstFake(t, newFakePolicyDrivenPRBackend(true), resource.TestStep{
+		Config:      dockerfilePatternsFixture(`[]`),
+		ExpectError: regexp.MustCompile(`Invalid Attribute Value`),
+	})
 }

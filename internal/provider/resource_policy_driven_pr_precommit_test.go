@@ -172,3 +172,80 @@ func TestPolicyDrivenPRResource_ValidateConfig_PrecommitModesAreMutuallyExclusiv
 		})
 	}
 }
+
+// runPolicyDrivenPRDockerfileValidateConfig drives the real ValidateConfig with only
+// secure_docker_file and dockerfile_patterns populated.
+func runPolicyDrivenPRDockerfileValidateConfig(t *testing.T, secureDockerFile types.Bool, patterns []string) *fwresource.ValidateConfigResponse {
+	t.Helper()
+
+	ctx := context.Background()
+	r := &policyDrivenPRResource{}
+
+	schemaResp := &fwresource.SchemaResponse{}
+	r.Schema(ctx, fwresource.SchemaRequest{}, schemaResp)
+	require.False(t, schemaResp.Diagnostics.HasError(), "schema errors: %v", schemaResp.Diagnostics)
+	schema := schemaResp.Schema
+
+	optionsType, ok := schema.Attributes["auto_remediation_options"].GetType().(types.ObjectType)
+	require.True(t, ok, "auto_remediation_options should be an object")
+
+	optionValues := make(map[string]attr.Value, len(optionsType.AttrTypes))
+	for name, at := range optionsType.AttrTypes {
+		optionValues[name] = nullValueFor(t, ctx, at)
+	}
+	optionValues["secure_docker_file"] = secureDockerFile
+	elems := make([]attr.Value, 0, len(patterns))
+	for _, pattern := range patterns {
+		elems = append(elems, types.StringValue(pattern))
+	}
+	set, diags := types.SetValue(types.StringType, elems)
+	require.False(t, diags.HasError(), "patterns: %v", diags)
+	optionValues["dockerfile_patterns"] = set
+
+	options, diags := types.ObjectValue(optionsType.AttrTypes, optionValues)
+	require.False(t, diags.HasError(), "options object: %v", diags)
+
+	selectedRepos, diags := types.ListValue(types.StringType, []attr.Value{types.StringValue("widgets")})
+	require.False(t, diags.HasError(), "selected repos: %v", diags)
+
+	model := policyDrivenPRModel{
+		ID:                    types.StringNull(),
+		Owner:                 types.StringValue("test-org"),
+		AutoRemdiationOptions: options,
+		SelectedRepos:         selectedRepos,
+		SelectedReposFilter:   nullValueFor(t, ctx, schema.Attributes["selected_repos_filter"].GetType()).(types.Object),
+		ExcludedRepos:         types.ListNull(types.StringType),
+	}
+
+	plan := tfsdk.Plan{Schema: schema}
+	require.False(t, plan.Set(ctx, model).HasError())
+
+	resp := &fwresource.ValidateConfigResponse{}
+	r.ValidateConfig(ctx, fwresource.ValidateConfigRequest{
+		Config: tfsdk.Config{Raw: plan.Raw, Schema: schema},
+	}, resp)
+	return resp
+}
+
+// TestPolicyDrivenPRResource_ValidateConfig_DockerfilePatternsNeedSecureDockerFile:
+// dockerfile_patterns is rejected when secure_docker_file is off, but not while it is
+// still unknown, because the config may be valid once the value is known.
+func TestPolicyDrivenPRResource_ValidateConfig_DockerfilePatternsNeedSecureDockerFile(t *testing.T) {
+	patterns := []string{"Dockerfile.*"}
+	tests := []struct {
+		name             string
+		secureDockerFile types.Bool
+		wantError        bool
+	}{
+		{"secure_docker_file true", types.BoolValue(true), false},
+		{"secure_docker_file unknown", types.BoolUnknown(), false},
+		{"secure_docker_file false", types.BoolValue(false), true},
+		{"secure_docker_file unset", types.BoolNull(), true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			resp := runPolicyDrivenPRDockerfileValidateConfig(t, tt.secureDockerFile, patterns)
+			assert.Equal(t, tt.wantError, resp.Diagnostics.HasError(), "diagnostics: %v", resp.Diagnostics)
+		})
+	}
+}
