@@ -177,7 +177,7 @@ func TestAccGithubChecksPwnRequestSettingsValidation(t *testing.T) {
 		"ignore_for_non_public_repos_on_other_control": {
 			body: `
   controls = [{
-    control  = "Script Injection"
+    control  = "NPM Package Compromised Updates"
     enable   = true
     type     = "required"
     settings = { ignore_for_non_public_repos = true }
