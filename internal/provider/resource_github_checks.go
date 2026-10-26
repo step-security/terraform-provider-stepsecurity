@@ -113,7 +113,7 @@ func (r *githubChecksResource) Schema(_ context.Context, _ resource.SchemaReques
 								},
 								"ignore_for_non_public_repos": schema.BoolAttribute{
 									Optional:    true,
-									Description: "When true, Pwn Request findings in non-public (private and internal) repositories pass the check and are reported as low priority instead of failing it. Findings in public repositories still fail. Only applicable to the PWN Request control. Defaults to false.",
+									Description: "When true, findings in non-public (private and internal) repositories pass the check and are reported as low priority instead of failing it. Findings in public repositories still fail. Only applicable to the PWN Request and Script Injection controls, and set separately on each. Defaults to false.",
 								},
 							},
 						},
@@ -307,17 +307,23 @@ func isCooldownControl(name string) bool {
 	return false
 }
 
-// pwnRequestControl is the control that takes the ignore_for_non_public_repos setting.
-const pwnRequestControl = "PWN Request"
+// pwnRequestControl and scriptInjectionControl are the controls that take the
+// ignore_for_non_public_repos setting.
+const (
+	pwnRequestControl      = "PWN Request"
+	scriptInjectionControl = "Script Injection"
+)
 
-// passOnPrivateReposSetting is the key the API stores the PWN Request setting under.
+// passOnPrivateReposSetting is the key the API stores the setting under, in each
+// control's own settings.
 // The Terraform attribute is ignore_for_non_public_repos, but agent-api and the
 // console already store and read this key, so it keeps its original name.
 const passOnPrivateReposSetting = "pass_on_private_repos"
 
-// isPwnRequestControl reports whether a control takes the ignore_for_non_public_repos setting.
-func isPwnRequestControl(name string) bool {
-	return name == pwnRequestControl
+// takesNonPublicReposSetting reports whether a control takes the
+// ignore_for_non_public_repos setting.
+func takesNonPublicReposSetting(name string) bool {
+	return name == pwnRequestControl || name == scriptInjectionControl
 }
 
 // isSet reports whether a settings attribute was given a value.
@@ -426,9 +432,9 @@ func (r *githubChecksResource) ValidateConfig(ctx context.Context, req resource.
 			}
 
 			isCooldown := isCooldownControl(control.Control.ValueString())
-			isPwnRequest := isPwnRequestControl(control.Control.ValueString())
+			takesNonPublic := takesNonPublicReposSetting(control.Control.ValueString())
 			hasSettings := !control.Settings.IsNull() && !control.Settings.IsUnknown()
-			if !isCooldown && !isPwnRequest && hasSettings {
+			if !isCooldown && !takesNonPublic && hasSettings {
 				resp.Diagnostics.AddError(
 					"can't provide settings",
 					"can't provide settings for control "+control.Control.ValueString(),
@@ -437,7 +443,7 @@ func (r *githubChecksResource) ValidateConfig(ctx context.Context, req resource.
 
 			// Each control that takes settings only reads its own fields; the API would
 			// store the others and ignore them, so a misplaced field would look applied.
-			if isPwnRequest && hasSettings {
+			if takesNonPublic && hasSettings {
 				attrs := control.Settings.Attributes()
 				if isSet(attrs["cool_down_period"]) || isSet(attrs["packages_to_exempt_in_cooldown_check"]) {
 					resp.Diagnostics.AddError(
@@ -449,7 +455,7 @@ func (r *githubChecksResource) ValidateConfig(ctx context.Context, req resource.
 			if isCooldown && hasSettings && isSet(control.Settings.Attributes()["ignore_for_non_public_repos"]) {
 				resp.Diagnostics.AddError(
 					"can't provide ignore_for_non_public_repos",
-					"ignore_for_non_public_repos is only applicable to the "+pwnRequestControl+" control, not "+control.Control.ValueString(),
+					"ignore_for_non_public_repos is only applicable to the "+pwnRequestControl+" and "+scriptInjectionControl+" controls, not "+control.Control.ValueString(),
 				)
 			}
 
@@ -615,11 +621,12 @@ func (r *githubChecksResource) ModifyPlan(ctx context.Context, req resource.Modi
 			continue
 		}
 
-		// cool_down_period has a schema default, so a PWN Request settings block gets
-		// cool_down_period = 2 planned even though the control has no cooldown and apply
-		// never sends one. Plan null instead, which is what apply stores in state.
+		// cool_down_period has a schema default, so a PWN Request or Script Injection
+		// settings block gets cool_down_period = 2 planned even though the control has
+		// no cooldown and apply never sends one. Plan null instead, which is what apply
+		// stores in state.
 		if !configControls[ind].Settings.IsNull() {
-			if isPwnRequestControl(control.Control.ValueString()) && !control.Settings.IsNull() && !control.Settings.IsUnknown() {
+			if takesNonPublicReposSetting(control.Control.ValueString()) && !control.Settings.IsNull() && !control.Settings.IsUnknown() {
 				attrs := control.Settings.Attributes()
 				if !attrs["cool_down_period"].IsNull() {
 					attrs["cool_down_period"] = types.Int64Null()
@@ -867,7 +874,7 @@ func (r *githubChecksResource) convertToCreateRequest(ctx context.Context, plan 
 		}
 		// The API replaces a check's config whole, so leaving settings out clears a
 		// stored setting, and an explicit false is sent as false.
-		if isPwnRequestControl(controlName) && !control.Settings.IsNull() && !control.Settings.IsUnknown() {
+		if takesNonPublicReposSetting(controlName) && !control.Settings.IsNull() && !control.Settings.IsUnknown() {
 			if pass, ok := control.Settings.Attributes()["ignore_for_non_public_repos"].(types.Bool); ok && isSet(pass) {
 				checkConfig.Settings = map[string]any{passOnPrivateReposSetting: pass.ValueBool()}
 			}
@@ -1095,7 +1102,7 @@ func (r *githubChecksResource) convertToState(ctx context.Context, owner string,
 				"ignore_for_non_public_repos":          types.BoolNull(),
 			}
 			c.Settings, _ = types.ObjectValue(controlSettingsAttrTypes(), settingsMap)
-		} else if pass, ok := passOnPrivateReposFromAPI(checkConfig.Settings); isPwnRequestControl(controlName) && ok {
+		} else if pass, ok := passOnPrivateReposFromAPI(checkConfig.Settings); takesNonPublicReposSetting(controlName) && ok {
 			c.Settings, _ = types.ObjectValue(controlSettingsAttrTypes(), map[string]attr.Value{
 				"cool_down_period":                     types.Int64Null(),
 				"packages_to_exempt_in_cooldown_check": types.ListNull(types.StringType),
@@ -1396,7 +1403,7 @@ func alignSettings(planSettings, stateSettings types.Object) types.Object {
 	return aligned
 }
 
-// passOnPrivateReposFromAPI reads the stored PWN Request setting. ok is false when the
+// passOnPrivateReposFromAPI reads the stored ignore_for_non_public_repos setting. ok is false when the
 // setting is not stored. A string is accepted as well as a bool, the same as the check
 // itself reads it, so a value saved by another client still shows up as configured.
 func passOnPrivateReposFromAPI(settings map[string]any) (value bool, ok bool) {

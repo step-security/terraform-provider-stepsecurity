@@ -66,6 +66,9 @@ resource "stepsecurity_github_checks" "test-organization" {
       control = "Script Injection"
       enable  = true
       type    = "optional"
+      settings = {
+        ignore_for_non_public_repos = true # set separately on each control
+      }
     }
   ]
   required_checks = {
@@ -196,7 +199,7 @@ Optional:
 Optional:
 
 - `cool_down_period` (Number) Cooldown period values (e.g., days). Only applicable to npm/PyPI/Maven/NuGet cooldown checks. Default is 2 days.
-- `ignore_for_non_public_repos` (Boolean) When true, Pwn Request findings in non-public (private and internal) repositories pass the check and are reported as low priority instead of failing it. Findings in public repositories still fail. Only applicable to the PWN Request control. Defaults to false.
+- `ignore_for_non_public_repos` (Boolean) When true, findings in non-public (private and internal) repositories pass the check and are reported as low priority instead of failing it. Findings in public repositories still fail. Only applicable to the PWN Request and Script Injection controls, and set separately on each. Defaults to false.
 - `packages_to_exempt_in_cooldown_check` (List of String) Package names to exempt from cooldown checks. Only applicable to npm/PyPI/Maven/NuGet cooldown checks.
 
 
