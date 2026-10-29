@@ -318,9 +318,9 @@ Optional:
 - `package_ecosystem` (Attributes List) List of package ecosystems to enable for dependency updates. (see [below for nested schema](#nestedatt--auto_remediation_options--package_ecosystem))
 - `pin_actions_to_sha` (Boolean) When enabled, this creates a PR/issue to pin actions to SHA. GitHub's Security Hardening guide recommends pinning actions to full length commit for third party actions.
 - `replace_action_on_major_tag_match` (Boolean) When enabled, actions in actions_to_replace_with_step_security_actions are replaced only when the major tag matches. Requires actions_to_replace_with_step_security_actions to be non-empty.
-- `skip_immutable_release_tags` (Boolean) When enabled, pinning leaves an action reference unpinned when its tag belongs to an immutable GitHub release. Such a tag cannot be moved or deleted, so it is as fixed as a commit SHA.
 - `restrict_github_token_permissions` (Boolean) When enabled, this creates a PR/issue to restrict GitHub token permissions. GitHub's Security Hardening guide recommends restricting permissions to the minimum required
 - `secure_docker_file` (Boolean) When enabled, this creates a PR/issue to secure Dockerfile by pinning base images to SHA.
+- `skip_immutable_release_tags` (Boolean) When enabled, pinning leaves an action reference unpinned when its tag belongs to an immutable GitHub release. Such a tag cannot be moved or deleted, so it is as fixed as a commit SHA.
 - `update_existing_configuration` (Boolean) When enabled, dependabot will remove existing entries that are not in the package_ecosystem config.
 - `update_precommit_file` (List of String) List of pre-commit file paths to update (e.g., ['.pre-commit-config.yaml']).
 
