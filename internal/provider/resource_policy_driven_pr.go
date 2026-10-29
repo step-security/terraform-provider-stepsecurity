@@ -198,6 +198,12 @@ func (r *policyDrivenPRResource) Schema(_ context.Context, _ resource.SchemaRequ
 						Description: "When enabled, actions in actions_to_replace_with_step_security_actions are replaced only when the major tag matches. Requires actions_to_replace_with_step_security_actions to be non-empty.",
 						Default:     booldefault.StaticBool(false),
 					},
+					"skip_immutable_release_tags": schema.BoolAttribute{
+						Optional:    true,
+						Computed:    true,
+						Description: "When enabled, pinning leaves an action reference unpinned when its tag belongs to an immutable GitHub release. Such a tag cannot be moved or deleted, so it is as fixed as a commit SHA.",
+						Default:     booldefault.StaticBool(false),
+					},
 					"actions_exempted_from_replacement": schema.ListAttribute{
 						ElementType: types.StringType,
 						Optional:    true,
@@ -585,6 +591,7 @@ func (r *policyDrivenPRResource) ImportState(ctx context.Context, req resource.I
 			"actions_to_replace_with_step_security_actions": types.ListType{ElemType: types.StringType},
 			"custom_actions_to_replace":                     types.MapType{ElemType: types.StringType},
 			"replace_action_on_major_tag_match":             types.BoolType,
+			"skip_immutable_release_tags":                   types.BoolType,
 			"actions_exempted_from_replacement":             types.ListType{ElemType: types.StringType},
 			"update_precommit_file":                         types.ListType{ElemType: types.StringType},
 			"custom_precommit_config": types.ObjectType{AttrTypes: map[string]attr.Type{
@@ -629,6 +636,12 @@ func (r *policyDrivenPRResource) ImportState(ctx context.Context, req resource.I
 			"replace_action_on_major_tag_match": types.BoolValue(func() bool {
 				if policy.AutoRemdiationOptions.ReplaceByMajorTag != nil {
 					return *policy.AutoRemdiationOptions.ReplaceByMajorTag
+				}
+				return false
+			}()),
+			"skip_immutable_release_tags": types.BoolValue(func() bool {
+				if policy.AutoRemdiationOptions.SkipImmutableReleaseTags != nil {
+					return *policy.AutoRemdiationOptions.SkipImmutableReleaseTags
 				}
 				return false
 			}()),
@@ -731,6 +744,7 @@ type autoRemdiationOptionsModel struct {
 	ActionsToReplaceWithStepSecurityActions types.List   `tfsdk:"actions_to_replace_with_step_security_actions"`
 	CustomActionsToReplace                  types.Map    `tfsdk:"custom_actions_to_replace"`
 	ReplaceByMajorTag                       types.Bool   `tfsdk:"replace_action_on_major_tag_match"`
+	SkipImmutableReleaseTags                types.Bool   `tfsdk:"skip_immutable_release_tags"`
 	ExemptedFromReplacement                 types.List   `tfsdk:"actions_exempted_from_replacement"`
 	UpdatePrecommitFile                     types.List   `tfsdk:"update_precommit_file"`
 	CustomPrecommitConfig                   types.Object `tfsdk:"custom_precommit_config"`
@@ -1190,6 +1204,11 @@ func (r *policyDrivenPRResource) Create(ctx context.Context, req resource.Create
 		v := options.ReplaceByMajorTag.ValueBool()
 		replaceByMajorTag = &v
 	}
+	var skipImmutableReleaseTags *bool
+	if !options.SkipImmutableReleaseTags.IsNull() && !options.SkipImmutableReleaseTags.IsUnknown() {
+		v := options.SkipImmutableReleaseTags.ValueBool()
+		skipImmutableReleaseTags = &v
+	}
 	var hardenRunnerConfig *stepsecurityapi.HardenRunnerConfig
 	if !options.HardenRunnerConfig.IsNull() && !options.HardenRunnerConfig.IsUnknown() {
 		var hrcModel hardenRunnerConfigModel
@@ -1242,6 +1261,7 @@ func (r *policyDrivenPRResource) Create(ctx context.Context, req resource.Create
 			ActionsToReplaceWithStepSecurityActions: actionsToReplace,
 			CustomActionsToReplace:                  customActionsToReplace,
 			ReplaceByMajorTag:                       replaceByMajorTag,
+			SkipImmutableReleaseTags:                skipImmutableReleaseTags,
 			ExemptedFromReplacement:                 exemptedFromReplacement,
 			UpdatePrecommitFile:                     updatePrecommitFile,
 			PackageEcosystem:                        packageEcosystem,
@@ -1812,6 +1832,11 @@ func (r *policyDrivenPRResource) Update(ctx context.Context, req resource.Update
 		v := planOptions.ReplaceByMajorTag.ValueBool()
 		replaceByMajorTagUpdate = &v
 	}
+	var skipImmutableReleaseTagsUpdate *bool
+	if !planOptions.SkipImmutableReleaseTags.IsNull() && !planOptions.SkipImmutableReleaseTags.IsUnknown() {
+		v := planOptions.SkipImmutableReleaseTags.ValueBool()
+		skipImmutableReleaseTagsUpdate = &v
+	}
 	var hardenRunnerConfigUpdate *stepsecurityapi.HardenRunnerConfig
 	if !planOptions.HardenRunnerConfig.IsNull() && !planOptions.HardenRunnerConfig.IsUnknown() {
 		var hrcModel hardenRunnerConfigModel
@@ -1863,6 +1888,7 @@ func (r *policyDrivenPRResource) Update(ctx context.Context, req resource.Update
 			ActionsToReplaceWithStepSecurityActions: actionsToReplace,
 			CustomActionsToReplace:                  customActionsToReplacePlan,
 			ReplaceByMajorTag:                       replaceByMajorTagUpdate,
+			SkipImmutableReleaseTags:                skipImmutableReleaseTagsUpdate,
 			ExemptedFromReplacement:                 exemptedFromReplacementUpdate,
 			UpdatePrecommitFile:                     updatePrecommitFilePlan,
 			PackageEcosystem:                        packageEcosystemPlan,
@@ -2144,6 +2170,7 @@ func (r *policyDrivenPRResource) updatePolicyDrivenPRState(ctx context.Context, 
 			"actions_to_replace_with_step_security_actions": types.ListType{ElemType: types.StringType},
 			"custom_actions_to_replace":                     types.MapType{ElemType: types.StringType},
 			"replace_action_on_major_tag_match":             types.BoolType,
+			"skip_immutable_release_tags":                   types.BoolType,
 			"actions_exempted_from_replacement":             types.ListType{ElemType: types.StringType},
 			"update_precommit_file":                         types.ListType{ElemType: types.StringType},
 			"custom_precommit_config": types.ObjectType{AttrTypes: map[string]attr.Type{
@@ -2188,6 +2215,12 @@ func (r *policyDrivenPRResource) updatePolicyDrivenPRState(ctx context.Context, 
 			"replace_action_on_major_tag_match": types.BoolValue(func() bool {
 				if stepSecurityPolicy.AutoRemdiationOptions.ReplaceByMajorTag != nil {
 					return *stepSecurityPolicy.AutoRemdiationOptions.ReplaceByMajorTag
+				}
+				return false
+			}()),
+			"skip_immutable_release_tags": types.BoolValue(func() bool {
+				if stepSecurityPolicy.AutoRemdiationOptions.SkipImmutableReleaseTags != nil {
+					return *stepSecurityPolicy.AutoRemdiationOptions.SkipImmutableReleaseTags
 				}
 				return false
 			}()),

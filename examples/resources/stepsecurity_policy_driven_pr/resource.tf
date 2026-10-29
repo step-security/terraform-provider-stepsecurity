@@ -28,6 +28,7 @@ resource "stepsecurity_policy_driven_pr" "org_level_all" {
     secure_docker_file                    = false
     actions_to_exempt_while_pinning       = ["actions/checkout", "actions/setup-node"]
     images_to_exempt_while_pinning        = ["amazon*"]
+    skip_immutable_release_tags           = true # leave tags of immutable GitHub releases unpinned
   }
 }
 
