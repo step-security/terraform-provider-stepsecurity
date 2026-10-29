@@ -45,6 +45,7 @@ type AutoRemdiationOptions struct {
 	ActionsToReplaceWithStepSecurityActions []string               `json:"actions_to_replace_with_step_security_actions"`
 	CustomActionsToReplace                  map[string]string      `json:"custom_actions_to_replace,omitempty"`
 	ReplaceByMajorTag                       *bool                  `json:"replace_by_major_tag,omitempty"`
+	SkipImmutableReleaseTags                *bool                  `json:"skip_immutable_release_tags,omitempty"`
 	ExemptedFromReplacement                 []string               `json:"exempted_from_replacement,omitempty"`
 	UpdatePrecommitFile                     []string               `json:"update_precommit_file,omitempty"`
 	CustomPrecommitConfig                   *CustomPrecommitConfig `json:"custom_precommit_config,omitempty"`
@@ -84,6 +85,7 @@ type controlSettings struct {
 	ActionsToReplace                    map[string]string                    `json:"actions_to_replace"`
 	CustomActionsToReplace              map[string]string                    `json:"custom_actions_to_replace"`
 	ReplaceByMajorTag                   *bool                                `json:"replace_by_major_tag,omitempty"`
+	SkipImmutableReleaseTags            *bool                                `json:"skip_immutable_release_tags,omitempty"`
 	ExemptedFromReplacement             []string                             `json:"exempted_from_replacement"`
 	ReplaceAllActions                   *bool                                `json:"replace_all_actions,omitempty"`
 	LabelsToReplace                     map[string]string                    `json:"labels_to_replace"`
@@ -284,6 +286,7 @@ func (c *APIClient) CreatePolicyDrivenPRPolicy(ctx context.Context, createReques
 		ActionsToReplace:                    actionsToReplace,
 		CustomActionsToReplace:              createRequest.AutoRemdiationOptions.CustomActionsToReplace,
 		ReplaceByMajorTag:                   createRequest.AutoRemdiationOptions.ReplaceByMajorTag,
+		SkipImmutableReleaseTags:            createRequest.AutoRemdiationOptions.SkipImmutableReleaseTags,
 		ExemptedFromReplacement:             createRequest.AutoRemdiationOptions.ExemptedFromReplacement,
 		ReplaceAllActions:                   replaceAllActions,
 		LabelsToReplace:                     createRequest.AutoRemdiationOptions.LabelsToReplace,
@@ -707,6 +710,7 @@ func autoRemediationOptionsFromConfig(config policyDrivenPRInternal) AutoRemdiat
 		ActionsToReplaceWithStepSecurityActions: actionsToReplace,
 		CustomActionsToReplace:                  config.ControlSettings.CustomActionsToReplace,
 		ReplaceByMajorTag:                       config.ControlSettings.ReplaceByMajorTag,
+		SkipImmutableReleaseTags:                config.ControlSettings.SkipImmutableReleaseTags,
 		ExemptedFromReplacement:                 config.ControlSettings.ExemptedFromReplacement,
 		UpdatePrecommitFile:                     updatePrecommitFiles,
 		CustomPrecommitConfig:                   config.ControlSettings.CustomPrecommitConfig,
