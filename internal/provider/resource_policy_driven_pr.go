@@ -290,6 +290,15 @@ func (r *policyDrivenPRResource) Schema(_ context.Context, _ resource.SchemaRequ
 						// already means "no extra patterns".
 						Validators: []validator.Set{setvalidator.SizeAtLeast(1)},
 					},
+					"custom_workflow_paths": schema.SetAttribute{
+						ElementType: types.StringType,
+						Optional:    true,
+						Description: "Repository-relative folders that hold workflow files outside .github/workflows, for example [\"ci/workflows\"]. Pull requests fix the .yml and .yaml files directly inside each folder (not in subfolders) in addition to .github/workflows, which is always included. Paths are written without a leading './' or a trailing '/', and must stay inside the repository. Issues and control evaluation only cover .github/workflows.",
+						// The API does not return an empty list, so [] would read back as
+						// null and show a diff on every plan. Omitting the attribute
+						// already means "only .github/workflows".
+						Validators: []validator.Set{setvalidator.SizeAtLeast(1)},
+					},
 					"update_existing_configuration": schema.BoolAttribute{
 						Optional:    true,
 						Computed:    true,
@@ -472,6 +481,13 @@ func (r *policyDrivenPRResource) ImportState(ctx context.Context, req resource.I
 		dockerfilePatternsSet, _ = types.SetValueFrom(ctx, types.StringType, elements)
 	}
 
+	// Null rather than an empty set when unset, for the same reason as
+	// dockerfile_patterns.
+	customWorkflowPathsSet := types.SetNull(types.StringType)
+	if len(policy.AutoRemdiationOptions.CustomWorkflowPaths) > 0 {
+		customWorkflowPathsSet, _ = types.SetValueFrom(ctx, types.StringType, policy.AutoRemdiationOptions.CustomWorkflowPaths)
+	}
+
 	var packageEcosystemList types.List
 	if len(policy.AutoRemdiationOptions.PackageEcosystem) > 0 {
 		var ecosystemObjects []attr.Value
@@ -603,6 +619,7 @@ func (r *policyDrivenPRResource) ImportState(ctx context.Context, req resource.I
 				},
 			},
 			"dockerfile_patterns":           types.SetType{ElemType: types.StringType},
+			"custom_workflow_paths":         types.SetType{ElemType: types.StringType},
 			"update_existing_configuration": types.BoolType,
 			"add_workflows":                 types.StringType,
 			"action_commit_map":             types.MapType{ElemType: types.StringType},
@@ -635,6 +652,7 @@ func (r *policyDrivenPRResource) ImportState(ctx context.Context, req resource.I
 			"update_precommit_file":             updatePrecommitFileList,
 			"package_ecosystem":                 packageEcosystemList,
 			"dockerfile_patterns":               dockerfilePatternsSet,
+			"custom_workflow_paths":             customWorkflowPathsSet,
 			"actions_exempted_from_replacement": exemptedFromReplacementList,
 			"update_existing_configuration": types.BoolValue(func() bool {
 				if policy.AutoRemdiationOptions.Subtractive != nil {
@@ -736,6 +754,7 @@ type autoRemdiationOptionsModel struct {
 	CustomPrecommitConfig                   types.Object `tfsdk:"custom_precommit_config"`
 	PackageEcosystem                        types.List   `tfsdk:"package_ecosystem"`
 	DockerfilePatterns                      types.Set    `tfsdk:"dockerfile_patterns"`
+	CustomWorkflowPaths                     types.Set    `tfsdk:"custom_workflow_paths"`
 	UpdateExistingConfiguration             types.Bool   `tfsdk:"update_existing_configuration"`
 	AddWorkflows                            types.String `tfsdk:"add_workflows"`
 	ActionCommitMap                         types.Map    `tfsdk:"action_commit_map"`
@@ -886,6 +905,21 @@ func (r *policyDrivenPRResource) ValidateConfig(ctx context.Context, req resourc
 		// control is on, and drops it silently otherwise. Configuring patterns
 		// against a disabled control then looks like the patterns are broken
 		// rather than unused, so fail at plan time instead.
+		// The API stores each custom workflow path in its cleaned form, so a path
+		// written any other way would read back changed and show a diff on every
+		// plan. Reject it here and say how to write it.
+		if !options.CustomWorkflowPaths.IsNull() && !options.CustomWorkflowPaths.IsUnknown() {
+			for _, elem := range options.CustomWorkflowPaths.Elements() {
+				value, ok := elem.(types.String)
+				if !ok || value.IsUnknown() || value.IsNull() {
+					continue
+				}
+				if problem := customWorkflowPathProblem(value.ValueString()); problem != "" {
+					resp.Diagnostics.AddError("Invalid Configuration", problem)
+				}
+			}
+		}
+
 		hasDockerfilePatterns := !options.DockerfilePatterns.IsNull() && !options.DockerfilePatterns.IsUnknown() && len(options.DockerfilePatterns.Elements()) > 0
 		if hasDockerfilePatterns {
 			// Skip while secure_docker_file is unknown: ValueBool() is false then,
@@ -1118,6 +1152,15 @@ func (r *policyDrivenPRResource) Create(ctx context.Context, req resource.Create
 		}
 	}
 
+	// Empty rather than nil when unset, so the request clears any folders the
+	// repo already has instead of leaving them in place.
+	customWorkflowPaths := []string{}
+	if !options.CustomWorkflowPaths.IsNull() {
+		for _, elem := range options.CustomWorkflowPaths.Elements() {
+			customWorkflowPaths = append(customWorkflowPaths, elem.(types.String).ValueString())
+		}
+	}
+
 	// Extract new optional fields
 	var packageEcosystem []stepsecurityapi.DependabotConfig
 	if !options.PackageEcosystem.IsNull() {
@@ -1246,6 +1289,7 @@ func (r *policyDrivenPRResource) Create(ctx context.Context, req resource.Create
 			UpdatePrecommitFile:                     updatePrecommitFile,
 			PackageEcosystem:                        packageEcosystem,
 			DockerfilePatterns:                      dockerfilePatterns,
+			CustomWorkflowPaths:                     customWorkflowPaths,
 			Subtractive:                             subtractive,
 			AddWorkflows:                            options.AddWorkflows.ValueString(),
 			ActionCommitMap:                         actionCommitMap,
@@ -1738,6 +1782,15 @@ func (r *policyDrivenPRResource) Update(ctx context.Context, req resource.Update
 		}
 	}
 
+	// Empty rather than nil when removed from the config, for the same reason as
+	// dockerfile_patterns.
+	customWorkflowPathsUpdate := []string{}
+	if !planOptions.CustomWorkflowPaths.IsNull() {
+		for _, elem := range planOptions.CustomWorkflowPaths.Elements() {
+			customWorkflowPathsUpdate = append(customWorkflowPathsUpdate, elem.(types.String).ValueString())
+		}
+	}
+
 	// Extract new optional fields for update
 	var packageEcosystemPlan []stepsecurityapi.DependabotConfig
 	if !planOptions.PackageEcosystem.IsNull() {
@@ -1867,6 +1920,7 @@ func (r *policyDrivenPRResource) Update(ctx context.Context, req resource.Update
 			UpdatePrecommitFile:                     updatePrecommitFilePlan,
 			PackageEcosystem:                        packageEcosystemPlan,
 			DockerfilePatterns:                      dockerfilePatternsUpdate,
+			CustomWorkflowPaths:                     customWorkflowPathsUpdate,
 			Subtractive:                             subtractiveUpdate,
 			AddWorkflows:                            planOptions.AddWorkflows.ValueString(),
 			ActionCommitMap:                         actionCommitMapPlan,
@@ -2030,6 +2084,13 @@ func (r *policyDrivenPRResource) updatePolicyDrivenPRState(ctx context.Context, 
 		dockerfilePatternsSet, _ = types.SetValueFrom(ctx, types.StringType, elements)
 	}
 
+	// Null rather than an empty set when unset, for the same reason as
+	// dockerfile_patterns.
+	customWorkflowPathsSet := types.SetNull(types.StringType)
+	if len(stepSecurityPolicy.AutoRemdiationOptions.CustomWorkflowPaths) > 0 {
+		customWorkflowPathsSet, _ = types.SetValueFrom(ctx, types.StringType, stepSecurityPolicy.AutoRemdiationOptions.CustomWorkflowPaths)
+	}
+
 	// Handle new optional fields
 	var packageEcosystemList types.List
 	if len(stepSecurityPolicy.AutoRemdiationOptions.PackageEcosystem) > 0 {
@@ -2162,6 +2223,7 @@ func (r *policyDrivenPRResource) updatePolicyDrivenPRState(ctx context.Context, 
 				},
 			},
 			"dockerfile_patterns":           types.SetType{ElemType: types.StringType},
+			"custom_workflow_paths":         types.SetType{ElemType: types.StringType},
 			"update_existing_configuration": types.BoolType,
 			"add_workflows":                 types.StringType,
 			"action_commit_map":             types.MapType{ElemType: types.StringType},
@@ -2194,6 +2256,7 @@ func (r *policyDrivenPRResource) updatePolicyDrivenPRState(ctx context.Context, 
 			"update_precommit_file":             updatePrecommitFileList,
 			"package_ecosystem":                 packageEcosystemList,
 			"dockerfile_patterns":               dockerfilePatternsSet,
+			"custom_workflow_paths":             customWorkflowPathsSet,
 			"actions_exempted_from_replacement": exemptedFromReplacementList,
 			"update_existing_configuration": types.BoolValue(func() bool {
 				if stepSecurityPolicy.AutoRemdiationOptions.Subtractive != nil {

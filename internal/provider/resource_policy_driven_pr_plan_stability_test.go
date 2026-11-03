@@ -338,6 +338,38 @@ func TestAccPolicyDrivenPREmptyDockerfilePatternsIsRejected(t *testing.T) {
 	})
 }
 
+func customWorkflowPathsFixture(paths string) string {
+	return fmt.Sprintf(`
+resource "stepsecurity_policy_driven_pr" "test" {
+  owner          = "step-terraform-tests"
+  selected_repos = ["test-repo-one"]
+
+  auto_remediation_options = {
+    create_pr             = true
+    pin_actions_to_sha    = true
+    custom_workflow_paths = %s
+  }
+}
+`, paths)
+}
+
+// TestAccPolicyDrivenPRCustomWorkflowPathsPlanIsEmptyAfterApply: folders round-trip,
+// and a reordered or duplicated list is the same set, so the plan stays clean.
+func TestAccPolicyDrivenPRCustomWorkflowPathsPlanIsEmptyAfterApply(t *testing.T) {
+	testAccPolicyDrivenPRAgainstFake(t, newFakePolicyDrivenPRBackend(true),
+		customWorkflowPathsFixture(`["ci/workflows", "templates", "ci/workflows"]`))
+}
+
+// TestAccPolicyDrivenPRUncleanCustomWorkflowPathIsRejected: the API stores the
+// cleaned form, so "./ci/workflows/" would read back as "ci/workflows" and drift.
+// It is rejected at plan time with the form to use.
+func TestAccPolicyDrivenPRUncleanCustomWorkflowPathIsRejected(t *testing.T) {
+	testAccPolicyDrivenPRStepsAgainstFake(t, newFakePolicyDrivenPRBackend(true), resource.TestStep{
+		Config:      customWorkflowPathsFixture(`["./ci/workflows/"]`),
+		ExpectError: regexp.MustCompile(`must be written as\s+"ci/workflows"`),
+	})
+}
+
 // TestAccPolicyDrivenPREmptyDependabotYAMLIsRejected: an empty cooldown_yaml, groups_yaml
 // or options_yaml is never sent to the API and reads back as null, so accepting it left a
 // diff on every plan. It is rejected at plan time instead.

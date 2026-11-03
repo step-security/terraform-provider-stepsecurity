@@ -48,6 +48,7 @@ resource "stepsecurity_policy_driven_pr" "repo_level_config" {
     restrict_github_token_permissions     = true
     secure_docker_file                    = true
     dockerfile_patterns                   = ["Dockerfile.*", "*.Dockerfile"] # also pin files with these names, not only "Dockerfile"; requires secure_docker_file = true
+    custom_workflow_paths                 = ["ci/workflows"]                 # also fix workflow files in these folders, not only .github/workflows
     labels_to_replace = {
       "ubuntu-latest-8-cores" = "ubuntu-latest"
       "windows-latest-large"  = "windows-latest"
