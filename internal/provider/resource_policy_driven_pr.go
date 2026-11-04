@@ -911,7 +911,11 @@ func (r *policyDrivenPRResource) ValidateConfig(ctx context.Context, req resourc
 		if !options.CustomWorkflowPaths.IsNull() && !options.CustomWorkflowPaths.IsUnknown() {
 			for _, elem := range options.CustomWorkflowPaths.Elements() {
 				value, ok := elem.(types.String)
-				if !ok || value.IsUnknown() || value.IsNull() {
+				if !ok || value.IsUnknown() {
+					continue
+				}
+				if value.IsNull() {
+					resp.Diagnostics.AddError("Invalid Configuration", "custom_workflow_paths entries cannot be null")
 					continue
 				}
 				if problem := customWorkflowPathProblem(value.ValueString()); problem != "" {
