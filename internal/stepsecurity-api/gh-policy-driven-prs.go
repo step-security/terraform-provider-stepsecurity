@@ -50,6 +50,7 @@ type AutoRemdiationOptions struct {
 	CustomPrecommitConfig                   *CustomPrecommitConfig `json:"custom_precommit_config,omitempty"`
 	PackageEcosystem                        []DependabotConfig     `json:"package_ecosystem,omitempty"`
 	DockerfilePatterns                      []string               `json:"dockerfile_patterns,omitempty"`
+	CustomWorkflowPaths                     []string               `json:"custom_workflow_paths,omitempty"`
 	Subtractive                             *bool                  `json:"subtractive,omitempty"`
 	AddWorkflows                            string                 `json:"add_workflows,omitempty"`
 	ActionCommitMap                         map[string]string      `json:"action_commit_map"`
@@ -76,9 +77,9 @@ type issuePRConfig struct {
 
 // controlSettings is the control_settings object sent to the API.
 //
-// DockerfilePatterns has no omitempty: the API keeps the stored patterns when the key
-// is missing, so removing them from the config has to reach it as an explicit empty
-// list.
+// DockerfilePatterns and CustomWorkflowPaths have no omitempty: the API keeps the
+// stored list when the key is missing, so removing it from the config has to reach it
+// as an explicit empty list.
 type controlSettings struct {
 	ExemptedActions                     []string                             `json:"exempted_actions"`
 	ActionsToReplace                    map[string]string                    `json:"actions_to_replace"`
@@ -91,6 +92,7 @@ type controlSettings struct {
 	CustomPrecommitConfig               *CustomPrecommitConfig               `json:"custom_precommit_config,omitempty"`
 	PackageEcosystem                    []DependabotConfig                   `json:"package_ecosystem,omitempty"`
 	DockerfilePatterns                  []string                             `json:"dockerfile_patterns"`
+	CustomWorkflowPaths                 []string                             `json:"custom_workflow_paths"`
 	Subtractive                         *bool                                `json:"subtractive,omitempty"`
 	AddWorkflows                        string                               `json:"add_workflows,omitempty"`
 	ApplyIssuePRConfigForAllRepos       *bool                                `json:"apply_issue_pr_config_for_all_repos,omitempty"`
@@ -291,6 +293,7 @@ func (c *APIClient) CreatePolicyDrivenPRPolicy(ctx context.Context, createReques
 		CustomPrecommitConfig:               createRequest.AutoRemdiationOptions.CustomPrecommitConfig,
 		PackageEcosystem:                    createRequest.AutoRemdiationOptions.PackageEcosystem,
 		DockerfilePatterns:                  createRequest.AutoRemdiationOptions.DockerfilePatterns,
+		CustomWorkflowPaths:                 createRequest.AutoRemdiationOptions.CustomWorkflowPaths,
 		Subtractive:                         createRequest.AutoRemdiationOptions.Subtractive,
 		AddWorkflows:                        createRequest.AutoRemdiationOptions.AddWorkflows,
 		ActionCommitMap:                     createRequest.AutoRemdiationOptions.ActionCommitMap,
@@ -712,6 +715,7 @@ func autoRemediationOptionsFromConfig(config policyDrivenPRInternal) AutoRemdiat
 		CustomPrecommitConfig:                   config.ControlSettings.CustomPrecommitConfig,
 		PackageEcosystem:                        config.ControlSettings.PackageEcosystem,
 		DockerfilePatterns:                      config.ControlSettings.DockerfilePatterns,
+		CustomWorkflowPaths:                     config.ControlSettings.CustomWorkflowPaths,
 		Subtractive:                             config.ControlSettings.Subtractive,
 		AddWorkflows:                            config.ControlSettings.AddWorkflows,
 		HardenRunnerConfig:                      config.ControlSettings.HardenRunnerConfig,

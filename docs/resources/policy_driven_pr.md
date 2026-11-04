@@ -76,6 +76,7 @@ resource "stepsecurity_policy_driven_pr" "repo_level_config" {
     restrict_github_token_permissions     = true
     secure_docker_file                    = true
     dockerfile_patterns                   = ["Dockerfile.*", "*.Dockerfile"] # also pin files with these names, not only "Dockerfile"; requires secure_docker_file = true
+    custom_workflow_paths                 = ["ci/workflows"]                 # also fix workflow files in these folders, not only .github/workflows
     labels_to_replace = {
       "ubuntu-latest-8-cores" = "ubuntu-latest"
       "windows-latest-large"  = "windows-latest"
@@ -309,6 +310,7 @@ Optional:
 - `create_pr` (Boolean) Create a PR when a finding is detected.
 - `custom_actions_to_replace` (Map of String) Map of actions to replace with custom replacements. Keys are the original action names, values are the replacement action names chosen by the customer.
 - `custom_precommit_config` (Attributes) Provide a full .pre-commit-config.yaml verbatim instead of assembling it from update_precommit_file hooks. Mutually exclusive with update_precommit_file. (see [below for nested schema](#nestedatt--auto_remediation_options--custom_precommit_config))
+- `custom_workflow_paths` (Set of String) Repository-relative folders that hold workflow files outside .github/workflows, for example ["ci/workflows"]. Pull requests fix the .yml and .yaml files directly inside each folder (not in subfolders) in addition to .github/workflows, which is always included. Paths are written without a leading './' or a trailing '/', and must stay inside the repository. Issues and control evaluation only cover .github/workflows.
 - `dockerfile_patterns` (Set of String) Extra shell-glob patterns, matched case-insensitively against a file's name only (not its path), naming files that the Docker base image pinning control (secure_docker_file) should pin in addition to files named exactly 'Dockerfile'. The built-in rule always applies, so these can only ever pin more files, never fewer. Use this for repositories naming files 'Dockerfile.dev' or 'Containerfile'. Example: ["Dockerfile.*", "Containerfile"].
 - `harden_github_hosted_runner` (Boolean) When enabled, this creates a PR/issue to install security agent on the GitHub-hosted runner to prevent exfiltration of credentials, monitor the build process, and detect compromised dependencies.
 - `harden_runner_config` (Attributes) Configuration for harden runner. When not provided, the default harden runner config will be applied. (see [below for nested schema](#nestedatt--auto_remediation_options--harden_runner_config))
