@@ -52,9 +52,10 @@ func (r *GithubRepoNotificationSettingsResource) Metadata(_ context.Context, req
 // Schema defines the schema for the resource.
 func (r *GithubRepoNotificationSettingsResource) Schema(_ context.Context, _ resource.SchemaRequest, resp *resource.SchemaResponse) {
 	resp.Schema = schema.Schema{
-		// Version 1 added the PAT toggles to notification_events; UpgradeState
-		// backfills them so states written by earlier releases plan no changes.
-		Version: 1,
+		// Version 1 added the PAT toggles to notification_events and version 2
+		// the new-token alert; UpgradeState backfills them so states written by
+		// earlier releases plan no changes.
+		Version: 2,
 		Attributes: map[string]schema.Attribute{
 			"id": schema.StringAttribute{
 				Computed: true,
@@ -235,6 +236,12 @@ func (r *GithubRepoNotificationSettingsResource) Schema(_ context.Context, _ res
 						Description: "Notify with pre-expiry reminders for personal access tokens that are about to expire",
 						Default:     booldefault.StaticBool(false),
 					},
+					"pat_new_token": schema.BoolAttribute{
+						Optional:    true,
+						Computed:    true,
+						Description: "Notify when a new personal access token appears in the organization, for the token classes switched on in the PAT governance policy's notify_on_new_token setting",
+						Default:     booldefault.StaticBool(false),
+					},
 				},
 				Required: true,
 			},
@@ -377,6 +384,7 @@ type githubNotificationEventsModel struct {
 	PATUnusedViolation                types.Bool `tfsdk:"pat_unused_violation"`
 	PATInactiveOwnerViolation         types.Bool `tfsdk:"pat_inactive_owner_violation"`
 	PATExpiryReminder                 types.Bool `tfsdk:"pat_expiry_reminder"`
+	PATNewToken                       types.Bool `tfsdk:"pat_new_token"`
 }
 
 // Create creates the resource and sets the initial Terraform state.
@@ -433,6 +441,7 @@ func (r *GithubRepoNotificationSettingsResource) Create(ctx context.Context, req
 			NotifyForPATUnusedViolation:        utilities.ConvertBoolToString(events.PATUnusedViolation.ValueBool()),
 			NotifyForPATInactiveOwnerViolation: utilities.ConvertBoolToString(events.PATInactiveOwnerViolation.ValueBool()),
 			NotifyForPATExpiryReminder:         utilities.ConvertBoolToString(events.PATExpiryReminder.ValueBool()),
+			NotifyForPATNewToken:               utilities.ConvertBoolToString(events.PATNewToken.ValueBool()),
 		},
 	}
 
@@ -544,6 +553,7 @@ func (r *GithubRepoNotificationSettingsResource) Read(ctx context.Context, req r
 			"pat_unused_violation":                  types.BoolType,
 			"pat_inactive_owner_violation":          types.BoolType,
 			"pat_expiry_reminder":                   types.BoolType,
+			"pat_new_token":                         types.BoolType,
 		},
 		map[string]attr.Value{
 			"domain_blocked":                        types.BoolValue(utilities.ConvertStringToBool(settings.NotifyWhenDomainBlocked)),
@@ -567,6 +577,7 @@ func (r *GithubRepoNotificationSettingsResource) Read(ctx context.Context, req r
 			"pat_unused_violation":                  types.BoolValue(utilities.ConvertStringToBool(settings.NotifyForPATUnusedViolation)),
 			"pat_inactive_owner_violation":          types.BoolValue(utilities.ConvertStringToBool(settings.NotifyForPATInactiveOwnerViolation)),
 			"pat_expiry_reminder":                   types.BoolValue(utilities.ConvertStringToBool(settings.NotifyForPATExpiryReminder)),
+			"pat_new_token":                         types.BoolValue(utilities.ConvertStringToBool(settings.NotifyForPATNewToken)),
 		},
 	)
 	state.NotificationEvents = eventsObj
@@ -639,6 +650,7 @@ func (r *GithubRepoNotificationSettingsResource) Update(ctx context.Context, req
 			NotifyForPATUnusedViolation:        utilities.ConvertBoolToString(events.PATUnusedViolation.ValueBool()),
 			NotifyForPATInactiveOwnerViolation: utilities.ConvertBoolToString(events.PATInactiveOwnerViolation.ValueBool()),
 			NotifyForPATExpiryReminder:         utilities.ConvertBoolToString(events.PATExpiryReminder.ValueBool()),
+			NotifyForPATNewToken:               utilities.ConvertBoolToString(events.PATNewToken.ValueBool()),
 		},
 	}
 
@@ -828,9 +840,10 @@ func (m githubEquivalentStateForDefaultModifier) PlanModifyString(_ context.Cont
 }
 
 // notificationEventsPATToggles are the notification_events attributes added
-// in schema version 1. States written by earlier releases lack them, and a
-// plan would otherwise add each one as false; the backend treats an absent
-// toggle as off, so false is the faithful value.
+// in schema versions 1 (the PAT governance toggles) and 2 (the new-token
+// alert). States written by earlier releases lack them, and a plan would
+// otherwise add each one as false; the backend treats an absent toggle as
+// off, so false is the faithful value.
 var notificationEventsPATToggles = []string{
 	"pat_max_age_violation",
 	"pat_no_expiry_violation",
@@ -838,12 +851,15 @@ var notificationEventsPATToggles = []string{
 	"pat_unused_violation",
 	"pat_inactive_owner_violation",
 	"pat_expiry_reminder",
+	"pat_new_token",
 }
 
-// UpgradeState upgrades states written with schema version 0.
+// UpgradeState upgrades states written with schema versions 0 and 1; both
+// only need the missing toggles backfilled.
 func (r *GithubRepoNotificationSettingsResource) UpgradeState(context.Context) map[int64]resource.StateUpgrader {
 	return map[int64]resource.StateUpgrader{
 		0: {StateUpgrader: upgradeGithubOrgNotificationSettingsStateV0},
+		1: {StateUpgrader: upgradeGithubOrgNotificationSettingsStateV0},
 	}
 }
 

@@ -169,6 +169,7 @@ Optional:
 - `pat_expiry_reminder` (Boolean) Notify with pre-expiry reminders for personal access tokens that are about to expire
 - `pat_inactive_owner_violation` (Boolean) Notify when a personal access token belongs to an owner who is no longer an active organization member
 - `pat_max_age_violation` (Boolean) Notify when a personal access token violates the PAT governance max-age control
+- `pat_new_token` (Boolean) Notify when a new personal access token appears in the organization, for the token classes switched on in the PAT governance policy's notify_on_new_token setting
 - `pat_no_expiry_violation` (Boolean) Notify when a personal access token violates the PAT governance no-expiration control
 - `pat_over_scoped_violation` (Boolean) Notify when a personal access token violates the PAT governance over-scoped control
 - `pat_unused_violation` (Boolean) Notify when a personal access token violates the PAT governance unused-token control
@@ -190,7 +191,7 @@ Required:
 
 Optional:
 
-- `events` (Set of String) Events this profile receives: `domain_blocked`, `new_endpoint_discovered`, `https_detections`, `suspicious_network_call_detected`, `suspicious_process_events_detected`, `secret_exfiltration_detected`, `secrets_detected`, `artifacts_secrets_detected`, `run_blocked_by_policy`, `baseline_check_failures`, `required_check_failures`, `optional_check_failures`, `non_compliant_artifact_detected`, and the PAT governance events `pat_max_age_violation`, `pat_no_expiry_violation`, `pat_over_scoped_violation`, `pat_unused_violation`, `pat_inactive_owner_violation`, `pat_expiry_reminder`, `pat_revocation` and `pat_abuse_detected`. Names match `notification_events` where an event is in both. `file_overwrite` and `imposter_commits_detected` are not available on profiles.
+- `events` (Set of String) Events this profile receives: `domain_blocked`, `new_endpoint_discovered`, `https_detections`, `suspicious_network_call_detected`, `suspicious_process_events_detected`, `secret_exfiltration_detected`, `secrets_detected`, `artifacts_secrets_detected`, `run_blocked_by_policy`, `baseline_check_failures`, `required_check_failures`, `optional_check_failures`, `non_compliant_artifact_detected`, and the PAT governance events `pat_max_age_violation`, `pat_no_expiry_violation`, `pat_over_scoped_violation`, `pat_unused_violation`, `pat_inactive_owner_violation`, `pat_expiry_reminder`, `pat_revocation`, `pat_abuse_detected` and `pat_new_token`. Names match `notification_events` where an event is in both. `file_overwrite` and `imposter_commits_detected` are not available on profiles.
 - `threat_intel_level` (String) Threat Intel notifications for this profile: `off` (default), `all`, `name` or `version`, with the same meaning as the resource's `threat_intel.level`.
 
 Read-Only:

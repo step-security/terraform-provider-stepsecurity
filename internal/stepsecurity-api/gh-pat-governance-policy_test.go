@@ -100,6 +100,8 @@ func TestUpdatePATGovernancePolicy_SendsEveryFieldAsTheAPISpellsIt(t *testing.T)
 		OwnerEmailFallbackDomain:               "example.com",
 		NotifyOnRevocation:                     true,
 		FineGrainedNotifyOnRevocation:          boolPtr(false),
+		NotifyOnNewToken:                       true,
+		FineGrainedNotifyOnNewToken:            boolPtr(false),
 		RevocationNotificationTemplate:         &PATReminderTemplate{Subject: "rs", Body: "rb"},
 		FineGrainedNoncompliantRevokeAfterDays: 3650,
 		AutoRevokeAfterReminders:               true,
@@ -113,6 +115,7 @@ func TestUpdatePATGovernancePolicy_SendsEveryFieldAsTheAPISpellsIt(t *testing.T)
 		"enabled", "classic_max_age_days", "classic_unused_days", "classic_expiry_reminder_days",
 		"expiry_reminder_templates", "expiry_reminder_cc", "expiry_reminder_to_owner",
 		"owner_email_fallback_domain", "notify_on_revocation", "fine_grained_notify_on_revocation",
+		"notify_on_new_token", "fine_grained_notify_on_new_token",
 		"revocation_notification_template", "fine_grained_noncompliant_revoke_after_days",
 		"auto_revoke_after_reminders", "classic_auto_revoke_after_reminders", "use_tenant_policy",
 	} {
@@ -123,6 +126,8 @@ func TestUpdatePATGovernancePolicy_SendsEveryFieldAsTheAPISpellsIt(t *testing.T)
 	assert.JSONEq(t, `0`, string(sent["classic_unused_days"]))
 	assert.JSONEq(t, `false`, string(sent["fine_grained_notify_on_revocation"]))
 	assert.NotContains(t, sent, "classic_notify_on_revocation")
+	assert.JSONEq(t, `false`, string(sent["fine_grained_notify_on_new_token"]))
+	assert.NotContains(t, sent, "classic_notify_on_new_token")
 	assert.NotContains(t, sent, "fine_grained_auto_revoke_after_reminders")
 	assert.NotContains(t, sent, "fine_grained_unused_days")
 	assert.NotContains(t, sent, "updated_at")
