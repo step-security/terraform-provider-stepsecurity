@@ -485,6 +485,36 @@ resource "stepsecurity_github_run_policy" "secrets_policy_default_branch" {
   }
 }
 
+# Custom Property Rule Example - Applies to repositories by GitHub custom
+# property, including repositories tagged later (the console's "Repositories
+# with a custom property" scope). Rows after the first combine with the row
+# above using "and" (default) or "or"; "and" binds first. Property names ignore
+# case; values match exactly, and a row matches when the repository has any
+# of its values. This rule reads:
+# (sensitive_app_level is Tier 1) OR (compliance_scope is pci or sox).
+resource "stepsecurity_github_run_policy" "tier1_secrets_policy" {
+  owner = "my-org"
+  name  = "Secrets Policy - Tier 1 Repositories"
+
+  custom_property_rule = [
+    {
+      property = "sensitive_app_level"
+      values   = ["Tier 1"]
+    },
+    {
+      combine  = "or"
+      property = "compliance_scope"
+      values   = ["pci", "sox"]
+    },
+  ]
+
+  policy_config = {
+    owner                 = "my-org"
+    name                  = "Secrets Policy - Tier 1 Repositories"
+    enable_secrets_policy = true
+  }
+}
+
 # For importing existing run policy to terraform state
 # this will be helpful to manage existing policy using terraform
 # alternative to this is to use terraform import command
