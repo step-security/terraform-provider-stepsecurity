@@ -185,6 +185,7 @@ Read-Only:
 - `all_repos` (Boolean) Whether this policy applies to all repositories in the organization.
 - `created_at` (String) The timestamp when this policy was created.
 - `created_by` (String) The user who created this policy.
+- `custom_property_rule` (Attributes List) Custom property rule this policy applies to, if any. Rows after the first combine with the row above using `and` or `or`; `and` binds first. (see [below for nested schema](#nestedatt--run_policies--custom_property_rule))
 - `customer` (String) The customer associated with the policy.
 - `last_updated_at` (String) The timestamp when this policy was last updated.
 - `last_updated_by` (String) The user who last updated this policy.
@@ -193,6 +194,16 @@ Read-Only:
 - `policy_config` (Attributes) The configuration for this run policy. (see [below for nested schema](#nestedatt--run_policies--policy_config))
 - `policy_id` (String) The unique identifier for this policy.
 - `repositories` (List of String) List of specific repositories this policy applies to.
+
+<a id="nestedatt--run_policies--custom_property_rule"></a>
+### Nested Schema for `run_policies.custom_property_rule`
+
+Read-Only:
+
+- `combine` (String) `and` or `or` with the row above; null on the first row.
+- `property` (String) The custom property name.
+- `values` (Set of String) Values matched exactly.
+
 
 <a id="nestedatt--run_policies--policy_config"></a>
 ### Nested Schema for `run_policies.policy_config`
