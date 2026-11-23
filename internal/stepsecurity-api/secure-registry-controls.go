@@ -21,10 +21,23 @@ type SecureRegistryControls struct {
 }
 
 // CooldownPeriodControl blocks packages published within a configurable window.
+// The backend replaces the whole object on upsert, so omitting
+// AutoExemptSecurityFixes clears any stored setting.
 type CooldownPeriodControl struct {
-	Enabled       bool     `json:"enabled"`
-	PeriodInDays  int      `json:"period_in_days"`
-	ExemptionList []string `json:"exemption_list,omitempty"`
+	Enabled                 bool                     `json:"enabled"`
+	PeriodInDays            int                      `json:"period_in_days"`
+	ExemptionList           []string                 `json:"exemption_list,omitempty"`
+	AutoExemptSecurityFixes *AutoExemptSecurityFixes `json:"auto_exempt_security_fixes,omitempty"`
+}
+
+// AutoExemptSecurityFixes lets the exact fixed version named by a verified,
+// scored advisory through the cooldown window when the advisory meets the
+// threshold. At most one of MinCVSSScore (0.1 to 10.0) and MinSeverity
+// (critical, high, moderate, low) is set; one is required when Enabled is true.
+type AutoExemptSecurityFixes struct {
+	Enabled      bool     `json:"enabled"`
+	MinCVSSScore *float64 `json:"min_cvss_score,omitempty"`
+	MinSeverity  string   `json:"min_severity,omitempty"`
 }
 
 // CompromisedPackagesControl blocks packages flagged as compromised.
@@ -34,7 +47,7 @@ type CompromisedPackagesControl struct {
 
 // TyposquattingControl blocks package names that are heuristically similar to
 // popular packages. It is an advisory control (fails open on detection errors).
-// Only applicable when Registry == "npm"; the backend rejects enabling it for
+// Only applicable to npm, pypi and maven; the backend rejects enabling it for
 // other registries. Whitelist entries override false-positive detections.
 type TyposquattingControl struct {
 	Enabled   bool     `json:"enabled"`

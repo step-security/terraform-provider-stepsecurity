@@ -19,6 +19,12 @@ resource "stepsecurity_secure_registry_policy" "npm_full" {
     enabled        = true
     period_in_days = 7
     exemption_list = ["@babel/core@*", "react@1.2.3", "@scope/*", "lodash@4.17.21"]
+
+    # Let the fixed version of a high or critical advisory skip the cooldown.
+    auto_exempt_security_fixes = {
+      enabled      = true
+      min_severity = "high"
+    }
   }
 
   compromised_packages_control = {
@@ -78,10 +84,22 @@ resource "stepsecurity_secure_registry_policy" "pypi_full" {
     enabled        = true
     period_in_days = 7
     exemption_list = ["requests@*", "django@1.*", "flask@3.0.3"]
+
+    # Threshold by CVSS score instead of severity (set one or the other).
+    auto_exempt_security_fixes = {
+      enabled        = true
+      min_cvss_score = 7.0
+    }
   }
 
   compromised_packages_control = {
     enabled = true
+  }
+
+  # PyPI names are compared after normalization, so "Reqeusts_Lib" matches "reqeusts-lib".
+  typosquatting_control = {
+    enabled        = true
+    exemption_list = ["reqeusts-lib"]
   }
 
   custom_block_list_control = {
@@ -115,8 +133,8 @@ import {
   id = "pypi"
 }
 
-# Enable cooldown and compromised packages controls for Maven Central
-# (custom_block_list_control, typosquatting_control, and npm_settings are not applicable to maven)
+# Enable cooldown, compromised packages and typosquatting controls for Maven Central
+# (custom_block_list_control and npm_settings are not applicable to maven)
 resource "stepsecurity_secure_registry_policy" "maven_full" {
   registry = "maven"
 
@@ -127,6 +145,12 @@ resource "stepsecurity_secure_registry_policy" "maven_full" {
 
   compromised_packages_control = {
     enabled = true
+  }
+
+  # Maven exemptions are exact groupId:artifactId coordinates.
+  typosquatting_control = {
+    enabled        = true
+    exemption_list = ["com.example:guava-utils"]
   }
 }
 
