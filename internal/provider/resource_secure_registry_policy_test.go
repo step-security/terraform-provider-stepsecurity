@@ -9,6 +9,7 @@ import (
 
 	"github.com/hashicorp/terraform-plugin-framework/attr"
 	"github.com/hashicorp/terraform-plugin-framework/diag"
+	"github.com/hashicorp/terraform-plugin-framework/path"
 	fwresource "github.com/hashicorp/terraform-plugin-framework/resource"
 	resourceschema "github.com/hashicorp/terraform-plugin-framework/resource/schema"
 	"github.com/hashicorp/terraform-plugin-framework/schema/validator"
@@ -540,24 +541,48 @@ func TestSecureRegistryPolicyResource_ValidateConfig_NpmSettings(t *testing.T) {
 			expectedError:          false,
 		},
 		{
-			name:                   "typosquatting_control_rejected_for_pypi",
+			name:                   "typosquatting_control_allowed_for_pypi",
 			registry:               "pypi",
 			npmSettings:            types.ObjectNull(npmSettingsAttrTypes),
 			typosquattingControl:   mustBuildTestTyposquattingObject(t, true),
 			customBlockListControl: types.ObjectNull(customBlockListControlAttrTypes),
-			expectedError:          true,
+			expectedError:          false,
 		},
 		{
-			name:                   "typosquatting_control_rejected_for_maven",
+			name:                   "typosquatting_control_allowed_for_maven",
 			registry:               "maven",
+			npmSettings:            types.ObjectNull(npmSettingsAttrTypes),
+			typosquattingControl:   mustBuildTestTyposquattingObject(t, true),
+			customBlockListControl: types.ObjectNull(customBlockListControlAttrTypes),
+			expectedError:          false,
+		},
+		{
+			name:                   "typosquatting_control_rejected_for_nuget",
+			registry:               "nuget",
 			npmSettings:            types.ObjectNull(npmSettingsAttrTypes),
 			typosquattingControl:   mustBuildTestTyposquattingObject(t, true),
 			customBlockListControl: types.ObjectNull(customBlockListControlAttrTypes),
 			expectedError:          true,
 		},
 		{
-			name:                   "typosquatting_control_rejected_for_nuget",
-			registry:               "nuget",
+			name:                   "typosquatting_control_rejected_for_go",
+			registry:               "go",
+			npmSettings:            types.ObjectNull(npmSettingsAttrTypes),
+			typosquattingControl:   mustBuildTestTyposquattingObject(t, true),
+			customBlockListControl: types.ObjectNull(customBlockListControlAttrTypes),
+			expectedError:          true,
+		},
+		{
+			name:                   "typosquatting_control_rejected_for_ruby",
+			registry:               "ruby",
+			npmSettings:            types.ObjectNull(npmSettingsAttrTypes),
+			typosquattingControl:   mustBuildTestTyposquattingObject(t, true),
+			customBlockListControl: types.ObjectNull(customBlockListControlAttrTypes),
+			expectedError:          true,
+		},
+		{
+			name:                   "typosquatting_control_rejected_for_cargo",
+			registry:               "cargo",
 			npmSettings:            types.ObjectNull(npmSettingsAttrTypes),
 			typosquattingControl:   mustBuildTestTyposquattingObject(t, true),
 			customBlockListControl: types.ObjectNull(customBlockListControlAttrTypes),
@@ -633,8 +658,8 @@ func TestSecureRegistryPolicyResource_ValidateConfig_UnknownBlocksDeferValidatio
 			},
 		},
 		{
-			name:     "unknown_typosquatting_control_on_pypi",
-			registry: "pypi",
+			name:     "unknown_typosquatting_control_on_nuget",
+			registry: "nuget",
 			model: func(m *secureRegistryPolicyResourceModel) {
 				m.TyposquattingControl = types.ObjectUnknown(typosquattingControlAttrTypes)
 			},
@@ -967,7 +992,7 @@ func TestAccSecureRegistryPolicyResource_PypiBlockList(t *testing.T) {
 }
 
 // TestAccSecureRegistryPolicyResource_Typosquatting is an acceptance test covering
-// typosquatting_control on npm, including plan-time rejection on other registries.
+// typosquatting_control on npm, including plan-time rejection on an unsupported registry.
 // Requires TF_ACC=1 and env vars STEP_SECURITY_API_KEY, STEP_SECURITY_CUSTOMER.
 func TestAccSecureRegistryPolicyResource_Typosquatting(t *testing.T) {
 	resourcehelper.Test(t, resourcehelper.TestCase{
@@ -987,10 +1012,109 @@ func TestAccSecureRegistryPolicyResource_Typosquatting(t *testing.T) {
 				ImportState:       true,
 				ImportStateVerify: true,
 			},
-			// typosquatting_control is not applicable to pypi — plan-time ValidateConfig error.
+			// typosquatting_control is not applicable to nuget — plan-time ValidateConfig error.
 			{
-				Config:      testAccSecureRegistryPolicyPypiWithTyposquattingConfig(),
+				Config:      testAccSecureRegistryPolicyNugetWithTyposquattingConfig(),
 				ExpectError: regexp.MustCompile(`typosquatting_control is not applicable`),
+			},
+		},
+	})
+}
+
+// TestAccSecureRegistryPolicyResource_TyposquattingPypiMaven is an acceptance test covering
+// typosquatting_control on pypi and maven, including registry-specific exemption names.
+// Requires TF_ACC=1 and env vars STEP_SECURITY_API_KEY, STEP_SECURITY_CUSTOMER.
+func TestAccSecureRegistryPolicyResource_TyposquattingPypiMaven(t *testing.T) {
+	resourcehelper.Test(t, resourcehelper.TestCase{
+		PreCheck:                 func() { testAccPreCheck(t) },
+		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+		Steps: []resourcehelper.TestStep{
+			{
+				Config: testAccSecureRegistryPolicyTyposquattingRegistryConfig("pypi", []string{"reqeusts"}),
+				Check: resourcehelper.ComposeAggregateTestCheckFunc(
+					resourcehelper.TestCheckResourceAttr("stepsecurity_secure_registry_policy.typosquatting_pypi", "registry", "pypi"),
+					resourcehelper.TestCheckResourceAttr("stepsecurity_secure_registry_policy.typosquatting_pypi", "typosquatting_control.enabled", "true"),
+					resourcehelper.TestCheckResourceAttr("stepsecurity_secure_registry_policy.typosquatting_pypi", "typosquatting_control.exemption_list.#", "1"),
+				),
+			},
+			{
+				ResourceName:      "stepsecurity_secure_registry_policy.typosquatting_pypi",
+				ImportState:       true,
+				ImportStateVerify: true,
+			},
+		},
+	})
+	resourcehelper.Test(t, resourcehelper.TestCase{
+		PreCheck:                 func() { testAccPreCheck(t) },
+		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+		Steps: []resourcehelper.TestStep{
+			{
+				Config: testAccSecureRegistryPolicyTyposquattingRegistryConfig("maven", []string{"com.example:guavaa"}),
+				Check: resourcehelper.ComposeAggregateTestCheckFunc(
+					resourcehelper.TestCheckResourceAttr("stepsecurity_secure_registry_policy.typosquatting_maven", "registry", "maven"),
+					resourcehelper.TestCheckResourceAttr("stepsecurity_secure_registry_policy.typosquatting_maven", "typosquatting_control.enabled", "true"),
+					resourcehelper.TestCheckTypeSetElemAttr("stepsecurity_secure_registry_policy.typosquatting_maven", "typosquatting_control.exemption_list.*", "com.example:guavaa"),
+				),
+			},
+			{
+				ResourceName:      "stepsecurity_secure_registry_policy.typosquatting_maven",
+				ImportState:       true,
+				ImportStateVerify: true,
+			},
+		},
+	})
+}
+
+// TestAccSecureRegistryPolicyResource_AutoExemptSecurityFixes is an acceptance test covering
+// cooldown_control.auto_exempt_security_fixes: a severity threshold, a switch to a CVSS
+// threshold, and removal of the block.
+// Requires TF_ACC=1 and env vars STEP_SECURITY_API_KEY, STEP_SECURITY_CUSTOMER.
+func TestAccSecureRegistryPolicyResource_AutoExemptSecurityFixes(t *testing.T) {
+	const name = "stepsecurity_secure_registry_policy.auto_exempt_test"
+	resourcehelper.Test(t, resourcehelper.TestCase{
+		PreCheck:                 func() { testAccPreCheck(t) },
+		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+		Steps: []resourcehelper.TestStep{
+			{
+				Config: testAccSecureRegistryPolicyAutoExemptConfig(`auto_exempt_security_fixes = {
+      enabled      = true
+      min_severity = "high"
+    }`),
+				Check: resourcehelper.ComposeAggregateTestCheckFunc(
+					resourcehelper.TestCheckResourceAttr(name, "cooldown_control.auto_exempt_security_fixes.enabled", "true"),
+					resourcehelper.TestCheckResourceAttr(name, "cooldown_control.auto_exempt_security_fixes.min_severity", "high"),
+					resourcehelper.TestCheckNoResourceAttr(name, "cooldown_control.auto_exempt_security_fixes.min_cvss_score"),
+				),
+			},
+			{
+				ResourceName:      name,
+				ImportState:       true,
+				ImportStateVerify: true,
+			},
+			{
+				Config: testAccSecureRegistryPolicyAutoExemptConfig(`auto_exempt_security_fixes = {
+      enabled        = true
+      min_cvss_score = 7.5
+    }`),
+				Check: resourcehelper.ComposeAggregateTestCheckFunc(
+					resourcehelper.TestCheckResourceAttr(name, "cooldown_control.auto_exempt_security_fixes.min_cvss_score", "7.5"),
+					resourcehelper.TestCheckNoResourceAttr(name, "cooldown_control.auto_exempt_security_fixes.min_severity"),
+				),
+			},
+			// Removing the block clears the setting.
+			{
+				Config: testAccSecureRegistryPolicyAutoExemptConfig(""),
+				Check: resourcehelper.ComposeAggregateTestCheckFunc(
+					resourcehelper.TestCheckResourceAttr(name, "cooldown_control.enabled", "true"),
+					resourcehelper.TestCheckNoResourceAttr(name, "cooldown_control.auto_exempt_security_fixes.enabled"),
+				),
+			},
+			// Enabled without a threshold is rejected at plan time.
+			{
+				Config: testAccSecureRegistryPolicyAutoExemptConfig(`auto_exempt_security_fixes = {
+      enabled = true
+    }`),
+				ExpectError: regexp.MustCompile(`Set min_cvss_score or min_severity`),
 			},
 		},
 	})
@@ -1068,11 +1192,34 @@ func buildTestCooldownObject(ctx context.Context, enabled bool, periodInDays int
 	} else {
 		exemptionList = types.SetNull(types.StringType)
 	}
+	return buildTestCooldownObjectWithAutoExempt(enabled, periodInDays, exemptionList, types.ObjectNull(autoExemptSecurityFixesAttrTypes))
+}
+
+func buildTestCooldownObjectWithAutoExempt(enabled bool, periodInDays int64, exemptionList types.Set, autoExempt types.Object) (types.Object, diag.Diagnostics) {
 	return types.ObjectValue(cooldownControlAttrTypes, map[string]attr.Value{
-		"enabled":        types.BoolValue(enabled),
-		"period_in_days": types.Int64Value(periodInDays),
-		"exemption_list": exemptionList,
+		"enabled":                    types.BoolValue(enabled),
+		"period_in_days":             types.Int64Value(periodInDays),
+		"exemption_list":             exemptionList,
+		"auto_exempt_security_fixes": autoExempt,
 	})
+}
+
+func mustBuildTestAutoExemptObject(t *testing.T, enabled types.Bool, score types.Float64, severity types.String) types.Object {
+	t.Helper()
+	obj, diags := types.ObjectValue(autoExemptSecurityFixesAttrTypes, map[string]attr.Value{
+		"enabled":        enabled,
+		"min_cvss_score": score,
+		"min_severity":   severity,
+	})
+	require.False(t, diags.HasError())
+	return obj
+}
+
+func mustBuildTestCooldownWithAutoExempt(t *testing.T, autoExempt types.Object) types.Object {
+	t.Helper()
+	obj, diags := buildTestCooldownObjectWithAutoExempt(true, 7, types.SetNull(types.StringType), autoExempt)
+	require.False(t, diags.HasError())
+	return obj
 }
 
 func buildTestCompromisedPackagesObject(enabled bool) (types.Object, diag.Diagnostics) {
@@ -1280,16 +1427,45 @@ resource "stepsecurity_secure_registry_policy" "typosquatting_test" {
 `, enabled, quotedPatternsList(exemptions))
 }
 
-func testAccSecureRegistryPolicyPypiWithTyposquattingConfig() string {
+func testAccSecureRegistryPolicyNugetWithTyposquattingConfig() string {
 	return testProviderConfig() + `
-resource "stepsecurity_secure_registry_policy" "pypi_test" {
-  registry = "pypi"
+resource "stepsecurity_secure_registry_policy" "nuget_test" {
+  registry = "nuget"
 
   typosquatting_control = {
     enabled = true
   }
 }
 `
+}
+
+func testAccSecureRegistryPolicyTyposquattingRegistryConfig(registry string, exemptions []string) string {
+	return testProviderConfig() + fmt.Sprintf(`
+resource "stepsecurity_secure_registry_policy" "typosquatting_%[1]s" {
+  registry = %[1]q
+
+  typosquatting_control = {
+    enabled        = true
+    exemption_list = %[2]s
+  }
+}
+`, registry, quotedPatternsList(exemptions))
+}
+
+// testAccSecureRegistryPolicyAutoExemptConfig renders a pypi cooldown policy. autoExempt is
+// the full auto_exempt_security_fixes attribute, or "" to leave it out.
+func testAccSecureRegistryPolicyAutoExemptConfig(autoExempt string) string {
+	return testProviderConfig() + fmt.Sprintf(`
+resource "stepsecurity_secure_registry_policy" "auto_exempt_test" {
+  registry = "pypi"
+
+  cooldown_control = {
+    enabled        = true
+    period_in_days = 7
+    %s
+  }
+}
+`, autoExempt)
 }
 
 func testAccSecureRegistryPolicyMavenConfig(cooldownEnabled bool, periodInDays int, compromisedEnabled bool) string {
@@ -1693,4 +1869,259 @@ func TestSecureRegistryPolicyResource_applyAPIResponse_NewEcosystemControls(t *t
 		CustomBlockList: &stepsecurityapi.CustomBlockListControl{Enabled: true, BlockYankedVersions: true},
 	}, &diags)
 	assert.Equal(t, types.BoolValue(true), model.CustomBlockListControl.Attributes()["block_yanked_versions"])
+}
+
+// --- cooldown_control.auto_exempt_security_fixes ---
+
+func TestSecureRegistryPolicyResource_buildUpsertRequest_AutoExemptSecurityFixes(t *testing.T) {
+	t.Parallel()
+
+	score := 7.5
+	tests := []struct {
+		name       string
+		autoExempt func(t *testing.T) types.Object
+		want       *stepsecurityapi.AutoExemptSecurityFixes
+	}{
+		{
+			name: "severity_threshold",
+			autoExempt: func(t *testing.T) types.Object {
+				return mustBuildTestAutoExemptObject(t, types.BoolValue(true), types.Float64Null(), types.StringValue("high"))
+			},
+			want: &stepsecurityapi.AutoExemptSecurityFixes{Enabled: true, MinSeverity: "high"},
+		},
+		{
+			name: "cvss_threshold",
+			autoExempt: func(t *testing.T) types.Object {
+				return mustBuildTestAutoExemptObject(t, types.BoolValue(true), types.Float64Value(7.5), types.StringNull())
+			},
+			want: &stepsecurityapi.AutoExemptSecurityFixes{Enabled: true, MinCVSSScore: &score},
+		},
+		{
+			name: "disabled_without_threshold",
+			autoExempt: func(t *testing.T) types.Object {
+				return mustBuildTestAutoExemptObject(t, types.BoolValue(false), types.Float64Null(), types.StringNull())
+			},
+			want: &stepsecurityapi.AutoExemptSecurityFixes{Enabled: false},
+		},
+		{
+			name:       "omitted",
+			autoExempt: func(*testing.T) types.Object { return types.ObjectNull(autoExemptSecurityFixesAttrTypes) },
+			want:       nil,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			r := &secureRegistryPolicyResource{}
+			plan := newEcosystemModel("pypi")
+			plan.CooldownControl = mustBuildTestCooldownWithAutoExempt(t, tt.autoExempt(t))
+
+			var diags diag.Diagnostics
+			req := r.buildUpsertRequest(context.Background(), &plan, nil, &diags)
+			require.False(t, diags.HasError(), "%v", diags)
+			require.NotNil(t, req.CooldownPeriod)
+			assert.Equal(t, tt.want, req.CooldownPeriod.AutoExemptSecurityFixes)
+		})
+	}
+}
+
+// Removing cooldown_control sends a disabled cooldown without the auto-exemption, which the
+// backend's whole-object replace turns into "cleared".
+func TestSecureRegistryPolicyResource_buildUpsertRequest_RemovedCooldownDropsAutoExempt(t *testing.T) {
+	t.Parallel()
+	r := &secureRegistryPolicyResource{}
+
+	prev := newEcosystemModel("npm")
+	prev.CooldownControl = mustBuildTestCooldownWithAutoExempt(t,
+		mustBuildTestAutoExemptObject(t, types.BoolValue(true), types.Float64Null(), types.StringValue("critical")))
+	plan := newEcosystemModel("npm")
+
+	var diags diag.Diagnostics
+	req := r.buildUpsertRequest(context.Background(), &plan, &prev, &diags)
+	require.False(t, diags.HasError())
+	require.NotNil(t, req.CooldownPeriod)
+	assert.False(t, req.CooldownPeriod.Enabled)
+	assert.Nil(t, req.CooldownPeriod.AutoExemptSecurityFixes)
+}
+
+func TestSecureRegistryPolicyResource_applyAPIResponse_AutoExemptSecurityFixes(t *testing.T) {
+	t.Parallel()
+
+	score := 9.0
+	tests := []struct {
+		name         string
+		api          *stepsecurityapi.AutoExemptSecurityFixes
+		wantNull     bool
+		wantEnabled  bool
+		wantScore    types.Float64
+		wantSeverity types.String
+	}{
+		{name: "absent", api: nil, wantNull: true},
+		{
+			name:         "severity",
+			api:          &stepsecurityapi.AutoExemptSecurityFixes{Enabled: true, MinSeverity: "moderate"},
+			wantEnabled:  true,
+			wantScore:    types.Float64Null(),
+			wantSeverity: types.StringValue("moderate"),
+		},
+		{
+			name:         "score",
+			api:          &stepsecurityapi.AutoExemptSecurityFixes{Enabled: true, MinCVSSScore: &score},
+			wantEnabled:  true,
+			wantScore:    types.Float64Value(9.0),
+			wantSeverity: types.StringNull(),
+		},
+		{
+			name:         "disabled_without_threshold",
+			api:          &stepsecurityapi.AutoExemptSecurityFixes{Enabled: false},
+			wantEnabled:  false,
+			wantScore:    types.Float64Null(),
+			wantSeverity: types.StringNull(),
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			r := &secureRegistryPolicyResource{}
+			ref := newEcosystemModel("pypi")
+			ref.CooldownControl = mustBuildTestCooldownWithAutoExempt(t, types.ObjectNull(autoExemptSecurityFixesAttrTypes))
+			model := newEcosystemModel("pypi")
+
+			var diags diag.Diagnostics
+			r.applyAPIResponseToModel(context.Background(), &ref, &model, &stepsecurityapi.SecureRegistryControls{
+				Registry:       "pypi",
+				CooldownPeriod: &stepsecurityapi.CooldownPeriodControl{Enabled: true, PeriodInDays: 7, AutoExemptSecurityFixes: tt.api},
+			}, &diags)
+			require.False(t, diags.HasError(), "%v", diags)
+
+			autoExempt := model.CooldownControl.Attributes()["auto_exempt_security_fixes"].(types.Object)
+			if tt.wantNull {
+				assert.True(t, autoExempt.IsNull())
+				return
+			}
+			var got autoExemptSecurityFixesModel
+			require.False(t, autoExempt.As(context.Background(), &got, basetypes.ObjectAsOptions{}).HasError())
+			assert.Equal(t, tt.wantEnabled, got.Enabled.ValueBool())
+			assert.True(t, tt.wantScore.Equal(got.MinCVSSScore), "score: want %v got %v", tt.wantScore, got.MinCVSSScore)
+			assert.True(t, tt.wantSeverity.Equal(got.MinSeverity), "severity: want %v got %v", tt.wantSeverity, got.MinSeverity)
+		})
+	}
+}
+
+// A configured CVSS score is reused from ref when the API echoes the same number, so the
+// planned value (e.g. 0.1) round-trips without float64 conversion drift.
+func TestSecureRegistryPolicyResource_applyAPIResponse_AutoExemptScoreRoundTrips(t *testing.T) {
+	t.Parallel()
+	for _, v := range []float64{0.1, 7.5, 10.0} {
+		r := &secureRegistryPolicyResource{}
+		refScore := types.Float64Value(v)
+		ref := newEcosystemModel("npm")
+		ref.CooldownControl = mustBuildTestCooldownWithAutoExempt(t,
+			mustBuildTestAutoExemptObject(t, types.BoolValue(true), refScore, types.StringNull()))
+		model := newEcosystemModel("npm")
+
+		apiScore := v
+		var diags diag.Diagnostics
+		r.applyAPIResponseToModel(context.Background(), &ref, &model, &stepsecurityapi.SecureRegistryControls{
+			Registry: "npm",
+			CooldownPeriod: &stepsecurityapi.CooldownPeriodControl{Enabled: true, PeriodInDays: 7,
+				AutoExemptSecurityFixes: &stepsecurityapi.AutoExemptSecurityFixes{Enabled: true, MinCVSSScore: &apiScore}},
+		}, &diags)
+		require.False(t, diags.HasError())
+
+		got := model.CooldownControl.Attributes()["auto_exempt_security_fixes"].(types.Object).Attributes()["min_cvss_score"]
+		assert.True(t, refScore.Equal(got), "score %v: want %v got %v", v, refScore, got)
+	}
+}
+
+func TestSecureRegistryPolicyResource_ValidateConfig_AutoExemptThreshold(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name      string
+		enabled   types.Bool
+		score     types.Float64
+		severity  types.String
+		wantError bool
+	}{
+		{name: "enabled_with_severity", enabled: types.BoolValue(true), score: types.Float64Null(), severity: types.StringValue("high")},
+		{name: "enabled_with_score", enabled: types.BoolValue(true), score: types.Float64Value(5), severity: types.StringNull()},
+		{name: "enabled_without_threshold", enabled: types.BoolValue(true), score: types.Float64Null(), severity: types.StringNull(), wantError: true},
+		{name: "disabled_without_threshold", enabled: types.BoolValue(false), score: types.Float64Null(), severity: types.StringNull()},
+		{name: "unknown_enabled_defers", enabled: types.BoolUnknown(), score: types.Float64Null(), severity: types.StringNull()},
+		{name: "unknown_threshold_defers", enabled: types.BoolValue(true), score: types.Float64Unknown(), severity: types.StringNull()},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			r := &secureRegistryPolicyResource{}
+			model := newEcosystemModel("maven")
+			model.CooldownControl = mustBuildTestCooldownWithAutoExempt(t,
+				mustBuildTestAutoExemptObject(t, tt.enabled, tt.score, tt.severity))
+
+			resp := &fwresource.ValidateConfigResponse{}
+			r.ValidateConfig(context.Background(), fwresource.ValidateConfigRequest{Config: testSecureRegistryPolicyConfig(t, model)}, resp)
+			assert.Equal(t, tt.wantError, resp.Diagnostics.HasError(), "%v", resp.Diagnostics)
+		})
+	}
+}
+
+// TestSecureRegistryPolicyResource_AutoExemptSchemaValidators runs the attribute validators
+// declared on min_cvss_score and min_severity against a real config.
+func TestSecureRegistryPolicyResource_AutoExemptSchemaValidators(t *testing.T) {
+	t.Parallel()
+
+	schema := testSecureRegistryPolicySchema(t)
+	autoExemptAttrs := schema.Attributes["cooldown_control"].(resourceschema.SingleNestedAttribute).
+		Attributes["auto_exempt_security_fixes"].(resourceschema.SingleNestedAttribute).Attributes
+	scoreValidators := autoExemptAttrs["min_cvss_score"].(resourceschema.Float64Attribute).Validators
+	severityValidators := autoExemptAttrs["min_severity"].(resourceschema.StringAttribute).Validators
+	base := path.Root("cooldown_control").AtName("auto_exempt_security_fixes")
+	baseExpr := path.MatchRoot("cooldown_control").AtName("auto_exempt_security_fixes")
+
+	tests := []struct {
+		name      string
+		score     types.Float64
+		severity  types.String
+		wantError bool
+	}{
+		{name: "score_only", score: types.Float64Value(0.1), severity: types.StringNull()},
+		{name: "severity_only", score: types.Float64Null(), severity: types.StringValue("low")},
+		{name: "both_set", score: types.Float64Value(7), severity: types.StringValue("high"), wantError: true},
+		{name: "score_below_range", score: types.Float64Value(0), severity: types.StringNull(), wantError: true},
+		{name: "score_above_range", score: types.Float64Value(10.1), severity: types.StringNull(), wantError: true},
+		{name: "unknown_severity_label", score: types.Float64Null(), severity: types.StringValue("medium"), wantError: true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			model := newEcosystemModel("npm")
+			model.CooldownControl = mustBuildTestCooldownWithAutoExempt(t,
+				mustBuildTestAutoExemptObject(t, types.BoolValue(true), tt.score, tt.severity))
+			config := testSecureRegistryPolicyConfig(t, model)
+
+			var diags diag.Diagnostics
+			for _, v := range scoreValidators {
+				resp := &validator.Float64Response{}
+				v.ValidateFloat64(context.Background(), validator.Float64Request{
+					Path: base.AtName("min_cvss_score"), PathExpression: baseExpr.AtName("min_cvss_score"),
+					Config: config, ConfigValue: tt.score,
+				}, resp)
+				diags.Append(resp.Diagnostics...)
+			}
+			for _, v := range severityValidators {
+				resp := &validator.StringResponse{}
+				v.ValidateString(context.Background(), validator.StringRequest{
+					Path: base.AtName("min_severity"), PathExpression: baseExpr.AtName("min_severity"),
+					Config: config, ConfigValue: tt.severity,
+				}, resp)
+				diags.Append(resp.Diagnostics...)
+			}
+			assert.Equal(t, tt.wantError, diags.HasError(), "%v", diags)
+		})
+	}
 }

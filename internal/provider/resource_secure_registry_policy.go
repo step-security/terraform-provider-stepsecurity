@@ -3,7 +3,9 @@ package provider
 import (
 	"context"
 	"fmt"
+	"slices"
 
+	"github.com/hashicorp/terraform-plugin-framework-validators/float64validator"
 	"github.com/hashicorp/terraform-plugin-framework-validators/int64validator"
 	"github.com/hashicorp/terraform-plugin-framework-validators/stringvalidator"
 	"github.com/hashicorp/terraform-plugin-framework/attr"
@@ -29,12 +31,27 @@ var (
 	_ resource.ResourceWithValidateConfig = &secureRegistryPolicyResource{}
 )
 
+// autoExemptSecurityFixesAttrTypes defines the types for the
+// cooldown_control.auto_exempt_security_fixes nested object.
+var autoExemptSecurityFixesAttrTypes = map[string]attr.Type{
+	"enabled":        types.BoolType,
+	"min_cvss_score": types.Float64Type,
+	"min_severity":   types.StringType,
+}
+
 // cooldownControlAttrTypes defines the types for the cooldown_control nested object.
 var cooldownControlAttrTypes = map[string]attr.Type{
-	"enabled":        types.BoolType,
-	"period_in_days": types.Int64Type,
-	"exemption_list": types.SetType{ElemType: types.StringType},
+	"enabled":                    types.BoolType,
+	"period_in_days":             types.Int64Type,
+	"exemption_list":             types.SetType{ElemType: types.StringType},
+	"auto_exempt_security_fixes": types.ObjectType{AttrTypes: autoExemptSecurityFixesAttrTypes},
 }
+
+// typosquattingRegistries are the registries the backend runs the typosquatting control for.
+var typosquattingRegistries = []string{"npm", "pypi", "maven"}
+
+// autoExemptSeverities are the advisory severity labels accepted by min_severity.
+var autoExemptSeverities = []string{"critical", "high", "moderate", "low"}
 
 // compromisedPackagesControlAttrTypes defines the types for the compromised_packages_control nested object.
 var compromisedPackagesControlAttrTypes = map[string]attr.Type{
@@ -86,9 +103,16 @@ type secureRegistryPolicyResourceModel struct {
 }
 
 type cooldownControlModel struct {
-	Enabled       types.Bool  `tfsdk:"enabled"`
-	PeriodInDays  types.Int64 `tfsdk:"period_in_days"`
-	ExemptionList types.Set   `tfsdk:"exemption_list"`
+	Enabled                 types.Bool   `tfsdk:"enabled"`
+	PeriodInDays            types.Int64  `tfsdk:"period_in_days"`
+	ExemptionList           types.Set    `tfsdk:"exemption_list"`
+	AutoExemptSecurityFixes types.Object `tfsdk:"auto_exempt_security_fixes"`
+}
+
+type autoExemptSecurityFixesModel struct {
+	Enabled      types.Bool    `tfsdk:"enabled"`
+	MinCVSSScore types.Float64 `tfsdk:"min_cvss_score"`
+	MinSeverity  types.String  `tfsdk:"min_severity"`
 }
 
 type compromisedPackagesControlModel struct {
@@ -157,6 +181,31 @@ func (r *secureRegistryPolicyResource) Schema(_ context.Context, _ resource.Sche
 						Optional:            true,
 						MarkdownDescription: "Packages exempt from the cooldown period. Supports exact names, version globs (`package@*`), and exact versions (`package@1.2.3`). For npm, scoped wildcards (`@scope/*`) are also supported. Order-insensitive — reordering entries produces no plan diff.",
 					},
+					"auto_exempt_security_fixes": schema.SingleNestedAttribute{
+						Optional:            true,
+						MarkdownDescription: "Lets a security fix through the cooldown period without waiting. Only the exact fixed version named by a verified, scored advisory is exempted, and only when the advisory meets the threshold set by `min_cvss_score` or `min_severity`. Supported for every registry. To turn this off, remove the block or set `enabled = false`.",
+						Attributes: map[string]schema.Attribute{
+							"enabled": schema.BoolAttribute{
+								Required:            true,
+								MarkdownDescription: "Whether security fixes are auto-exempted from the cooldown period.",
+							},
+							"min_cvss_score": schema.Float64Attribute{
+								Optional:            true,
+								MarkdownDescription: "Lowest advisory CVSS score that qualifies a fix, from `0.1` to `10.0`. Conflicts with `min_severity`; one of the two is required when `enabled = true`.",
+								Validators: []validator.Float64{
+									float64validator.Between(0.1, 10.0),
+									float64validator.ConflictsWith(path.MatchRelative().AtParent().AtName("min_severity")),
+								},
+							},
+							"min_severity": schema.StringAttribute{
+								Optional:            true,
+								MarkdownDescription: "Lowest advisory severity that qualifies a fix: `critical`, `high`, `moderate` or `low`. Conflicts with `min_cvss_score`; one of the two is required when `enabled = true`.",
+								Validators: []validator.String{
+									stringvalidator.OneOf(autoExemptSeverities...),
+								},
+							},
+						},
+					},
 				},
 			},
 			"compromised_packages_control": schema.SingleNestedAttribute{
@@ -171,7 +220,7 @@ func (r *secureRegistryPolicyResource) Schema(_ context.Context, _ resource.Sche
 			},
 			"typosquatting_control": schema.SingleNestedAttribute{
 				Optional:            true,
-				MarkdownDescription: "Blocks packages whose names are heuristically similar to popular packages (advisory typosquatting detection). Only applicable when `registry = \"npm\"`; setting this for any other registry raises a plan-time error.",
+				MarkdownDescription: "Blocks packages whose names are heuristically similar to popular packages (advisory typosquatting detection). Only applicable when `registry` is `npm`, `pypi` or `maven`; setting this for any other registry raises a plan-time error.",
 				Attributes: map[string]schema.Attribute{
 					"enabled": schema.BoolAttribute{
 						Required:            true,
@@ -180,7 +229,7 @@ func (r *secureRegistryPolicyResource) Schema(_ context.Context, _ resource.Sche
 					"exemption_list": schema.SetAttribute{
 						ElementType:         types.StringType,
 						Optional:            true,
-						MarkdownDescription: "Package names exempt from typosquatting detection, overriding false positives. Order-insensitive — reordering entries produces no plan diff.",
+						MarkdownDescription: "Package names exempt from typosquatting detection, overriding false positives. For npm, use the exact package name. For PyPI, names are compared after normalization, so `Foo_Bar` matches `foo-bar`. For Maven, use the exact `groupId:artifactId`. Order-insensitive — reordering entries produces no plan diff.",
 					},
 				},
 			},
@@ -253,6 +302,8 @@ func (r *secureRegistryPolicyResource) ValidateConfig(ctx context.Context, req r
 		return
 	}
 
+	validateAutoExemptSecurityFixesConfig(model.CooldownControl, &resp.Diagnostics)
+
 	if model.Registry.IsUnknown() || model.Registry.IsNull() {
 		return
 	}
@@ -270,11 +321,11 @@ func (r *secureRegistryPolicyResource) ValidateConfig(ctx context.Context, req r
 		)
 	}
 
-	if registry != "npm" && !model.TyposquattingControl.IsNull() && !model.TyposquattingControl.IsUnknown() {
+	if !slices.Contains(typosquattingRegistries, registry) && !model.TyposquattingControl.IsNull() && !model.TyposquattingControl.IsUnknown() {
 		resp.Diagnostics.AddAttributeError(
 			path.Root("typosquatting_control"),
 			"typosquatting_control not applicable",
-			fmt.Sprintf("typosquatting_control is not applicable to registry %q. Remove this block or set registry to \"npm\".", registry),
+			fmt.Sprintf("typosquatting_control is not applicable to registry %q. Remove this block or set registry to \"npm\", \"pypi\" or \"maven\".", registry),
 		)
 	}
 
@@ -309,6 +360,37 @@ func (r *secureRegistryPolicyResource) ValidateConfig(ctx context.Context, req r
 			path.Root("custom_block_list_control"),
 			"custom_block_list_control not applicable",
 			"custom_block_list_control is not applicable to registry \"maven\". Remove this block or use a different registry.",
+		)
+	}
+}
+
+// validateAutoExemptSecurityFixesConfig requires a threshold (min_cvss_score or
+// min_severity) when auto_exempt_security_fixes is enabled. A disabled setting
+// needs none. Setting both is caught by the ConflictsWith schema validator, and
+// unknown values defer to apply.
+func validateAutoExemptSecurityFixesConfig(cooldown types.Object, diags *diag.Diagnostics) {
+	if cooldown.IsNull() || cooldown.IsUnknown() {
+		return
+	}
+	autoExempt, ok := cooldown.Attributes()["auto_exempt_security_fixes"].(types.Object)
+	if !ok || autoExempt.IsNull() || autoExempt.IsUnknown() {
+		return
+	}
+	attrs := autoExempt.Attributes()
+	enabled, _ := attrs["enabled"].(types.Bool)
+	score, _ := attrs["min_cvss_score"].(types.Float64)
+	severity, _ := attrs["min_severity"].(types.String)
+	if enabled.IsNull() || enabled.IsUnknown() || !enabled.ValueBool() {
+		return
+	}
+	if score.IsUnknown() || severity.IsUnknown() {
+		return
+	}
+	if score.IsNull() && severity.IsNull() {
+		diags.AddAttributeError(
+			path.Root("cooldown_control").AtName("auto_exempt_security_fixes"),
+			"auto_exempt_security_fixes threshold required",
+			"Set min_cvss_score or min_severity when auto_exempt_security_fixes is enabled.",
 		)
 	}
 }
@@ -466,6 +548,24 @@ func (r *secureRegistryPolicyResource) buildUpsertRequest(
 			var exemptions []string
 			diags.Append(m.ExemptionList.ElementsAs(ctx, &exemptions, false)...)
 			ctrl.ExemptionList = exemptions
+		}
+		// Omitted when absent from the plan; the backend replaces cooldown_period
+		// wholesale, so that clears any stored setting.
+		if !m.AutoExemptSecurityFixes.IsNull() && !m.AutoExemptSecurityFixes.IsUnknown() {
+			var a autoExemptSecurityFixesModel
+			diags.Append(m.AutoExemptSecurityFixes.As(ctx, &a, basetypes.ObjectAsOptions{})...)
+			if diags.HasError() {
+				return req
+			}
+			autoExempt := &stepsecurityapi.AutoExemptSecurityFixes{Enabled: a.Enabled.ValueBool()}
+			if !a.MinCVSSScore.IsNull() && !a.MinCVSSScore.IsUnknown() {
+				score := a.MinCVSSScore.ValueFloat64()
+				autoExempt.MinCVSSScore = &score
+			}
+			if !a.MinSeverity.IsNull() && !a.MinSeverity.IsUnknown() {
+				autoExempt.MinSeverity = a.MinSeverity.ValueString()
+			}
+			ctrl.AutoExemptSecurityFixes = autoExempt
 		}
 		req.CooldownPeriod = ctrl
 	} else if prevState != nil && !prevState.CooldownControl.IsNull() {
@@ -686,10 +786,56 @@ func (r *secureRegistryPolicyResource) buildCooldownControlObject(
 		}
 	}
 
+	refAutoExempt := types.ObjectNull(autoExemptSecurityFixesAttrTypes)
+	if refTracking {
+		if v, ok := ref.CooldownControl.Attributes()["auto_exempt_security_fixes"].(types.Object); ok {
+			refAutoExempt = v
+		}
+	}
+
 	obj, objDiags := types.ObjectValue(cooldownControlAttrTypes, map[string]attr.Value{
-		"enabled":        types.BoolValue(ctrl.Enabled),
-		"period_in_days": types.Int64Value(int64(ctrl.PeriodInDays)),
-		"exemption_list": exemptionListVal,
+		"enabled":                    types.BoolValue(ctrl.Enabled),
+		"period_in_days":             types.Int64Value(int64(ctrl.PeriodInDays)),
+		"exemption_list":             exemptionListVal,
+		"auto_exempt_security_fixes": buildAutoExemptSecurityFixesObject(ctrl.AutoExemptSecurityFixes, refAutoExempt, diags),
+	})
+	diags.Append(objDiags...)
+	return obj
+}
+
+// buildAutoExemptSecurityFixesObject converts the API auto-exemption setting to a
+// Terraform object, or null when the backend has none. When ref holds the same CVSS
+// score, ref's value is reused so the configured number round-trips exactly
+// instead of picking up float64 conversion noise.
+func buildAutoExemptSecurityFixesObject(
+	a *stepsecurityapi.AutoExemptSecurityFixes,
+	ref types.Object,
+	diags *diag.Diagnostics,
+) types.Object {
+	if a == nil {
+		return types.ObjectNull(autoExemptSecurityFixesAttrTypes)
+	}
+
+	score := types.Float64Null()
+	if a.MinCVSSScore != nil {
+		score = types.Float64Value(*a.MinCVSSScore)
+		if !ref.IsNull() && !ref.IsUnknown() {
+			if refScore, ok := ref.Attributes()["min_cvss_score"].(types.Float64); ok &&
+				!refScore.IsNull() && !refScore.IsUnknown() && refScore.ValueFloat64() == *a.MinCVSSScore {
+				score = refScore
+			}
+		}
+	}
+
+	severity := types.StringNull()
+	if a.MinSeverity != "" {
+		severity = types.StringValue(a.MinSeverity)
+	}
+
+	obj, objDiags := types.ObjectValue(autoExemptSecurityFixesAttrTypes, map[string]attr.Value{
+		"enabled":        types.BoolValue(a.Enabled),
+		"min_cvss_score": score,
+		"min_severity":   severity,
 	})
 	diags.Append(objDiags...)
 	return obj

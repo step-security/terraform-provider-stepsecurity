@@ -34,6 +34,12 @@ resource "stepsecurity_secure_registry_policy" "npm_full" {
     enabled        = true
     period_in_days = 7
     exemption_list = ["@babel/core@*", "react@1.2.3", "@scope/*", "lodash@4.17.21"]
+
+    # Let the fixed version of a high or critical advisory skip the cooldown.
+    auto_exempt_security_fixes = {
+      enabled      = true
+      min_severity = "high"
+    }
   }
 
   compromised_packages_control = {
@@ -93,10 +99,22 @@ resource "stepsecurity_secure_registry_policy" "pypi_full" {
     enabled        = true
     period_in_days = 7
     exemption_list = ["requests@*", "django@1.*", "flask@3.0.3"]
+
+    # Threshold by CVSS score instead of severity (set one or the other).
+    auto_exempt_security_fixes = {
+      enabled        = true
+      min_cvss_score = 7.0
+    }
   }
 
   compromised_packages_control = {
     enabled = true
+  }
+
+  # PyPI names are compared after normalization, so "Reqeusts_Lib" matches "reqeusts-lib".
+  typosquatting_control = {
+    enabled        = true
+    exemption_list = ["reqeusts-lib"]
   }
 
   custom_block_list_control = {
@@ -130,8 +148,8 @@ import {
   id = "pypi"
 }
 
-# Enable cooldown and compromised packages controls for Maven Central
-# (custom_block_list_control, typosquatting_control, and npm_settings are not applicable to maven)
+# Enable cooldown, compromised packages and typosquatting controls for Maven Central
+# (custom_block_list_control and npm_settings are not applicable to maven)
 resource "stepsecurity_secure_registry_policy" "maven_full" {
   registry = "maven"
 
@@ -142,6 +160,12 @@ resource "stepsecurity_secure_registry_policy" "maven_full" {
 
   compromised_packages_control = {
     enabled = true
+  }
+
+  # Maven exemptions are exact groupId:artifactId coordinates.
+  typosquatting_control = {
+    enabled        = true
+    exemption_list = ["com.example:guava-utils"]
   }
 }
 
@@ -258,7 +282,7 @@ import {
 - `custom_block_list_control` (Attributes) Explicitly blocks packages or versions matching configured glob patterns. Supported for `npm`, `pypi`, `nuget`, `go`, `ruby` and `cargo`; not applicable to `maven`. (see [below for nested schema](#nestedatt--custom_block_list_control))
 - `go_settings` (Attributes) Go-specific registry settings. Only applicable when `registry = "go"`; setting this for any other registry raises a plan-time error. (see [below for nested schema](#nestedatt--go_settings))
 - `npm_settings` (Attributes) npm-specific registry settings. Only applicable when `registry = "npm"`; setting this for any other registry raises a plan-time error. (see [below for nested schema](#nestedatt--npm_settings))
-- `typosquatting_control` (Attributes) Blocks packages whose names are heuristically similar to popular packages (advisory typosquatting detection). Only applicable when `registry = "npm"`; setting this for any other registry raises a plan-time error. (see [below for nested schema](#nestedatt--typosquatting_control))
+- `typosquatting_control` (Attributes) Blocks packages whose names are heuristically similar to popular packages (advisory typosquatting detection). Only applicable when `registry` is `npm`, `pypi` or `maven`; setting this for any other registry raises a plan-time error. (see [below for nested schema](#nestedatt--typosquatting_control))
 
 <a id="nestedatt--compromised_packages_control"></a>
 ### Nested Schema for `compromised_packages_control`
@@ -277,8 +301,22 @@ Required:
 
 Optional:
 
+- `auto_exempt_security_fixes` (Attributes) Lets a security fix through the cooldown period without waiting. Only the exact fixed version named by a verified, scored advisory is exempted, and only when the advisory meets the threshold set by `min_cvss_score` or `min_severity`. Supported for every registry. To turn this off, remove the block or set `enabled = false`. (see [below for nested schema](#nestedatt--cooldown_control--auto_exempt_security_fixes))
 - `exemption_list` (Set of String) Packages exempt from the cooldown period. Supports exact names, version globs (`package@*`), and exact versions (`package@1.2.3`). For npm, scoped wildcards (`@scope/*`) are also supported. Order-insensitive — reordering entries produces no plan diff.
 - `period_in_days` (Number) Number of days to quarantine newly-published package versions. Must be between 1 and 30.
+
+<a id="nestedatt--cooldown_control--auto_exempt_security_fixes"></a>
+### Nested Schema for `cooldown_control.auto_exempt_security_fixes`
+
+Required:
+
+- `enabled` (Boolean) Whether security fixes are auto-exempted from the cooldown period.
+
+Optional:
+
+- `min_cvss_score` (Number) Lowest advisory CVSS score that qualifies a fix, from `0.1` to `10.0`. Conflicts with `min_severity`; one of the two is required when `enabled = true`.
+- `min_severity` (String) Lowest advisory severity that qualifies a fix: `critical`, `high`, `moderate` or `low`. Conflicts with `min_cvss_score`; one of the two is required when `enabled = true`.
+
 
 
 <a id="nestedatt--custom_block_list_control"></a>
@@ -325,7 +363,7 @@ Required:
 
 Optional:
 
-- `exemption_list` (Set of String) Package names exempt from typosquatting detection, overriding false positives. Order-insensitive — reordering entries produces no plan diff.
+- `exemption_list` (Set of String) Package names exempt from typosquatting detection, overriding false positives. For npm, use the exact package name. For PyPI, names are compared after normalization, so `Foo_Bar` matches `foo-bar`. For Maven, use the exact `groupId:artifactId`. Order-insensitive — reordering entries produces no plan diff.
 
 ## Import
 
