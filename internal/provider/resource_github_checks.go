@@ -104,12 +104,17 @@ func (r *githubChecksResource) Schema(_ context.Context, _ resource.SchemaReques
 									Optional:    true,
 									Computed:    true,
 									Default:     int64default.StaticInt64(2),
-									Description: "Cooldown period values (e.g., days). Only applicable to npm/PyPI/Maven/NuGet cooldown checks. Default is 2 days.",
+									Description: "Cooldown period values (e.g., days). Only applicable to the npm/PyPI/Maven/NuGet package cooldown and GitHub Action Cooldown controls. Default is 2 days.",
 								},
 								"packages_to_exempt_in_cooldown_check": schema.ListAttribute{
 									Optional:    true,
 									ElementType: types.StringType,
 									Description: "Package names to exempt from cooldown checks. Only applicable to npm/PyPI/Maven/NuGet cooldown checks.",
+								},
+								"actions_to_exempt_in_cooldown_check": schema.ListAttribute{
+									Optional:    true,
+									ElementType: types.StringType,
+									Description: "GitHub Actions and reusable workflows to exempt from the cooldown check: owner/* (every action of an owner), owner/repo (any version, including its sub-path actions and reusable workflows), owner/repo@ref (one version), or */* (every action). Actions owned by your organizations and local actions are never evaluated. Only applicable to the GitHub Action Cooldown control.",
 								},
 								"ignore_for_non_public_repos": schema.BoolAttribute{
 									Optional:    true,
@@ -277,6 +282,7 @@ func controlSettingsAttrTypes() map[string]attr.Type {
 	return map[string]attr.Type{
 		"cool_down_period":                     types.Int64Type,
 		"packages_to_exempt_in_cooldown_check": types.ListType{ElemType: types.StringType},
+		"actions_to_exempt_in_cooldown_check":  types.ListType{ElemType: types.StringType},
 		"ignore_for_non_public_repos":          types.BoolType,
 	}
 }
@@ -301,10 +307,22 @@ func controlObjectType() types.ObjectType {
 // isCooldownControl reports whether a control takes cooldown settings.
 func isCooldownControl(name string) bool {
 	switch name {
-	case "NPM Package Cooldown", "PyPI Package Cooldown", "Maven Package Cooldown", "NuGet Package Cooldown":
+	case "NPM Package Cooldown", "PyPI Package Cooldown", "Maven Package Cooldown", "NuGet Package Cooldown", actionCooldownControl:
 		return true
 	}
 	return false
+}
+
+// actionCooldownControl is the cooldown control for GitHub Actions. It takes
+// actions_to_exempt_in_cooldown_check instead of packages_to_exempt_in_cooldown_check.
+const actionCooldownControl = "GitHub Action Cooldown"
+
+// exemptedActionsSetting is the key the API stores actions_to_exempt_in_cooldown_check under.
+const exemptedActionsSetting = "exempted_actions"
+
+// isActionCooldownControl reports whether a control takes actions_to_exempt_in_cooldown_check.
+func isActionCooldownControl(name string) bool {
+	return name == actionCooldownControl
 }
 
 // pwnRequestControl is the control that takes the ignore_for_non_public_repos setting.
@@ -439,10 +457,26 @@ func (r *githubChecksResource) ValidateConfig(ctx context.Context, req resource.
 			// store the others and ignore them, so a misplaced field would look applied.
 			if isPwnRequest && hasSettings {
 				attrs := control.Settings.Attributes()
-				if isSet(attrs["cool_down_period"]) || isSet(attrs["packages_to_exempt_in_cooldown_check"]) {
+				if isSet(attrs["cool_down_period"]) || isSet(attrs["packages_to_exempt_in_cooldown_check"]) || isSet(attrs["actions_to_exempt_in_cooldown_check"]) {
 					resp.Diagnostics.AddError(
 						"can't provide cooldown settings",
-						"cool_down_period and packages_to_exempt_in_cooldown_check are only applicable to cooldown controls, not "+control.Control.ValueString(),
+						"cool_down_period, packages_to_exempt_in_cooldown_check and actions_to_exempt_in_cooldown_check are only applicable to cooldown controls, not "+control.Control.ValueString(),
+					)
+				}
+			}
+			isActionCooldown := isActionCooldownControl(control.Control.ValueString())
+			if isCooldown && hasSettings {
+				attrs := control.Settings.Attributes()
+				if isActionCooldown && isSet(attrs["packages_to_exempt_in_cooldown_check"]) {
+					resp.Diagnostics.AddError(
+						"can't provide packages_to_exempt_in_cooldown_check",
+						"packages_to_exempt_in_cooldown_check is not applicable to the "+actionCooldownControl+" control; use actions_to_exempt_in_cooldown_check",
+					)
+				}
+				if !isActionCooldown && isSet(attrs["actions_to_exempt_in_cooldown_check"]) {
+					resp.Diagnostics.AddError(
+						"can't provide actions_to_exempt_in_cooldown_check",
+						"actions_to_exempt_in_cooldown_check is only applicable to the "+actionCooldownControl+" control, not "+control.Control.ValueString(),
 					)
 				}
 			}
@@ -638,6 +672,7 @@ func (r *githubChecksResource) ModifyPlan(ctx context.Context, req resource.Modi
 			planned, _ = types.ObjectValue(controlSettingsAttrTypes(), map[string]attr.Value{
 				"cool_down_period":                     types.Int64Value(2),
 				"packages_to_exempt_in_cooldown_check": types.ListNull(types.StringType),
+				"actions_to_exempt_in_cooldown_check":  types.ListNull(types.StringType),
 				"ignore_for_non_public_repos":          types.BoolNull(),
 			})
 		} else {
@@ -848,7 +883,13 @@ func (r *githubChecksResource) convertToCreateRequest(ctx context.Context, plan 
 				}
 			}
 
-			if packagesAttr, ok := settingsAttrs["packages_to_exempt_in_cooldown_check"]; ok {
+			// The GitHub Action Cooldown control reads its exemptions from a
+			// different setting than the package cooldown controls.
+			exemptAttr, exemptKey := "packages_to_exempt_in_cooldown_check", "exempted_packages"
+			if isActionCooldownControl(controlName) {
+				exemptAttr, exemptKey = "actions_to_exempt_in_cooldown_check", exemptedActionsSetting
+			}
+			if packagesAttr, ok := settingsAttrs[exemptAttr]; ok {
 				if packagesList, ok := packagesAttr.(types.List); ok && !packagesList.IsNull() {
 					for _, packageValue := range packagesList.Elements() {
 						if packageString, ok := packageValue.(types.String); ok && !packageString.IsNull() && !packageString.IsUnknown() {
@@ -862,7 +903,7 @@ func (r *githubChecksResource) convertToCreateRequest(ctx context.Context, plan 
 				"cooldown_period_in_days": cooldownPeriod,
 			}
 			if len(exemptPackages) > 0 {
-				checkConfig.Settings["exempted_packages"] = exemptPackages
+				checkConfig.Settings[exemptKey] = exemptPackages
 			}
 		}
 		// The API replaces a check's config whole, so leaving settings out clears a
@@ -1063,8 +1104,13 @@ func (r *githubChecksResource) convertToState(ctx context.Context, owner string,
 				cooldownPeriod = types.Int64Value(2)
 			}
 
-			// Handle packages_to_exempt_in_cooldown_check
-			if exemptPackages, ok := checkConfig.Settings["exempted_packages"]; ok {
+			// Handle packages_to_exempt_in_cooldown_check, or actions_to_exempt_in_cooldown_check
+			// for the GitHub Action Cooldown control
+			exemptKey := "exempted_packages"
+			if isActionCooldownControl(controlName) {
+				exemptKey = exemptedActionsSetting
+			}
+			if exemptPackages, ok := checkConfig.Settings[exemptKey]; ok {
 				var elements []attr.Value
 				// Handle both []string and []any types from API response
 				if packages, ok := exemptPackages.([]string); ok && len(packages) > 0 {
@@ -1092,13 +1138,19 @@ func (r *githubChecksResource) convertToState(ctx context.Context, owner string,
 			settingsMap := map[string]attr.Value{
 				"cool_down_period":                     cooldownPeriod,
 				"packages_to_exempt_in_cooldown_check": packagesList,
+				"actions_to_exempt_in_cooldown_check":  types.ListNull(types.StringType),
 				"ignore_for_non_public_repos":          types.BoolNull(),
+			}
+			if isActionCooldownControl(controlName) {
+				settingsMap["packages_to_exempt_in_cooldown_check"] = types.ListNull(types.StringType)
+				settingsMap["actions_to_exempt_in_cooldown_check"] = packagesList
 			}
 			c.Settings, _ = types.ObjectValue(controlSettingsAttrTypes(), settingsMap)
 		} else if pass, ok := passOnPrivateReposFromAPI(checkConfig.Settings); isPwnRequestControl(controlName) && ok {
 			c.Settings, _ = types.ObjectValue(controlSettingsAttrTypes(), map[string]attr.Value{
 				"cool_down_period":                     types.Int64Null(),
 				"packages_to_exempt_in_cooldown_check": types.ListNull(types.StringType),
+				"actions_to_exempt_in_cooldown_check":  types.ListNull(types.StringType),
 				"ignore_for_non_public_repos":          types.BoolValue(pass),
 			})
 		} else {
@@ -1256,7 +1308,7 @@ func (r *githubChecksResource) convertToState(ctx context.Context, owner string,
 // The backend only stores controls and per-repo flags, so anything it can't express is taken
 // from plan:
 //   - the shape of required_checks/optional_checks/baseline_check (see alignChecksBlock);
-//   - list order, and null vs empty for repos, omit_repos and packages_to_exempt_in_cooldown_check;
+//   - list order, and null vs empty for repos, omit_repos and the cooldown exemption lists;
 //   - the order of controls.
 //
 // Controls that the backend has enabled but plan doesn't contain are kept (appended), so a
@@ -1363,8 +1415,8 @@ func (r *githubChecksResource) alignStringList(planList, stateList types.List) t
 }
 
 // alignSettings keeps from plan what the API can't store:
-//   - an empty packages_to_exempt_in_cooldown_check. Empty lists aren't sent to the API, so
-//     state built from it has null there instead.
+//   - an empty packages_to_exempt_in_cooldown_check or actions_to_exempt_in_cooldown_check.
+//     Empty lists aren't sent to the API, so state built from it has null there instead.
 //   - a settings block with every field null, e.g. settings = {} on PWN Request. Nothing is
 //     sent for it, so state built from the API has no settings block at all.
 func alignSettings(planSettings, stateSettings types.Object) types.Object {
@@ -1379,16 +1431,23 @@ func alignSettings(planSettings, stateSettings types.Object) types.Object {
 		}
 		return planSettings
 	}
-	planPackages, ok := planSettings.Attributes()["packages_to_exempt_in_cooldown_check"].(types.List)
-	if !ok || planPackages.IsNull() || planPackages.IsUnknown() || len(planPackages.Elements()) != 0 {
-		return stateSettings
-	}
-	statePackages, ok := stateSettings.Attributes()["packages_to_exempt_in_cooldown_check"].(types.List)
-	if !ok || !statePackages.IsNull() {
-		return stateSettings
-	}
 	attrs := stateSettings.Attributes()
-	attrs["packages_to_exempt_in_cooldown_check"] = planPackages
+	changed := false
+	for _, name := range []string{"packages_to_exempt_in_cooldown_check", "actions_to_exempt_in_cooldown_check"} {
+		planList, ok := planSettings.Attributes()[name].(types.List)
+		if !ok || planList.IsNull() || planList.IsUnknown() || len(planList.Elements()) != 0 {
+			continue
+		}
+		stateList, ok := attrs[name].(types.List)
+		if !ok || !stateList.IsNull() {
+			continue
+		}
+		attrs[name] = planList
+		changed = true
+	}
+	if !changed {
+		return stateSettings
+	}
 	aligned, diags := types.ObjectValue(controlSettingsAttrTypes(), attrs)
 	if diags.HasError() {
 		return stateSettings

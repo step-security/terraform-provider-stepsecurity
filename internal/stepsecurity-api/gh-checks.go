@@ -10,6 +10,7 @@ import (
 
 var (
 	AvailableControls = map[string]string{
+		"GitHub Action Cooldown":            "github_action_recent_release_guard",
 		"Maven Package Compromised Updates": "maven_package_compromised_updates",
 		"Maven Package Cooldown":            "maven_package_cooldown",
 		"NPM Package Compromised Updates":   "npm_package_compromised_updates",
