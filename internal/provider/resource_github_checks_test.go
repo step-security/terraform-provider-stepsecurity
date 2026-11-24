@@ -39,9 +39,34 @@ func createSettingsObject(cooldownPeriod *int64, packages []string) types.Object
 	} else {
 		settingsMap["packages_to_exempt_in_cooldown_check"] = types.ListNull(types.StringType)
 	}
+	settingsMap["actions_to_exempt_in_cooldown_check"] = types.ListNull(types.StringType)
 	settingsMap["ignore_for_non_public_repos"] = types.BoolNull()
 
 	obj, _ := types.ObjectValue(controlSettingsAttrTypes(), settingsMap)
+	return obj
+}
+
+// createActionCooldownSettingsObject builds a GitHub Action Cooldown settings object. A nil
+// actions slice leaves actions_to_exempt_in_cooldown_check null.
+func createActionCooldownSettingsObject(cooldownPeriod *int64, actions []string) types.Object {
+	period := types.Int64Null()
+	if cooldownPeriod != nil {
+		period = types.Int64Value(*cooldownPeriod)
+	}
+	actionsList := types.ListNull(types.StringType)
+	if actions != nil {
+		elements := make([]attr.Value, len(actions))
+		for i, a := range actions {
+			elements[i] = types.StringValue(a)
+		}
+		actionsList, _ = types.ListValue(types.StringType, elements)
+	}
+	obj, _ := types.ObjectValue(controlSettingsAttrTypes(), map[string]attr.Value{
+		"cool_down_period":                     period,
+		"packages_to_exempt_in_cooldown_check": types.ListNull(types.StringType),
+		"actions_to_exempt_in_cooldown_check":  actionsList,
+		"ignore_for_non_public_repos":          types.BoolNull(),
+	})
 	return obj
 }
 
@@ -55,6 +80,7 @@ func createPwnSettingsObject(pass *bool) types.Object {
 	obj, _ := types.ObjectValue(controlSettingsAttrTypes(), map[string]attr.Value{
 		"cool_down_period":                     types.Int64Null(),
 		"packages_to_exempt_in_cooldown_check": types.ListNull(types.StringType),
+		"actions_to_exempt_in_cooldown_check":  types.ListNull(types.StringType),
 		"ignore_for_non_public_repos":          passValue,
 	})
 	return obj

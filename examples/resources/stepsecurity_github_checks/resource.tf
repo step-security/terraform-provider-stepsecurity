@@ -146,3 +146,24 @@ resource "stepsecurity_github_checks" "test-organization-nuget" {
     repos = ["*"] # applies to all repositories in the organization
   }
 }
+
+# github PR checks configuration with the GitHub Action Cooldown control. It fails a PR that
+# adds or updates a reference to an external action or reusable workflow released fewer than
+# cool_down_period days ago. Actions owned by your organizations are never evaluated.
+resource "stepsecurity_github_checks" "example-org-action-cooldown" {
+  owner = "example-org"
+  controls = [
+    {
+      control = "GitHub Action Cooldown"
+      enable  = true
+      type    = "required"
+      settings = {
+        cool_down_period                    = 7
+        actions_to_exempt_in_cooldown_check = ["example-org/*", "example-org/example-action@v1"]
+      }
+    }
+  ]
+  required_checks = {
+    repos = ["*"] # applies to all repositories in the organization
+  }
+}
