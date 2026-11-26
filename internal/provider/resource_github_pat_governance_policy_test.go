@@ -140,6 +140,7 @@ func TestGithubPATGovernancePolicyResource_Schema(t *testing.T) {
 		"expiry_reminder_templates", "expiry_reminder_cc", "expiry_reminder_to_owner",
 		"owner_email_fallback_domain",
 		"notify_on_revocation", "classic_notify_on_revocation", "fine_grained_notify_on_revocation",
+		"notify_on_new_token", "classic_notify_on_new_token", "fine_grained_notify_on_new_token",
 		"revocation_notification_template", "classic_revocation_notification_template",
 		"fine_grained_revocation_notification_template",
 		"classic_noncompliant_revoke_after_days", "fine_grained_noncompliant_revoke_after_days",
@@ -168,6 +169,7 @@ func TestGithubPATGovernancePolicyResource_Schema(t *testing.T) {
 	for _, name := range []string{
 		"fine_grained_unused_days", "classic_unused_days",
 		"classic_notify_on_revocation", "fine_grained_notify_on_revocation",
+		"classic_notify_on_new_token", "fine_grained_notify_on_new_token",
 		"classic_auto_revoke_after_reminders", "fine_grained_auto_revoke_after_reminders",
 		"use_tenant_policy",
 	} {

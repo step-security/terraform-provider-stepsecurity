@@ -335,6 +335,7 @@ var apiProfileEvents = map[string]bool{
 	"notifyForPATExpiryReminder":         true,
 	"notifyForPATRevocation":             true,
 	"notifyForPATAbuseDetection":         true,
+	"notifyForPATNewToken":               true,
 }
 
 // TestOrgProfileEventsMatchAPI keeps the configurable events and the API's

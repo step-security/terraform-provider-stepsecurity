@@ -67,6 +67,11 @@ type PATGovernancePolicy struct {
 	ClassicRevocationNotificationTemplate     *PATReminderTemplate `json:"classic_revocation_notification_template,omitempty"`
 	FineGrainedRevocationNotificationTemplate *PATReminderTemplate `json:"fine_grained_revocation_notification_template,omitempty"`
 
+	// New-token alerts: the switch and per-class overrides (nil inherits).
+	NotifyOnNewToken            bool  `json:"notify_on_new_token,omitempty"`
+	ClassicNotifyOnNewToken     *bool `json:"classic_notify_on_new_token,omitempty"`
+	FineGrainedNotifyOnNewToken *bool `json:"fine_grained_notify_on_new_token,omitempty"`
+
 	// Revoke tokens that stay non-compliant for this many days (0 = off).
 	ClassicNoncompliantRevokeAfterDays     int64 `json:"classic_noncompliant_revoke_after_days,omitempty"`
 	FineGrainedNoncompliantRevokeAfterDays int64 `json:"fine_grained_noncompliant_revoke_after_days,omitempty"`

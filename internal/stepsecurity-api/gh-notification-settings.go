@@ -46,6 +46,7 @@ type NotificationSettings struct {
 	NotifyForPATUnusedViolation        string `json:"notifyForPATUnusedViolation"`
 	NotifyForPATInactiveOwnerViolation string `json:"notifyForPATInactiveOwnerViolation"`
 	NotifyForPATExpiryReminder         string `json:"notifyForPATExpiryReminder"`
+	NotifyForPATNewToken               string `json:"notifyForPATNewToken"`
 	SlackNotificationMethod            string `json:"slackNotificationMethod"`  // "webhook" (default) or "oauth"
 	SlackChannelID                     string `json:"slackChannelID,omitempty"` // For OAuth: channel to post to
 	// OrgThreatIntelLevel is the org's threat intel opt-in granularity:
@@ -195,6 +196,7 @@ func (c *APIClient) DeleteNotificationSettings(ctx context.Context, owner string
 			NotifyForPATUnusedViolation:        "false",
 			NotifyForPATInactiveOwnerViolation: "false",
 			NotifyForPATExpiryReminder:         "false",
+			NotifyForPATNewToken:               "false",
 			SlackNotificationMethod:            SlackNotificationMethodWebhook,
 			// Threat intel is opt-out, so destroying has to write the explicit
 			// "off": clearing the level would leave the org notifying about every

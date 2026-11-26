@@ -293,6 +293,20 @@ func patPolicySettingsAttributes() map[string]schema.Attribute {
 			Optional:    true,
 			Description: "Revocation notices for fine-grained PATs. Omit to follow notify_on_revocation.",
 		},
+		"notify_on_new_token": schema.BoolAttribute{
+			Optional:    true,
+			Computed:    true,
+			Default:     booldefault.StaticBool(false),
+			Description: "Alert the organization when a personal access token appears that was created (fine-grained) or SSO-authorized (classic) after the alert was switched on, once per token. Delivered to the organization's destinations and the notification channels subscribed to the pat_new_token event, and to the webhook and S3 integrations. Tokens that exist when the alert is switched on are never reported.",
+		},
+		"classic_notify_on_new_token": schema.BoolAttribute{
+			Optional:    true,
+			Description: "New-token alerts for classic PATs. Omit to follow notify_on_new_token.",
+		},
+		"fine_grained_notify_on_new_token": schema.BoolAttribute{
+			Optional:    true,
+			Description: "New-token alerts for fine-grained PATs. Omit to follow notify_on_new_token.",
+		},
 		"revocation_notification_template":              patTemplateSchema("Custom revocation notice sent to the token's user, for every token class without a class template. Omit to use the built-in email. Subject and body may use {{owner}}, {{token_name}}, {{token_type}}, {{organization}}, {{revoked_at}}, {{reason}} and {{manage_url}}."),
 		"classic_revocation_notification_template":      patTemplateSchema("Custom revocation notice for classic PATs. Omit to use revocation_notification_template, then the built-in email."),
 		"fine_grained_revocation_notification_template": patTemplateSchema("Custom revocation notice for fine-grained PATs. Omit to use revocation_notification_template, then the built-in email."),
@@ -396,6 +410,9 @@ type patPolicySettingsModel struct {
 	RevocationNotificationTemplate            types.Object `tfsdk:"revocation_notification_template"`
 	ClassicRevocationNotificationTemplate     types.Object `tfsdk:"classic_revocation_notification_template"`
 	FineGrainedRevocationNotificationTemplate types.Object `tfsdk:"fine_grained_revocation_notification_template"`
+	NotifyOnNewToken                          types.Bool   `tfsdk:"notify_on_new_token"`
+	ClassicNotifyOnNewToken                   types.Bool   `tfsdk:"classic_notify_on_new_token"`
+	FineGrainedNotifyOnNewToken               types.Bool   `tfsdk:"fine_grained_notify_on_new_token"`
 
 	ClassicNoncompliantRevokeAfterDays     types.Int64 `tfsdk:"classic_noncompliant_revoke_after_days"`
 	FineGrainedNoncompliantRevokeAfterDays types.Int64 `tfsdk:"fine_grained_noncompliant_revoke_after_days"`
@@ -569,6 +586,9 @@ func (m *patPolicySettingsModel) toAPIPolicy(ctx context.Context) (stepsecuritya
 		NotifyOnRevocation:            m.NotifyOnRevocation.ValueBool(),
 		ClassicNotifyOnRevocation:     optionalBool(m.ClassicNotifyOnRevocation),
 		FineGrainedNotifyOnRevocation: optionalBool(m.FineGrainedNotifyOnRevocation),
+		NotifyOnNewToken:              m.NotifyOnNewToken.ValueBool(),
+		ClassicNotifyOnNewToken:       optionalBool(m.ClassicNotifyOnNewToken),
+		FineGrainedNotifyOnNewToken:   optionalBool(m.FineGrainedNotifyOnNewToken),
 
 		ClassicNoncompliantRevokeAfterDays:     m.ClassicNoncompliantRevokeAfterDays.ValueInt64(),
 		FineGrainedNoncompliantRevokeAfterDays: m.FineGrainedNoncompliantRevokeAfterDays.ValueInt64(),
@@ -627,6 +647,9 @@ func (m *patPolicySettingsModel) setFromAPIPolicy(ctx context.Context, policy *s
 	m.NotifyOnRevocation = types.BoolValue(policy.NotifyOnRevocation)
 	m.ClassicNotifyOnRevocation = boolFromOptional(policy.ClassicNotifyOnRevocation)
 	m.FineGrainedNotifyOnRevocation = boolFromOptional(policy.FineGrainedNotifyOnRevocation)
+	m.NotifyOnNewToken = types.BoolValue(policy.NotifyOnNewToken)
+	m.ClassicNotifyOnNewToken = boolFromOptional(policy.ClassicNotifyOnNewToken)
+	m.FineGrainedNotifyOnNewToken = boolFromOptional(policy.FineGrainedNotifyOnNewToken)
 	m.RevocationNotificationTemplate = objectFromTemplate(policy.RevocationNotificationTemplate)
 	m.ClassicRevocationNotificationTemplate = objectFromTemplate(policy.ClassicRevocationNotificationTemplate)
 	m.FineGrainedRevocationNotificationTemplate = objectFromTemplate(policy.FineGrainedRevocationNotificationTemplate)

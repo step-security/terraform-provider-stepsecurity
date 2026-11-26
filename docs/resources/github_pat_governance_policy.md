@@ -141,6 +141,7 @@ import {
 - `classic_expiry_reminder_days` (List of Number) Reminder bands for classic PATs. A class with its own list ignores expiry_reminder_days entirely; omit to share it, set [0] to send no reminders for this class.
 - `classic_max_age_days` (Number) Maximum allowed age in days for classic PATs, measured from the SSO authorization time. 0 disables the check.
 - `classic_noncompliant_revoke_after_days` (Number) Revoke classic PATs that have remained non-compliant for this many days without an approved exception. 0 disables the control.
+- `classic_notify_on_new_token` (Boolean) New-token alerts for classic PATs. Omit to follow notify_on_new_token.
 - `classic_notify_on_revocation` (Boolean) Revocation notices for classic PATs. Omit to follow notify_on_revocation.
 - `classic_revocation_notification_template` (Attributes) Custom revocation notice for classic PATs. Omit to use revocation_notification_template, then the built-in email. (see [below for nested schema](#nestedatt--classic_revocation_notification_template))
 - `classic_unused_days` (Number) Unused limit in days for classic PATs. Omit to use unused_days; 0 disables the staleness check for this class.
@@ -152,12 +153,14 @@ import {
 - `fine_grained_expiry_reminder_days` (List of Number) Reminder bands for fine-grained PATs. A class with its own list ignores expiry_reminder_days entirely; omit to share it, set [0] to send no reminders for this class.
 - `fine_grained_max_age_days` (Number) Maximum allowed age in days for fine-grained PATs, measured from the org-access grant time. 0 disables the check.
 - `fine_grained_noncompliant_revoke_after_days` (Number) Revoke fine-grained PATs that have remained non-compliant for this many days without an approved exception. 0 disables the control.
+- `fine_grained_notify_on_new_token` (Boolean) New-token alerts for fine-grained PATs. Omit to follow notify_on_new_token.
 - `fine_grained_notify_on_revocation` (Boolean) Revocation notices for fine-grained PATs. Omit to follow notify_on_revocation.
 - `fine_grained_revocation_notification_template` (Attributes) Custom revocation notice for fine-grained PATs. Omit to use revocation_notification_template, then the built-in email. (see [below for nested schema](#nestedatt--fine_grained_revocation_notification_template))
 - `fine_grained_unused_days` (Number) Unused limit in days for fine-grained PATs. Omit to use unused_days; 0 disables the staleness check for this class.
 - `flag_no_expiry` (Boolean) Flag tokens without an expiration date, or whose expiration is set further out than the class max age allows.
 - `flag_over_scoped` (Boolean) Flag over-scoped tokens: classic PATs carrying coarse scopes, and fine-grained PATs granting write access across all repositories.
 - `github_issue_repo` (String) Bare repository name in this organization where a violations issue is filed and kept up to date on each alert. Empty disables the GitHub-issue alert channel.
+- `notify_on_new_token` (Boolean) Alert the organization when a personal access token appears that was created (fine-grained) or SSO-authorized (classic) after the alert was switched on, once per token. Delivered to the organization's destinations and the notification channels subscribed to the pat_new_token event, and to the webhook and S3 integrations. Tokens that exist when the alert is switched on are never reported.
 - `notify_on_revocation` (Boolean) Email the token's user when StepSecurity itself revokes the token (after the final reminder, or at the end of the non-compliance window), copying expiry_reminder_cc. Revocations a person performs from the dashboard are not notified.
 - `over_scoped_scopes` (List of String) Classic PAT scopes treated as over-scoped. Omit to use the server default (repo, admin:org, workflow). Only used when flag_over_scoped is true.
 - `owner_email_fallback_domain` (String) Bare email domain (for example example.com) used to derive an address for a token's user when the SSO directory returns nothing, from the enterprise managed user login convention: the trailing _shortcode is dropped, the first hyphen becomes a dot and the domain is appended. The derived address counts as a linked identity. Empty disables the fallback.
