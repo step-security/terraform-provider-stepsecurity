@@ -47,6 +47,7 @@ type RunPolicyConfig struct {
 	AllowedRunnerConstraints       map[string][]string      `json:"allowed_runner_constraints,omitempty"`
 	RequirePolicyStore             bool                     `json:"require_policy_store,omitempty"`
 	BlockJobContainer              bool                     `json:"block_job_container,omitempty"`
+	AllowAgenticWorkflows          bool                     `json:"allow_agentic_workflows,omitempty"`
 	SecretsAnalyzeDefaultBranch    bool                     `json:"secrets_analyze_default_branch,omitempty"`
 	EnforceMethod                  string                   `json:"enforce_method,omitempty"`
 	PrejobAllowedRunnerLabels      []string                 `json:"prejob_allowed_runner_labels,omitempty"`

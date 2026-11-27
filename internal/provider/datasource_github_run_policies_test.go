@@ -83,6 +83,7 @@ func TestGithubRunPoliciesDataSource_ReadMappingWithPinnedActions(t *testing.T) 
 		"allowed_runner_constraints":        types.MapNull(types.SetType{ElemType: types.StringType}),
 		"require_policy_store":              types.BoolValue(policy.PolicyConfig.RequirePolicyStore),
 		"block_job_container":               types.BoolValue(policy.PolicyConfig.BlockJobContainer),
+		"allow_agentic_workflows":           types.BoolValue(policy.PolicyConfig.AllowAgenticWorkflows),
 		"secrets_analyze_default_branch":    types.BoolValue(policy.PolicyConfig.SecretsAnalyzeDefaultBranch),
 		"enforce_method":                    types.StringValue(policy.PolicyConfig.EnforceMethod),
 		"prejob_allowed_runner_labels":      types.SetNull(types.StringType),
@@ -122,6 +123,7 @@ func TestGithubRunPoliciesDataSource_ReadMappingWithPinnedActions(t *testing.T) 
 		"allowed_runner_constraints":        types.MapType{ElemType: types.SetType{ElemType: types.StringType}},
 		"require_policy_store":              types.BoolType,
 		"block_job_container":               types.BoolType,
+		"allow_agentic_workflows":           types.BoolType,
 		"secrets_analyze_default_branch":    types.BoolType,
 		"enforce_method":                    types.StringType,
 		"prejob_allowed_runner_labels":      types.SetType{ElemType: types.StringType},
@@ -363,6 +365,7 @@ type githubRunPolicyDataSourcePolicyConfigModel struct {
 	AllowedRunnerConstraints       types.Map    `tfsdk:"allowed_runner_constraints"`
 	RequirePolicyStore             types.Bool   `tfsdk:"require_policy_store"`
 	BlockJobContainer              types.Bool   `tfsdk:"block_job_container"`
+	AllowAgenticWorkflows          types.Bool   `tfsdk:"allow_agentic_workflows"`
 	SecretsAnalyzeDefaultBranch    types.Bool   `tfsdk:"secrets_analyze_default_branch"`
 	EnforceMethod                  types.String `tfsdk:"enforce_method"`
 	PrejobAllowedRunnerLabels      types.Set    `tfsdk:"prejob_allowed_runner_labels"`
@@ -431,6 +434,7 @@ func testRunPolicyDataSourceAttrTypes() map[string]attr.Type {
 			"allowed_runner_constraints":        types.MapType{ElemType: types.SetType{ElemType: types.StringType}},
 			"require_policy_store":              types.BoolType,
 			"block_job_container":               types.BoolType,
+			"allow_agentic_workflows":           types.BoolType,
 			"secrets_analyze_default_branch":    types.BoolType,
 			"enforce_method":                    types.StringType,
 			"prejob_allowed_runner_labels":      types.SetType{ElemType: types.StringType},
