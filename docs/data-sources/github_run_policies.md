@@ -200,6 +200,7 @@ Read-Only:
 Read-Only:
 
 - `actions_to_exempt_while_pinning` (Set of String) Set of actions exempt from pinning requirements.
+- `allow_agentic_workflows` (Boolean) When true, GitHub Agentic Workflows (gh-aw) compiled `*.lock.yml` files may place Harden Runner after gh-aw's own lead-in steps, and gh-aw jobs that accept no user steps are skipped.
 - `allowed_actions` (Map of String) Map of allowed actions and their permissions. Keys may be an exact ref (`actions/checkout@v4`), a name-only match (`actions/checkout`), an owner wildcard (`my-org/*`), or the global wildcard (`*/*`).
 - `allowed_runner_constraints` (Map of Set of String) Structured runs-on.com constraints permitted when `runs_on_mode` is `allowed`, keyed by dimension (e.g. `family`, `cpu`, `image`); each key maps to the set of allowed values. Expression values match by exact text, which also lets the `runs-on` routing key be pinned.
 - `allowed_runner_labels` (Set of String) Set of plain runner labels permitted when `runs_on_mode` is `allowed`.

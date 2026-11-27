@@ -482,6 +482,25 @@ resource "stepsecurity_github_run_policy" "harden_runner_policy_checks" {
   }
 }
 
+# Harden Runner Policy Example (GitHub Agentic Workflows) - gh-aw compiles each
+# agentic workflow into a .lock.yml file and controls the step order of its jobs.
+# allow_agentic_workflows accepts that layout: Harden Runner may come after gh-aw's
+# own setup steps, and gh-aw jobs that accept no user steps (such as conclusion)
+# are skipped and listed in the evaluation. Other workflows are unaffected.
+resource "stepsecurity_github_run_policy" "harden_runner_policy_agentic_workflows" {
+  owner     = "my-org"
+  name      = "Harden Runner Policy - Agentic Workflows"
+  all_repos = true
+
+  policy_config = {
+    owner                       = "my-org"
+    name                        = "Harden Runner Policy - Agentic Workflows"
+    enable_harden_runner_policy = true
+    harden_runner_target_labels = []
+    allow_agentic_workflows     = true
+  }
+}
+
 # Secrets Policy Example (analyze default branch) - By default the secrets policy
 # only evaluates non-default-branch runs; enable secrets_analyze_default_branch to
 # also evaluate runs on the repository default branch. Pairs well with
@@ -543,6 +562,7 @@ Required:
 Optional:
 
 - `actions_to_exempt_while_pinning` (Set of String) Set of actions exempt from pinning requirements. Supports exact match (e.g., `actions/checkout@v4`), name-only match (e.g., `actions/checkout`), and owner wildcard (e.g., `my-org/*`). The global wildcard `*/*` is **rejected** by the API here: it would exempt every action from pinning, leaving `require_pinned_actions` enabled but enforcing nothing. To allow any action while still requiring pins, put `*/*` in `allowed_actions` instead.
+- `allow_agentic_workflows` (Boolean) Sub-feature of the Harden Runner policy. When true, the policy accepts the job layout that GitHub Agentic Workflows (gh-aw) compiles into `*.lock.yml` files: Harden Runner may come after gh-aw's own lead-in steps (run steps, the gh-aw setup action, `actions/github-script`, `actions/download-artifact`), and gh-aw jobs that accept no user steps, such as `conclusion`, are skipped and listed in the evaluation. A custom Harden Runner action must still be the first step. When false (default), gh-aw workflows follow the same first-step rule as every other workflow. Only meaningful when `enable_harden_runner_policy` is true.
 - `allowed_actions` (Map of String) Map of allowed actions and their permissions (e.g., `"actions/checkout" = "allow"`). Keys support exact match (`actions/checkout@v4`), name-only match (`actions/checkout`, any ref), owner wildcard (`my-org/*`), and global wildcard (`*/*`, every action). Use `*/*` to allow all actions while still enforcing `require_pinned_actions`.
 - `allowed_runner_constraints` (Map of Set of String) Structured runs-on.com constraints permitted when `runs_on_mode` is `allowed`, keyed by dimension (e.g. `family`, `cpu`, `image`). Each key maps to the set of allowed values for that dimension: a `runs-on` token of the form `key=value` is allowed when the key is unconfigured, or when its value is in the set. Keys are lowercased server-side (use lowercase keys to avoid plan drift) and each key must have at least one value. Expression values are matched by their exact text (whitespace-insensitive), so the `runs-on` routing key itself can be pinned to the conventional expression.
 - `allowed_runner_labels` (Set of String) Set of plain runner labels permitted when `runs_on_mode` is `allowed` (e.g. `ubuntu-latest`). A job is allowed when its `runs-on` label matches an entry verbatim. Ignored in `disallowed` mode.

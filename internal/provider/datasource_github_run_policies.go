@@ -209,6 +209,10 @@ func (d *githubRunPoliciesDataSource) Schema(_ context.Context, _ datasource.Sch
 									Computed:            true,
 									MarkdownDescription: "When true, targeted jobs that run entirely inside a job-level `container:` are blocked (Harden Runner cannot monitor a fully containerized job on GitHub-hosted standard runners).",
 								},
+								"allow_agentic_workflows": schema.BoolAttribute{
+									Computed:            true,
+									MarkdownDescription: "When true, GitHub Agentic Workflows (gh-aw) compiled `*.lock.yml` files may place Harden Runner after gh-aw's own lead-in steps, and gh-aw jobs that accept no user steps are skipped.",
+								},
 								"secrets_analyze_default_branch": schema.BoolAttribute{
 									Computed:            true,
 									MarkdownDescription: "When true, the secrets policy also evaluates runs on the repository default branch.",
@@ -328,6 +332,7 @@ func (d *githubRunPoliciesDataSource) Read(ctx context.Context, req datasource.R
 			"runs_on_mode":                      types.StringValue(policy.PolicyConfig.RunsOnMode),
 			"require_policy_store":              types.BoolValue(policy.PolicyConfig.RequirePolicyStore),
 			"block_job_container":               types.BoolValue(policy.PolicyConfig.BlockJobContainer),
+			"allow_agentic_workflows":           types.BoolValue(policy.PolicyConfig.AllowAgenticWorkflows),
 			"secrets_analyze_default_branch":    types.BoolValue(policy.PolicyConfig.SecretsAnalyzeDefaultBranch),
 			"enforce_method":                    types.StringValue(policy.PolicyConfig.EnforceMethod),
 		}
@@ -472,6 +477,7 @@ func (d *githubRunPoliciesDataSource) Read(ctx context.Context, req datasource.R
 			"allowed_runner_constraints":        types.MapType{ElemType: types.SetType{ElemType: types.StringType}},
 			"require_policy_store":              types.BoolType,
 			"block_job_container":               types.BoolType,
+			"allow_agentic_workflows":           types.BoolType,
 			"secrets_analyze_default_branch":    types.BoolType,
 			"enforce_method":                    types.StringType,
 			"prejob_allowed_runner_labels":      types.SetType{ElemType: types.StringType},
@@ -553,6 +559,7 @@ func (d *githubRunPoliciesDataSource) Read(ctx context.Context, req datasource.R
 			"allowed_runner_constraints":        types.MapType{ElemType: types.SetType{ElemType: types.StringType}},
 			"require_policy_store":              types.BoolType,
 			"block_job_container":               types.BoolType,
+			"allow_agentic_workflows":           types.BoolType,
 			"secrets_analyze_default_branch":    types.BoolType,
 			"enforce_method":                    types.StringType,
 			"prejob_allowed_runner_labels":      types.SetType{ElemType: types.StringType},

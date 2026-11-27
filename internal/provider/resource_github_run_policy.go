@@ -85,6 +85,7 @@ type policyConfigModel struct {
 	AllowedRunnerConstraints       types.Map    `tfsdk:"allowed_runner_constraints"`
 	RequirePolicyStore             types.Bool   `tfsdk:"require_policy_store"`
 	BlockJobContainer              types.Bool   `tfsdk:"block_job_container"`
+	AllowAgenticWorkflows          types.Bool   `tfsdk:"allow_agentic_workflows"`
 	SecretsAnalyzeDefaultBranch    types.Bool   `tfsdk:"secrets_analyze_default_branch"`
 	EnforceMethod                  types.String `tfsdk:"enforce_method"`
 	PrejobAllowedRunnerLabels      types.Set    `tfsdk:"prejob_allowed_runner_labels"`
@@ -411,6 +412,12 @@ func (r *githubRunPolicyResource) Schema(_ context.Context, _ resource.SchemaReq
 						Default:             booldefault.StaticBool(false),
 						MarkdownDescription: "Sub-feature of the Harden Runner policy. When true, targeted jobs that run entirely inside a job-level `container:` are blocked, because Harden Runner cannot monitor a fully containerized job on GitHub-hosted standard runners. Steps that use containers are unaffected. Only meaningful when `enable_harden_runner_policy` is true.",
 					},
+					"allow_agentic_workflows": schema.BoolAttribute{
+						Optional:            true,
+						Computed:            true,
+						Default:             booldefault.StaticBool(false),
+						MarkdownDescription: "Sub-feature of the Harden Runner policy. When true, the policy accepts the job layout that GitHub Agentic Workflows (gh-aw) compiles into `*.lock.yml` files: Harden Runner may come after gh-aw's own lead-in steps (run steps, the gh-aw setup action, `actions/github-script`, `actions/download-artifact`), and gh-aw jobs that accept no user steps, such as `conclusion`, are skipped and listed in the evaluation. A custom Harden Runner action must still be the first step. When false (default), gh-aw workflows follow the same first-step rule as every other workflow. Only meaningful when `enable_harden_runner_policy` is true.",
+					},
 					"secrets_analyze_default_branch": schema.BoolAttribute{
 						Optional:            true,
 						Computed:            true,
@@ -561,6 +568,7 @@ func (r *githubRunPolicyResource) Create(ctx context.Context, req resource.Creat
 			RunsOnMode:                     policyConfig.RunsOnMode.ValueString(),
 			RequirePolicyStore:             policyConfig.RequirePolicyStore.ValueBool(),
 			BlockJobContainer:              policyConfig.BlockJobContainer.ValueBool(),
+			AllowAgenticWorkflows:          policyConfig.AllowAgenticWorkflows.ValueBool(),
 			SecretsAnalyzeDefaultBranch:    policyConfig.SecretsAnalyzeDefaultBranch.ValueBool(),
 			EnforceMethod:                  policyConfig.EnforceMethod.ValueString(),
 		},
@@ -832,6 +840,7 @@ func (r *githubRunPolicyResource) Update(ctx context.Context, req resource.Updat
 			RunsOnMode:                     policyConfig.RunsOnMode.ValueString(),
 			RequirePolicyStore:             policyConfig.RequirePolicyStore.ValueBool(),
 			BlockJobContainer:              policyConfig.BlockJobContainer.ValueBool(),
+			AllowAgenticWorkflows:          policyConfig.AllowAgenticWorkflows.ValueBool(),
 			SecretsAnalyzeDefaultBranch:    policyConfig.SecretsAnalyzeDefaultBranch.ValueBool(),
 			EnforceMethod:                  policyConfig.EnforceMethod.ValueString(),
 		},
@@ -1119,6 +1128,7 @@ func (r *githubRunPolicyResource) updateModelFromAPI(ctx context.Context, model 
 		"runs_on_mode":                      types.StringValue(policy.PolicyConfig.RunsOnMode),
 		"require_policy_store":              types.BoolValue(policy.PolicyConfig.RequirePolicyStore),
 		"block_job_container":               types.BoolValue(policy.PolicyConfig.BlockJobContainer),
+		"allow_agentic_workflows":           types.BoolValue(policy.PolicyConfig.AllowAgenticWorkflows),
 		"secrets_analyze_default_branch":    types.BoolValue(policy.PolicyConfig.SecretsAnalyzeDefaultBranch),
 		"enforce_method":                    types.StringValue(policy.PolicyConfig.EnforceMethod),
 	}
@@ -1321,6 +1331,7 @@ func (r *githubRunPolicyResource) updateModelFromAPI(ctx context.Context, model 
 		"allowed_runner_constraints":        types.MapType{ElemType: types.SetType{ElemType: types.StringType}},
 		"require_policy_store":              types.BoolType,
 		"block_job_container":               types.BoolType,
+		"allow_agentic_workflows":           types.BoolType,
 		"secrets_analyze_default_branch":    types.BoolType,
 		"enforce_method":                    types.StringType,
 		"prejob_allowed_runner_labels":      types.SetType{ElemType: types.StringType},
